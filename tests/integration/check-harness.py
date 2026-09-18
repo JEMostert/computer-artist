@@ -7,7 +7,7 @@ import subprocess
 import sys
 import time
 
-root=Path(__file__).resolve().parents[1]
+root=Path(__file__).resolve().parents[2]
 session=json.loads(Path(sys.argv[1]).read_text())
 assert session['compositor']=='/usr/bin/kwin_wayland'
 assert '/ca-stock-' in session['wayland'] and session['wayland'].endswith('/wayland-test')

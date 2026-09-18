@@ -1,4 +1,5 @@
 """CLI wiring for Computer Memory and the observation/programming API."""
+import fcntl
 import json
 import os
 from pathlib import Path
@@ -13,6 +14,11 @@ from .runtime import Observations
 
 
 def add_commands(commands, shared):
+    storage = commands.add_parser('storage', parents=[shared], help='Inspect or prune managed temporary runs')
+    storage.add_argument('action', choices=('status','clean','keep','unkeep'))
+    storage.add_argument('id', nargs='?')
+    storage.add_argument('--scope', choices=('outputs','runs'), default='outputs')
+    storage.add_argument('--dry-run', action='store_true')
     runs = commands.add_parser('runs', parents=[shared], help='Inspect recorded executions without replaying input')
     runs.add_argument('action', choices=('list','show'))
     runs.add_argument('id', nargs='?')
@@ -85,6 +91,14 @@ def arguments(manifest, encoded, extra):
 def local_command(args, extra):
     """Return None for commands requiring a desktop connection."""
     memory = Memory(args.memory_dir)
+    if args.command == 'storage':
+        from .storage import inspect, cleanup, preserve
+        root = (Path(__file__).resolve().parents[1]/'outputs') if args.scope == 'outputs' else memory.root/'runs'
+        if args.action in ('keep','unkeep'):
+            if not args.id: raise ValueError('keep/unkeep requires a run ID')
+            preserve(root,args.id,args.action=='keep')
+            return {'ok':True,'id':args.id,'preserved':args.action=='keep'}
+        return {'ok':True, **(inspect(root) if args.action=='status' else cleanup(root,dry_run=args.dry_run))}
     if args.command == 'runs':
         if args.action == 'show':
             if not args.id: raise ValueError('runs show requires a run ID')
@@ -139,16 +153,21 @@ def run_worker(args, extra, socket_path):
         bind(info,{})
         spec.update(source=source,arguments={})
     run_id = uuid.uuid4().hex
-    folder = memory.root / 'runs' / run_id
-    folder.mkdir(parents=True, mode=0o700)
+    from .storage import managed_run
+    with managed_run(memory.root/'runs', run_id) as folder:
+        return _supervise(args, spec, run_id, folder)
+
+
+def _supervise(args, spec, run_id, folder):
     atomic_json(folder/'request.json', spec)
     started = time.monotonic()
     process = None
     failure = None
-    with (folder/'program.log').open('w') as log:
+    with (folder/'.active.lock').open('r') as lease, (folder/'program.log').open('w') as log:
+        fcntl.flock(lease.fileno(), fcntl.LOCK_SH)
         try:
             process = subprocess.Popen([sys.executable,'-m','computer_artist.worker',str(folder)],
-                                       cwd=Path(__file__).resolve().parents[1], stdout=log,stderr=subprocess.STDOUT,start_new_session=True)
+                                       cwd=Path(__file__).resolve().parents[1], stdout=log,stderr=subprocess.STDOUT,start_new_session=True,pass_fds=(lease.fileno(),))
             process.wait(timeout=args.deadline)
         except subprocess.TimeoutExpired:
             failure = 'Hard execution deadline exceeded'

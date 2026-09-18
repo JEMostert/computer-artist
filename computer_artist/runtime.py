@@ -36,7 +36,7 @@ def image_box(rect, window, image):
 
 
 class Observations:
-    limit = 64
+    limit = 15
 
     def __init__(self, memory, client):
         self.memory, self.client = memory, client
@@ -52,6 +52,8 @@ class Observations:
 
     def capture(self, identity, *, since=None, region=None):
         from PIL import Image, ImageChops
+        from .storage import limits
+        _, max_bytes = limits()
         window = next((w for w in self.client.windows() if w['id'] == identity), None)
         if window is None:
             raise Interrupted('Target window closed')
@@ -105,7 +107,13 @@ class Observations:
                 atomic_json(folder / (observation+'.json'), record)
                 atomic_json(self.memory.scope(identity) / 'window.json', window)
                 records = sorted(folder.glob('*.json'), key=lambda p: p.stat().st_mtime)
-                for expired in records[:-self.limit]:
+                total = sum(p.stat().st_size for p in folder.iterdir() if p.is_file() and not p.is_symlink())
+                remaining = len(records)
+                for expired in records[:-1]:
+                    if remaining <= self.limit and total <= max_bytes: break
+                    paths = (expired, expired.with_suffix('.png'), folder/(expired.stem+'-crop.png'))
+                    total -= sum(p.stat().st_size for p in paths if p.exists())
+                    remaining -= 1
                     expired.unlink()
                     expired.with_suffix('.png').unlink(missing_ok=True)
                     (folder / (expired.stem+'-crop.png')).unlink(missing_ok=True)

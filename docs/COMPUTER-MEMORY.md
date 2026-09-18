@@ -121,7 +121,7 @@ This deliberately conservative check can reject animated controls. It does not
 prove semantic identity or that the rest of the page is unchanged, and there
 remains a capture-to-action race. KWin also validates the actual input target.
 
-Only the newest 64 observations per window are retained. Targets referring to an
+Only the newest 15 observations per window are retained. Targets referring to an
 evicted observation expire and must be defined again. Observation IDs from other
 windows cannot be used. Captures are main-surface buffers: decorations and
 subsurfaces are excluded, and GPU buffers may be unreadable.
@@ -244,3 +244,7 @@ The example `examples/memory/draw-rectangle.py` can be registered with stdin
 redirection. It assumes the correct drawing tool/canvas is already selected and
 checks only that pixels changed. Do not treat it as a verified app-specific
 rectangle workflow.
+
+Execution records are retained by the [managed storage policy](STORAGE.md):
+15 completed unpreserved runs, with a configurable size budget. Reusable module
+versions are never pruned by this policy.

@@ -73,15 +73,15 @@ qdbus6 org.kde.KWin /Plugins org.kde.KWin.Plugins.UnloadPlugin computerartist
 
 ## Tests against packaged KWin
 
-`scripts/run-stock-plugin.py` runs **`/usr/bin/kwin_wayland`**, using the plugin
+`tests/integration/run-stock-plugin.py` runs **`/usr/bin/kwin_wayland`**, using the plugin
 from the build directory. It provides a separate nested test window; `--headless`
 selects the virtual backend. It drops executable-added privileges with setpriv
 for testing. The test compositor's private environment alone enables fake-input
 access to exercise human input; that setting is never applied to the desktop.
 
-`scripts/check-stock-plugin.py SESSION` verifies simultaneous pointer drawing and
+`tests/integration/check-stock-plugin.py SESSION` verifies simultaneous pointer drawing and
 human typing, changed rendered output, button release on disconnect/stale action/
-takeover/watchdog/unload, and reload. `scripts/stock-test-input.c` refuses displays
+takeover/watchdog/unload, and reload. `tests/integration/stock-test-input.c` refuses displays
 outside the `ca-stock-*/wayland-test` harness. The test runner owns a persistent `hold` helper connection that
 keeps the virtual seat's devices present during the headless tests.
 

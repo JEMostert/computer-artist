@@ -70,4 +70,6 @@ def main(folder):
 
 
 if __name__ == '__main__':
-    raise SystemExit(main(sys.argv[1]))
+    from .storage import active_run
+    with active_run(sys.argv[1]):
+        raise SystemExit(main(sys.argv[1]))

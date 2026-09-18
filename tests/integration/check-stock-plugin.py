@@ -9,7 +9,7 @@ import sys
 import threading
 import time
 
-root=Path(__file__).resolve().parents[1]
+root=Path(__file__).resolve().parents[2]
 sys.path.insert(0,str(root))
 from computer_artist import Client,ActionError
 s=json.loads(Path(sys.argv[1]).read_text())

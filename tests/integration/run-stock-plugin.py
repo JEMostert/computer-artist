@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Test the native plugin using packaged KWin, isolated from the desktop."""
+import fcntl
 import json
 import os
 from pathlib import Path
@@ -9,12 +10,17 @@ import sys
 import tempfile
 import time
 
-root=Path(__file__).resolve().parents[1]
+root=Path(__file__).resolve().parents[2]
 if '--private-bus' not in sys.argv:
     os.execvp('dbus-run-session',['dbus-run-session','--',sys.executable,str(Path(__file__).resolve()),'--private-bus',*sys.argv[1:]])
 base=Path(tempfile.mkdtemp(prefix='ca-stock-',dir=os.environ['XDG_RUNTIME_DIR']))
 output=root/'outputs'/base.name
-output.mkdir(parents=True)
+sys.path.insert(0,str(root))
+from computer_artist.storage import managed_run
+run_storage=managed_run(root/'outputs',base.name)
+output=run_storage.__enter__()
+run_fd=os.open(output/'.active.lock',os.O_RDWR)
+fcntl.flock(run_fd,fcntl.LOCK_SH)
 config=base/'config';config.mkdir()
 (config/'kwinrc').write_text('[Plugins]\ncomputerartistEnabled=true\nnightlightEnabled=false\n[Wayland]\nInputMethod=\n')
 parent=Path(os.environ.get('WAYLAND_DISPLAY','wayland-0'))
@@ -29,7 +35,7 @@ children=[]
 logs=[]
 def launch(name,command,environment):
     log=(output/(name+'.log')).open('w');logs.append(log)
-    child=subprocess.Popen(command,env=environment,stdout=log,stderr=subprocess.STDOUT);children.append(child)
+    child=subprocess.Popen(command,env=environment,stdout=log,stderr=subprocess.STDOUT,pass_fds=(run_fd,));children.append(child)
     return child
 
 def stop(*_):raise KeyboardInterrupt
@@ -48,20 +54,20 @@ try:
         time.sleep(.3)
     app_env=dict(env,WAYLAND_DISPLAY=display,QT_QPA_PLATFORM='wayland')
     app_env.pop('QT_PLUGIN_PATH',None)
-    launch('canvas',[sys.executable,str(root/'scripts/seat_fixture.py'),'agent'],app_env)
+    launch('canvas',[sys.executable,str(root/'tests/integration/seat_fixture.py'),'agent'],app_env)
     time.sleep(1)
-    launch('human',[sys.executable,str(root/'scripts/seat_fixture.py'),'human'],app_env)
+    launch('human',[sys.executable,str(root/'tests/integration/seat_fixture.py'),'human'],app_env)
     time.sleep(1)
-    sid=subprocess.check_output(['qdbus6','org.kde.KWin','/Scripting','org.kde.kwin.Scripting.loadScript',str(root/'scripts/arrange-fixtures.js')],env=env,text=True).strip()
+    sid=subprocess.check_output(['qdbus6','org.kde.KWin','/Scripting','org.kde.kwin.Scripting.loadScript',str(root/'tests/integration/arrange-fixtures.js')],env=env,text=True).strip()
     subprocess.run(['qdbus6','org.kde.KWin','/Scripting/Script'+sid,'org.kde.kwin.Script.run'],env=env,check=True)
     state={'pid':compositor.pid,'compositor':'/usr/bin/kwin_wayland','plugin':str(root/'build/plugin/kwin/plugins/computerartist.so'),'control':str(base/'control'),'runtime':str(base),'output':str(output),'wayland':display,'bus':os.environ['DBUS_SESSION_BUS_ADDRESS']}
     (output/'session.json').write_text(json.dumps(state,indent=2)+'\n')
     (root/'build/stock-plugin-session.json').write_text(json.dumps(state,indent=2)+'\n')
     print(json.dumps(state),flush=True)
     if '--check' in sys.argv:
-        subprocess.run([sys.executable,str(root/'scripts/check-stock-plugin.py'),str(output/'session.json')],check=True)
-        subprocess.run([sys.executable,str(root/'scripts/check-harness.py'),str(output/'session.json')],check=True)
-        subprocess.run([sys.executable,str(root/'scripts/check-host-lanes.py'),str(output/'session.json')],check=True)
+        subprocess.run([sys.executable,str(root/'tests/integration/check-stock-plugin.py'),str(output/'session.json')],check=True)
+        subprocess.run([sys.executable,str(root/'tests/integration/check-harness.py'),str(output/'session.json')],check=True)
+        subprocess.run([sys.executable,str(root/'tests/integration/check-host-lanes.py'),str(output/'session.json')],check=True)
     else:
         compositor.wait()
 except KeyboardInterrupt:pass
@@ -72,3 +78,5 @@ finally:
             try:child.wait(5)
             except subprocess.TimeoutExpired:child.kill();child.wait()
     for log in logs:log.close()
+    os.close(run_fd)
+    run_storage.__exit__(*sys.exc_info())

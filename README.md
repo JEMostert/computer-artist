@@ -148,6 +148,21 @@ Agent input requires the human pointer and keyboard focus to be outside the targ
 
 The painting demo’s final file save used KDE's clipboard outside CA plus explicit host input. It is not evidence of a CA clipboard or keyboard API.
 
+## Storage stays bounded
+
+Temporary runs retain the newest **15 completed runs**, with a **256 MiB** budget
+per managed store. Active runs and explicitly preserved results are protected.
+Reusable Computer Memory modules and published artwork are kept separately.
+
+```bash
+ca storage status
+ca storage clean --dry-run
+ca storage keep RUN_ID
+```
+
+See [storage and cleanup](docs/STORAGE.md) for configuration, execution-record
+retention, and the development folder layout.
+
 ## Build and test
 
 ```bash
