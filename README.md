@@ -56,6 +56,28 @@ ca session close
 
 Keep your pointer and keyboard focus outside the target application's connection before agent input. Capture paths must be new. Read-only commands do not open sessions; there is no `session open` step.
 
+### Teach your agent to use CA
+
+```bash
+ca setup --codex                    # Install the global agent skill
+ca setup --codex --dry-run          # Preview its destination
+ca setup --codex --remove           # Remove the installed link
+ca setup --skills-dir ~/.codex/skills  # Older Codex hosts or a custom skill root
+```
+
+`--codex` uses `~/.agents/skills`, the user-level location in the
+[Codex skills documentation](https://developers.openai.com/es-419/docs/build-skills).
+For a host that discovers skills under `$CODEX_HOME/skills`, pass that directory
+with `--skills-dir`. Pick the location your host reads; installing in both may
+show duplicate skills.
+
+Setup links [the bundled skill](skills/computer-artist/SKILL.md) into that
+directory. Checkout updates also update the skill; keep this checkout in place.
+It is safe to rerun and refuses to replace an unrelated skill. Reload your host's
+skills or start a new session, then ask it to use `$computer-artist`.
+The guide covers observation, programs, reusable actions, verification and
+explicit host input. Setup works offline and does not install or restart KWin.
+
 ### Give the agent a program, not just a click
 
 On a drawing canvas with a drawing tool selected, send a continuous stroke as one bounded Python program:

@@ -59,12 +59,14 @@ def parser():
     result.add_argument('--memory-dir', default=argparse.SUPPRESS)
     result.add_argument('--budget', type=int, default=argparse.SUPPRESS)
     commands = result.add_subparsers(dest='command', required=True)
+    from .setup import add_command
+    add_command(commands)
     for name, help_text in [('windows', 'List windows and their IDs'),
                             ('capabilities', 'Report compositor support'),
                             ('stop', 'Revoke the current agent lease and return its app'),
                             ('takeover', 'Alias for stop')]:
         commands.add_parser(name, parents=[shared], help=help_text)
-    session = commands.add_parser('session', parents=[shared], help='Open, inspect or close the agent cursor session')
+    session = commands.add_parser('session', parents=[shared], help='Inspect or close the automatically opened cursor session')
     session.add_argument('action', choices=('status', 'close'))
     for name in ('click', 'move', 'type', 'key', 'scroll', 'focus'):
         command = commands.add_parser(name, parents=[shared], help=f'{name.capitalize()} in an explicitly selected window')
@@ -190,6 +192,10 @@ def main(argv=None):
 
     signal.signal(signal.SIGTERM, terminate)
     try:
+        if args.command == 'setup':
+            from .setup import install
+            print(json.dumps(install(args), indent=2))
+            return 0
         from .harness import local_command, run_worker
         reply = local_command(args, extra)
         if reply is not None:

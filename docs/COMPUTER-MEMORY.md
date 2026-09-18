@@ -219,8 +219,8 @@ session deliberately remains open until explicitly closed.
 These are ordinary local Python programs with the user's permissions, **not a
 security sandbox**. Budget accounting covers the provided client API. Direct
 network/filesystem calls and separately detached processes are not mediated by
-that API. Run records and logs persist; only observation history is automatically
-bounded. There is no model inference service hidden inside the runtime.
+that API. Run records, logs and observation history follow the managed storage
+limits below. There is no model inference service hidden inside the runtime.
 
 Default storage (`CA_MEMORY_DIR` or `--memory-dir` overrides it):
 
