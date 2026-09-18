@@ -1,0 +1,12 @@
+/build/
+/local/
+/outputs/
+__pycache__/
+*.pyc
+
+/computer-memory/
+.venv/
+.env
+.env.*
+!.env.example
+.pytest_cache/
