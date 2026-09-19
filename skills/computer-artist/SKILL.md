@@ -24,6 +24,13 @@ dialogs and completed drawing layers. Prefer `ctx.wait_for` to guessed long
 sleeps. Read [programs.md](references/programs.md) for examples, coordinates,
 memory registration and explicit host control.
 
+For practical planning, batching, coordinate mapping and recovery, read
+[operating tips](references/operating-tips.md) before a substantial desktop task.
+For KolourPaint drawing, also read [painting lessons](references/kolourpaint.md):
+they include the tested polygon completion, color-dialog and fill techniques
+from the project's two-painting demonstration. Start with these known methods;
+check the current layout instead of rediscovering the interaction from scratch.
+
 Default input uses the independent agent pointer. The human's pointer and
 keyboard focus must be outside the target application's Wayland connection.
 Multiple windows can share a connection. Human takeover is a stop signal;
