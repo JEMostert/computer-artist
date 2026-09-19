@@ -1,7 +1,7 @@
 # Practical operating tips
 
 These are starting strategies derived from CA's API and desktop work. Specific
-KolourPaint observations are in [kolourpaint.md](kolourpaint.md). They reduce
+Drawing interaction lessons are in [pointer-techniques.md](pointer-techniques.md). They reduce
 exploration; they do not guarantee identical behavior in another application.
 
 ## Establish enough state, then act

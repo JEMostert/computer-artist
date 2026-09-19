@@ -80,8 +80,8 @@ Window IDs are temporary namespaces. Reuse explicitly:
 
 ```bash
 ca memory attach NEW_ID --from OLD_ID --name stroke
-ca memory promote WINDOW_ID stroke --app kolourpaint
-ca memory attach NEW_ID --from-app kolourpaint --name stroke
+ca memory promote WINDOW_ID stroke --app drawing-app
+ca memory attach NEW_ID --from-app drawing-app --name stroke
 ```
 
 Attachment copies code; it does not establish compatibility with the new window.

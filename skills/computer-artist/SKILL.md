@@ -26,7 +26,7 @@ memory registration and explicit host control.
 
 For practical planning, batching, coordinate mapping and recovery, read
 [operating tips](references/operating-tips.md) before a substantial desktop task.
-For KolourPaint drawing, also read [painting lessons](references/kolourpaint.md):
+For drawing tasks, also read [pointer techniques](references/pointer-techniques.md):
 they include the tested polygon completion, color-dialog and fill techniques
 from the project's two-painting demonstration. Start with these known methods;
 check the current layout instead of rediscovering the interaction from scratch.

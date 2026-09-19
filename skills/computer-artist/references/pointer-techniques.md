@@ -1,11 +1,11 @@
-# KolourPaint: lessons from the desktop drawing run
+# Pointer techniques for drawing applications
 
-These techniques were used in the project's September 2026 two-painting demo.
-They are observations from that configuration, not promises about every Qt or
-KolourPaint version. Rediscover current widget positions from the image; do not
-reuse the old window IDs, monitor offsets, canvas size or reference subject.
-The durable evidence is `docs/PAINTING-DEMO.md` and
-`docs/assets/kolourpaint-original.png` in the resolved CA checkout.
+These techniques combine tested desktop drawing methods with reusable guidance.
+Tool completion gestures, scroll increments and fill coverage depend on the
+application. Use known behavior where it matches the current interface; locate
+current widgets instead of reusing old window IDs or monitor offsets. The
+project's demonstration is documented in `docs/PAINTING-DEMO.md` in the resolved
+CA checkout.
 
 ## Accurate reconstruction through drawing input
 
@@ -15,7 +15,7 @@ adjacent rows into taller rectangles. A 224 by 332 grid with 48 colors produced
 8,464 rectangles in the refined pass. These are useful scale examples, not
 required settings; choose resolution and palette for the new image's detail.
 
-Draw those rectangles using KolourPaint's filled-rectangle tool and actual
+Draw those rectangles using the application's filled-rectangle tool and actual
 pointer drags. Source-image analysis may supply geometry when the user asks for
 reconstruction; importing a rendered bitmap does not demonstrate drawing input.
 Exclude an inset or background only when requested for the current reference.
@@ -28,13 +28,13 @@ Keep the fill-only style and intended foreground color selected.
 
 ## An original interpretation
 
-For the second painting, independently authored silhouettes and curves supplied
-the geometry. Continuous pencil drags drew contours, opaque shapes established
-layers, and brush drags added broad highlights. Recognizable features and a
-deliberate silhouette mattered more than recreating every reference pixel.
+For an original interpretation, author silhouettes and curves independently.
+Use continuous pencil drags for contours, opaque shapes to establish layers,
+and brush drags for broad highlights. Prioritize recognizable features and a
+deliberate silhouette.
 
-A useful starting order is backdrop, rear limbs/hair, body/clothing, head and
-face, foreground hands/accessories, outlines, then highlights and small details.
+A useful starting order is background, rear objects, main forms, foreground
+objects, outlines, then highlights and small details.
 Design the curves in a convenient local coordinate system and scale them into
 the available canvas. Sample smooth curves for `ctx.path`; retain intentional
 corners. Use the brush's actual width for broad marks. The demo also used small
@@ -43,7 +43,7 @@ directional unevenness.
 
 ## Polygon completion and bucket-fill failure
 
-The tested filled-polygon interaction was:
+For a polygon tool that uses right-click to commit, the tested sequence is:
 
 1. Select Polygon and the filled-only style.
 2. Left-click each vertex.
@@ -51,9 +51,9 @@ The tested filled-polygon interaction was:
 4. Observe the committed shape before changing tools.
 
 With the context API, the last operation is
-`ctx.click(x=last_x, y=last_y, button='right')`. Do not substitute a double click:
-that did not reliably finish the polygons in our run. Polygon vertices are
-clicks; a freehand contour uses a held-button `ctx.path` drag.
+`ctx.click(x=last_x, y=last_y, button='right')`. A double click is not interchangeable
+with this gesture; use the current tool's completion behavior. Polygon vertices
+are clicks; a freehand contour uses a held-button `ctx.path` drag.
 
 Rapid clicks at very close vertices can be interpreted as a double click. The
 working demo simplified fill contours to roughly 16 logical pixels between
@@ -64,7 +64,7 @@ important features.
 
 Bucket fill stopped at pre-existing color boundaries inside the intended shape.
 A closed outline alone does not mean the entire interior is one fillable region.
-For opaque clothing or face shapes covering earlier artwork, a filled polygon
+For opaque shapes covering earlier artwork, a filled polygon
 or ellipse worked better. Avoid repeatedly bucket-filling fragments without
 understanding the existing boundaries. Reapply outlines/details after the fill
 when needed to preserve their visibility.
@@ -79,7 +79,7 @@ focus even though the user has not touched anything.
 If host control is already authorized, release agent ownership and use explicit
 host focus on a suitable other application, moving the real pointer out of the
 target connection if needed. Re-list windows and continue on the actual dialog.
-Closing the dialog may reactivate KolourPaint, requiring the same recovery.
+Closing the dialog may reactivate the drawing application, requiring the same recovery.
 Do not label this as prevention of focus stealing or general popup support.
 
 The RGB spinboxes accepted scroll input. In this setup, positive scroll lowered
@@ -97,12 +97,12 @@ operations by color to avoid reopening the dialog for every mark.
 
 ## Saving and capture limitations
 
-The demo saved through KolourPaint's own Save dialog. Because CA has no keyboard
-or clipboard injection, an explicitly authorized external KDE clipboard action
-supplied the filename; a host middle-click pasted it into the active filename
-field, and the Save button completed the operation. The prior text clipboard
-was restored afterward. This is an environment-specific workaround, not a CA
-API feature or an automatic permission to change clipboard/focus. If a task
+Save through the application's Save dialog. On a desktop with compatible
+clipboard and middle-click paste behavior, an explicitly authorized external
+clipboard action can supply the filename, followed by a host middle-click into
+the active filename field and a click on Save. This worked in the demonstration;
+CA itself has no keyboard or clipboard injection. It is an environment-specific
+workaround, not an automatic permission to change clipboard/focus. If a task
 requires CA-only actions and the filename cannot be entered, report that limit.
 
 For this workaround, inspect the focused field and resulting filename before
@@ -110,8 +110,8 @@ Save. Preserve prior clipboard content privately; do not print it in logs or
 responses. Text restoration does not preserve arbitrary non-text clipboard
 formats, so do not claim full clipboard restoration in that case.
 
-CA captured KolourPaint's main surface successfully. Another tested application,
-Vivaldi, had an unreadable GPU buffer; the separately available Spectacle tool
-provided a read-only screenshot. That fallback is not a generic CA capture fix.
+Some application main surfaces are readable while GPU-backed buffers may be
+unreadable. A separately available desktop screenshot tool can provide visual
+evidence in that case; this does not repair CA's capture backend.
 Use an available screenshot mechanism within the task's scope and account for
 its different window borders, scaling and coordinate origin.
