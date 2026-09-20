@@ -41,7 +41,7 @@ The final PNG was saved with KolourPaint's own Save dialog. KDE's clipboard
 supplied the absolute filename and the explicit host lane pasted it using a
 middle click and pressed Save. The prior text clipboard content was restored,
 focus and pointer were returned to the chat, and the CA session was closed.
-CA itself still has no keyboard or clipboard injection API.
+At the time of that demo, CA had no keyboard or clipboard injection API.
 
 ## README artwork
 

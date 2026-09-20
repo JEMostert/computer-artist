@@ -21,6 +21,14 @@ int main(int argc,char **argv) {
     if(!strcmp(argv[2],"move") && argc==5) org_kde_kwin_fake_input_pointer_motion_absolute(input,wl_fixed_from_double(atof(argv[3])),wl_fixed_from_double(atof(argv[4])));
     else if(!strcmp(argv[2],"click")) {org_kde_kwin_fake_input_button(input,272,1);org_kde_kwin_fake_input_button(input,272,0);}
     else if(!strcmp(argv[2],"key") && argc==4) {org_kde_kwin_fake_input_keyboard_key(input,atoi(argv[3]),1);org_kde_kwin_fake_input_keyboard_key(input,atoi(argv[3]),0);}
+    else if(!strcmp(argv[2],"shift-a-b")) {
+        // One physical-device identity must own both the down and the up.
+        org_kde_kwin_fake_input_keyboard_key(input,42,1);
+        wl_display_roundtrip(display);
+        org_kde_kwin_fake_input_keyboard_key(input,30,1);org_kde_kwin_fake_input_keyboard_key(input,30,0);
+        org_kde_kwin_fake_input_keyboard_key(input,42,0);
+        org_kde_kwin_fake_input_keyboard_key(input,48,1);org_kde_kwin_fake_input_keyboard_key(input,48,0);
+    }
     else if(!strcmp(argv[2],"hold")) { while(wl_display_dispatch(display)>=0) {} return 0; }
     else return 2;
     wl_display_roundtrip(display);wl_display_disconnect(display);return 0;

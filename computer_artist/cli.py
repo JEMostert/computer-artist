@@ -14,7 +14,7 @@ from .client import Client, PLAIN
 BUTTONS = {'left': 272, 'right': 273, 'middle': 274}
 KEYS = {**PLAIN, 'ctrl': 29, 'control': 29, 'shift': 42, 'alt': 56,
         'super': 125, 'meta': 125, 'enter': 28, 'return': 28, 'tab': 15,
-        'escape': 1, 'esc': 1, 'backspace': 14, 'delete': 111, 'space': 57,
+        'escape': 1, 'esc': 1, 'backspace': 14, 'delete': 111, 'insert': 110, 'space': 57,
         'left': 105, 'right': 106, 'up': 103, 'down': 108,
         'home': 102, 'end': 107, 'pageup': 104, 'pagedown': 109,
         **{f'f{i}': 58+i for i in range(1, 11)}, 'f11': 87, 'f12': 88}
@@ -50,7 +50,7 @@ def parser():
     shared.add_argument('--deadline', type=positive_number, help='Action deadline in seconds (default: 120)')
     shared.add_argument('--trace', help='Write an action trace as JSON')
     lanes = shared.add_mutually_exclusive_group()
-    lanes.add_argument('--host', dest='lane', action='store_const', const='host', help='Explicitly control the real desktop pointer/focus')
+    lanes.add_argument('--host', dest='lane', action='store_const', const='host', help='Explicitly use desktop pointer, focus, keyboard and clipboard')
     lanes.add_argument('--agent', dest='lane', action='store_const', const='agent', help='Control the independent agent pointer (default)')
     result = argparse.ArgumentParser(prog='ca', parents=[shared], description='Computer Artist: independent agent input on your desktop')
     # Shared options are declared before child parsers copy them.
@@ -70,7 +70,10 @@ def parser():
         commands.add_parser(name, parents=[shared], help=help_text)
     session = commands.add_parser('session', parents=[shared], help='Inspect or close the automatically opened cursor session')
     session.add_argument('action', choices=('status', 'close'))
-    for name in ('click', 'move', 'type', 'key', 'scroll', 'focus'):
+    clipboard = commands.add_parser('clipboard', parents=[shared], help='Read or write the shared host text clipboard')
+    clipboard.add_argument('action', choices=('get','set'))
+    clipboard.add_argument('text', nargs='?', help='Text to set; omit to read stdin')
+    for name in ('click', 'move', 'type', 'paste', 'key', 'scroll', 'focus'):
         command = commands.add_parser(name, parents=[shared], help=f'{name.capitalize()} in an explicitly selected window')
         command.add_argument('--window', required=True, help='Exact ID from ca windows')
         if name in ('click', 'move', 'scroll'):
@@ -79,10 +82,12 @@ def parser():
             command.add_argument('--absolute', action='store_true', help='Use desktop logical coordinates instead')
         if name == 'click':
             command.add_argument('--button', choices=BUTTONS, default='left')
-        elif name == 'type':
-            command.add_argument('text', help='Literal US-keyboard text; use -- before text starting with a dash')
+        elif name in ('type','paste'):
+            command.add_argument('text', help='Unicode text to paste; use -- before text starting with a dash')
+            command.add_argument('--shortcut', type=chord, default=chord('Shift+Insert'), help='Paste shortcut (default: Shift+Insert); use Ctrl+Shift+V for apps that require it')
         elif name == 'key':
             command.add_argument('chord', type=chord, help='Key or chord, e.g. End or Ctrl+Shift+S')
+            command.add_argument('--duration', type=positive_number, default=0, help='Hold keys for this many seconds')
         elif name == 'scroll':
             command.add_argument('--delta', required=True, type=finite_number, help='Signed scroll delta; positive is down/right')
             command.add_argument('--axis', choices=('vertical', 'horizontal'), default='vertical')
@@ -145,13 +150,22 @@ def execute(client, args):
             program['main'](client)
         client.release()
         return {'ok': True, 'command': 'run', 'status': 'program_returned', 'released': True}
+    if args.command == 'clipboard':
+        if client.lane != 'host':
+            raise ValueError('Clipboard access requires explicit --host')
+        if args.action == 'get':
+            if args.text is not None: raise ValueError('clipboard get takes no text argument')
+            return {'ok':True, 'text':client.clipboard_get(), 'lane':'host'}
+        text = args.text if args.text is not None else sys.stdin.read(8193)
+        return client.clipboard_set(text)
     identity = args.window.strip('{}')
     find_window(client, identity)
-    if args.command == 'focus' and client.lane != 'host':
-        raise ValueError('Desktop focus changes require explicit --host')
-    if args.command in ('type', 'key'):
+    if args.command in ('focus','type','paste','key') and client.lane != 'host':
+        raise ValueError('Desktop focus, keyboard and paste require explicit --host')
+    if args.command in ('type', 'paste', 'key'):
         operations = client.request('capabilities').get('operations', [])
-        if 'key' not in operations or 'focus' not in operations:
+        required = {'key','focus'} | ({'clipboard_set'} if args.command in ('type','paste') else set())
+        if not required <= set(operations):
             raise ValueError('This lane does not support keyboard input; check ca capabilities')
     with client.owned(identity):
         window = find_window(client, identity)
@@ -171,10 +185,10 @@ def execute(client, args):
         else:
             # Preserve the app's selected field/caret; no invented click location.
             client.focus(identity)
-            if args.command == 'type':
-                client.type_text(args.text)
+            if args.command in ('type','paste'):
+                client.paste(args.text, shortcut=args.shortcut)
             else:
-                client.chord(*args.chord)
+                client.chord(*args.chord, duration=args.duration)
     return {'ok': True, 'command': args.command, 'window': identity,
             'status': 'dispatched', 'released': True}
 
@@ -207,8 +221,8 @@ def main(argv=None):
             reply = run_worker(args, extra, socket_path(args.socket))
             print(json.dumps(reply, indent=2))
             return 0 if reply['ok'] else 1
-        if args.command == 'type':
-            Client.text_sequence(args.text)  # Reject unsupported text before acquiring anything.
+        if args.command in ('type','paste'):
+            Client.validate_text(args.text)
         path = socket_path(args.socket)
         try:
             client = Client(path, deadline=args.deadline, lane=args.lane)

@@ -42,11 +42,9 @@ work by color. Scope large scroll deltas to the correct spinbox.
 
 ## Saving
 
-CA has no keyboard or clipboard injection. The demo used an authorized external
-clipboard operation followed by explicit host middle-click into the filename
-field and a click on Save. This is environment-specific; inspect the pasted name.
-Preserve prior clipboard contents privately. Text restoration does not restore
-arbitrary clipboard formats. For CA-only tasks, report blocked filename entry.
+Select the filename field, then use host `ctx.paste(filename)` and click Save.
+Inspect the pasted name. Paste changes the shared text clipboard and leaves it
+available to the app; it does not automatically restore previous clipboard data.
 
 Verify the saved file, not just a screenshot. If CA cannot read a GPU buffer,
 use an available authorized capture method and account for its borders/scaling.

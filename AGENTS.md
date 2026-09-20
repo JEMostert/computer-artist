@@ -1,6 +1,6 @@
 # Computer Artist
 
-This project was reset on 18 September 2026. Read FEATURES.md for the intended
+This project was reset on 18 September 2026. Read docs/CAPABILITIES.md for the intended
 capabilities and build sequence. No prior implementation remains.
 
 - The goal is independent agent input in applications on the user's actual
@@ -11,7 +11,7 @@ capabilities and build sequence. No prior implementation remains.
 - Treat app-assigned seats and client-specific seat exposure as hypotheses
   until tested. Report restrictions for native Wayland and XWayland separately.
 - Keep compositor experiments separate from the running host compositor.
-- Preserve the broader capabilities in FEATURES.md: conditional programs, continuous
+- Preserve the broader capabilities in docs/CAPABILITIES.md: conditional programs, continuous
   observation, precise gestures, handoff, verified outcomes, and reusable work.
 - Distinguish proposed, implemented, and verified behavior. Do not inherit old
   test results or describe input isolation as a security sandbox.

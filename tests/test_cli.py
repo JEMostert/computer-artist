@@ -47,7 +47,7 @@ class CLITest(unittest.TestCase):
                         reply['windows'] = [{'id': 'target', 'native': True, 'visible': True,
                                              'x': 100, 'y': 200, 'width': 300, 'height': 400}]
                     if op == 'capabilities':
-                        reply['operations'] = ['focus','key']
+                        reply['operations'] = ['focus','key','clipboard_get','clipboard_set']
                         if not test.old_plugin:
                             reply.update(protocol=3,lane=request.get('lane','agent'),host_pointer=True)
                     if op == 'focus' and test.reject_focus:
@@ -89,24 +89,35 @@ class CLITest(unittest.TestCase):
         self.assertEqual(json.loads(result.stdout)['status'], 'dispatched')
 
     def test_type_focuses_without_mouse_events(self):
-        result = self.ca('type', '--window', 'target', 'Ab')
+        result = self.ca('--host', 'type', '--window', 'target', 'Ab 😀')
         self.assertEqual(result.returncode, 0, result.stderr)
         ops = [e['op'] for e in self.events]
         self.assertLess(ops.index('focus'), ops.index('key'))
+        self.assertLess(ops.index('clipboard_set'), ops.index('key'))
+        self.assertEqual(next(e['text'] for e in self.events if e['op']=='clipboard_set'), 'Ab 😀')
+        self.assertEqual([e['code'] for e in self.events if e['op']=='key'], [42,110,110,42])
         self.assertFalse(any(op in ('move', 'button') for op in ops))
         self.assertEqual(ops[-1], 'release')
 
-    def test_unsupported_text_has_no_side_effects(self):
-        result = self.ca('type', '--window', 'target', 'prefix 😀')
+    def test_oversized_text_has_no_side_effects(self):
+        result = self.ca('--host', 'type', '--window', 'target', '😀'*2049)
         self.assertEqual(result.returncode, 1)
         self.assertEqual(self.events, [])
 
     def test_rejected_focus_returns_lease_without_typing(self):
         self.reject_focus = True
-        result = self.ca('type', '--window', 'target', 'hello')
+        result = self.ca('--host', 'type', '--window', 'target', 'hello')
         self.assertEqual(result.returncode, 1)
         self.assertFalse(any(e['op']=='key' for e in self.events))
+        self.assertFalse(any(e['op']=='clipboard_set' for e in self.events))
         self.assertEqual(self.events[-1]['op'], 'release')
+
+    def test_keyboard_and_clipboard_require_host(self):
+        for args in [('paste','--window','target','hello'),('key','--window','target','W'),('clipboard','set','hello')]:
+            self.events.clear()
+            result=self.ca(*args)
+            self.assertEqual(result.returncode,1)
+            self.assertFalse(any(e['op'] in ('acquire','key','clipboard_set') for e in self.events))
 
     def test_outside_coordinates_do_not_dispatch_input(self):
         result = self.ca('click', '--window', 'target', '--x', '300', '--y', '0')

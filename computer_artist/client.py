@@ -14,13 +14,13 @@ class ActionError(RuntimeError):
         super().__init__(f'{operation}: {reply.get("error", "rejected")}')
 
 
-# Reserved keyboard helpers; require backend keyboard support before dispatch.
+# Physical Linux key codes. Text entry uses the clipboard, independent of layout.
 LETTERS = dict(zip('qwertyuiopasdfghjklzxcvbnm',
                    [16,17,18,19,20,21,22,23,24,25,30,31,32,33,34,35,36,37,38,44,45,46,47,48,49,50]))
 PLAIN = {**LETTERS, **dict(zip('1234567890', range(2,12))),
          ' ':57, '\n':28, '\t':15, '-':12, '=':13, '[':26, ']':27,
          ';':39, "'":40, '`':41, '\\':43, ',':51, '.':52, '/':53}
-SHIFTED = dict(zip('!@#$%^&*()_+{}:"~|<>?', '1234567890-=[];\'`\\,./'))
+CLIPBOARD_MAX_BYTES = 8192
 
 
 class ExecutionBudget:
@@ -51,6 +51,7 @@ class Client:
         self.lease = ''
         self.generation = None
         self.failure = None
+        self.held_keys = set()
         self.trace = deque(maxlen=512)
         if lane == 'host':
             try:
@@ -107,7 +108,7 @@ class Client:
                 self.release()
                 self.failure = TimeoutError('Execution cancelled or deadline/action budget exceeded')
                 raise self.failure
-            if op in ('move','button','key','scroll','focus'):
+            if op in ('move','button','key','scroll','focus','clipboard_get','clipboard_set'):
                 values.update(lease=self.lease, generation=self.generation)
             return self._request(op, **values)
 
@@ -144,6 +145,7 @@ class Client:
         if self.lease:
             self._request('release', lease=self.lease)
             self.lease = ''
+            self.held_keys.clear()
 
     @contextmanager
     def owned(self, window_id):
@@ -157,50 +159,77 @@ class Client:
         return self.request('move', x=x, y=y)
 
     def focus(self, window_id):
-        """Focus a leased window on the agent keyboard without clicking in it."""
+        """Focus a leased host window without moving the pointer."""
         return self.request('focus', window=window_id)
 
     def button(self, code=272, pressed=True):
         return self.request('button', code=code, pressed=pressed)
 
     def key(self, code, pressed):
-        if pressed:
-            end = time.monotonic()+3
-            while not self.request('ping').get('keyboard_ready', False):
-                if time.monotonic() >= end:
-                    self._request('cancel')
-                    raise TimeoutError('Application did not acknowledge agent activation')
-                time.sleep(.01)
-        return self.request('key', code=code, pressed=pressed)
+        if self.lane != 'host':
+            raise ValueError('Keyboard input requires explicit host access')
+        if type(code) is not int or not 1 <= code <= 247 or type(pressed) is not bool:
+            raise ValueError('Key requires a Linux key code (1–247) and a boolean pressed state')
+        result = self.request('key', code=code, pressed=pressed)
+        if pressed: self.held_keys.add(code)
+        else: self.held_keys.discard(code)
+        return result
 
     def click(self, x, y, button=272):
         self.move(x,y)
         self.button(button, True)
         self.button(button, False)
 
-    def chord(self, *codes):
+    def chord(self, *codes, duration=0):
+        import math
+        if not math.isfinite(duration) or duration < 0:
+            raise ValueError('Key duration must be finite and nonnegative')
+        if not codes or len(set(codes)) != len(codes) or any(type(code) is not int or not 1 <= code <= 247 for code in codes):
+            raise ValueError('Provide distinct Linux key codes (1–247)')
         try:
             for code in codes: self.key(code, True)
+            end = time.monotonic() + duration
+            while time.monotonic() < end:
+                self.request('ping')  # Enforce cancellation and the shared budget while holding.
+                time.sleep(min(.05, max(0, end-time.monotonic())))
             for code in reversed(codes): self.key(code, False)
-        except Exception:
-            self._request('cancel')
+        except BaseException:
+            try: self._request('cancel')
+            except Exception: pass
+            self.held_keys.clear()
             raise
 
     @staticmethod
-    def text_sequence(text):
-        sequence = []
-        for char in text:
-            shifted = char.isascii() and char.isupper() or char in SHIFTED
-            base = SHIFTED.get(char, char.lower())
-            if base not in PLAIN:
-                raise ValueError(f'Character not supported by US keyboard driver: {char!r}')
-            sequence.append((PLAIN[base], shifted))
-        return sequence
+    def validate_text(text):
+        if not isinstance(text, str) or len(text.encode('utf-8')) > CLIPBOARD_MAX_BYTES:
+            raise ValueError(f'Clipboard text must be a string of at most {CLIPBOARD_MAX_BYTES} UTF-8 bytes')
+
+    def clipboard_get(self):
+        if self.lane != 'host':
+            raise ValueError('Clipboard access requires explicit host access')
+        return self.request('clipboard_get')['text']
+
+    def clipboard_set(self, text):
+        self.validate_text(text)
+        if self.lane != 'host':
+            raise ValueError('Clipboard access requires explicit host access')
+        return self.request('clipboard_set', text=text)
+
+    def paste(self, text, *, shortcut=(42,110)):
+        """Paste into the already focused, leased host target (Shift+Insert)."""
+        self.validate_text(text)
+        if self.lane != 'host' or not self.lease:
+            raise ValueError('Paste requires an acquired host window')
+        if self.held_keys:
+            raise ValueError('Release held keys before pasting')
+        if not self.request('ping').get('keyboard_ready'):
+            raise ValueError('Paste requires keyboard focus on the host target')
+        self.clipboard_set(text)
+        self.chord(*shortcut)
 
     def type_text(self, text):
-        sequence = self.text_sequence(text)
-        for code, shifted in sequence:
-            self.chord(42, code) if shifted else self.chord(code)
+        """Compatibility alias: text is entered through clipboard paste."""
+        return self.paste(text)
 
     def scroll(self, delta, *, axis='vertical', v120=0):
         return self.request('scroll', axis=axis, delta=delta, v120=v120)

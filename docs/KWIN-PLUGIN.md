@@ -20,7 +20,13 @@ Observer traffic cannot renew another connection's lease.
 The animated cursor is a separate scene overlay. Capture reads the target's main
 surface buffer; it can fail for unmappable GPU buffers and excludes composed
 subsurfaces, decorations and effects. Menus needing compositor-validated grab
-serials, keyboard, clipboard, IME, drag-and-drop and XWayland are unsupported.
+serials, independent keyboard/clipboard, IME, drag-and-drop and XWayland are unsupported.
+
+Explicit host input sends pointer and keyboard events through KWin's normal
+pipeline with a distinct device identity. Held keys are released on interruption;
+external devices take priority. A nonblocking Wayland data-control client owns
+the shared text clipboard on this compositor. Clipboard transfers are bounded
+and expire instead of blocking KWin. See [host operations](HOST-LANE.md).
 
 The user-only Unix socket serves newline-delimited JSON. The Python client
 handles ownership, heartbeat, deadlines, action budgets and bounded traces.

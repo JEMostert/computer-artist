@@ -64,10 +64,11 @@ class ControllerTest(unittest.TestCase):
             self.assertTrue(self.released.is_set())
         self.assertFalse(any(e['op']=='move' for e in self.events))
 
-    def test_unsupported_text_does_not_partially_type(self):
+    def test_agent_text_does_not_dispatch(self):
         with Client(self.path) as client:
             with client.owned('existing-window'):
                 with self.assertRaises(ValueError): client.type_text('valid prefix 😀')
         self.assertFalse(any(e['op']=='key' for e in self.events))
+        self.assertFalse(any(e['op']=='clipboard_set' for e in self.events))
 
 if __name__=='__main__': unittest.main()

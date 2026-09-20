@@ -5,7 +5,7 @@ has a typed interface, an immutable version, optional preconditions and explicit
 outcome checks. It is intended for steps such as drawing a shape or selecting an
 object; a module need not encode an entire task.
 
-These commands work with the installed stock-KWin plugin. Keyboard input,
+These commands work with a matching stock-KWin plugin build. Independent keyboard input,
 XWayland, automatic visual control detection, accessibility discovery and semantic
 Blender/browser adapters are **not implemented**. The runtime reports those
 limits; it never silently switches to human input. A Blender cylinder module
@@ -90,7 +90,10 @@ Available context methods:
 | `ctx.fragments.call(name, **arguments)` | Invoke another module in the same window/context |
 | `ctx.verify(name, boolean, evidence=...)` | Record an explicit check; stop on failure |
 | `ctx.yield_to_agent(reason)` | Stop and return control with available observation evidence |
-| `ctx.type(text)`, `ctx.press('Ctrl+S')` | Capability-gated; rejected on the current pointer-only plugin |
+| `ctx.paste(text, shortcut='Shift+Insert')`, `ctx.type(text)` | Host only; paste Unicode text through the shared clipboard (`type` is an alias) |
+| `ctx.clipboard_get()`, `ctx.clipboard_set(text)` | Host only; UTF-8 text, at most 8192 bytes; no focus change |
+| `ctx.press('Ctrl+S', duration=0)` | Host only; focus the target and press a chord, optionally holding it |
+| `ctx.key_down('W')`, `ctx.key_up('W')` | Host only; hold/release one physical key for app interactions |
 
 Relative coordinates are fractions in `[0,1)` of **window content**, not of a
 particular canvas or screenshot crop. Pixel coordinates are logical pixels.

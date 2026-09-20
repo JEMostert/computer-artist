@@ -38,8 +38,13 @@ Five runs rotate; preserve needed evidence with `ca storage keep RUN_ID`.
 
 Default input is independent; human pointer/focus must be outside the target
 connection. Stop on human takeover. Never silently switch to `--host`.
-Keyboard, clipboard, XWayland, and popup grabs are unsupported by the current
-plugin. Coordinates are logical content pixels; account for screenshot scaling.
+Use explicit `--host` clipboard and keyboard operations as needed for the task,
+unless the user prohibits them. Prefer clipboard paste (`ctx.paste(text)`) for
+text entry. Use keys only for interactions that require them, such as game
+controls or application shortcuts; use pointer scrolling for scrolling.
+Check host capabilities first. Host input shares desktop focus and clipboard.
+XWayland and popup grabs remain unsupported.
+Coordinates are logical content pixels; account for screenshot scaling.
 Re-observe after geometry changes or uncertain replies.
 
 For drawing, read [techniques](references/pointer-techniques.md); for coordinate

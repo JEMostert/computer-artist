@@ -87,5 +87,10 @@ timeout=4)`, `ctx.path(points, until=predicate, observe_every=10)`,
 Write task code and artifacts under `ctx.output`. `ca runs show RUN_ID` inspects
 records; `ca storage keep RUN_ID` preserves them. Captures and executions currently
 create separate runs, so preserve earlier evidence needed across the five-run rotation.
-Close with `ca session close`. `--host` controls the human pointer/focus and requires
-authorized scope; it is never an automatic fallback. Neither lane types text.
+Close with `ca session close`. `--host` enables shared desktop input explicitly.
+Use `ctx.paste(text)` for Unicode text entry; `ctx.type(text)` is an alias.
+Use `ctx.press('Ctrl+S')`, `ctx.press('W', duration=1)`, or paired
+`ctx.key_down('W')` / `ctx.key_up('W')` when the interaction requires keys.
+Clipboard text is shared and limited to 8192 UTF-8 bytes per operation;
+`ctx.clipboard_get()` / `ctx.clipboard_set(text)` read/write it without focus.
+Paste defaults to Shift+Insert; pass `shortcut='Ctrl+Shift+V'` if the app needs it.

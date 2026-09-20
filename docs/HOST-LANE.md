@@ -26,11 +26,41 @@ request fails if KWin redirects it to another window, such as a modal dialog;
 observe and target the actual dialog explicitly.
 
 Both lanes currently support native Wayland toplevels, pointer movement, buttons
-and scrolling. The host lane additionally supports `focus`. Neither lane provides
-keyboard injection. XWayland, popup grabs, constrained pointers and application
+and scrolling. The host lane additionally supports `focus`, keyboard input and
+text clipboard access. XWayland, popup grabs, constrained pointers and application
 DND are unsupported by the host implementation. Popup-triggered automatic
 activation remains a known limitation of the agent lane; host focus is an
 explicit recovery tool, not prevention of the original focus change.
+
+## Text and keys
+
+```bash
+ca --host paste --window EDITOR_ID 'Hello café 😀'
+ca --host clipboard set 'Shared clipboard text'
+ca --host clipboard get
+ca --host key --window EDITOR_ID Ctrl+S
+ca --host key --window GAME_ID W --duration 1
+```
+
+Prefer clipboard paste for text. `type` is a compatibility alias for `paste`.
+Paste focuses the selected window, writes the shared clipboard, then sends
+Shift+Insert. This avoids keyboard-layout assumptions for text. Use `--shortcut`
+for an application's alternative paste binding. Neither focus nor paste moves
+the pointer; select the intended field first. Clipboard read/write alone does
+not acquire a window, change focus or open a session.
+
+Clipboard support is UTF-8 text only, bounded to 8192 bytes. It uses the selected
+compositor's `ext-data-control-v1` connection, not the shell's display. Writes
+persist after CLI disconnect until replaced or the plugin is unloaded. Paste
+leaves the text available for asynchronous app reads; previous clipboard data
+is not automatically restored. The primary selection is untouched. A successful
+paste reply reports dispatch; verify the text in the application.
+
+Key names refer to Linux physical key positions (letter names use US positions).
+Their interpretation follows the desktop's active layout. Keyboard operations
+require the leased target's real keyboard focus. A focus change, external input,
+disconnect, stale action, timeout or session close stops input and releases held
+keys. Host shortcuts pass through KWin's ordinary shortcut handling.
 
 ## Coordination
 
@@ -44,13 +74,13 @@ connection conflict. Conflicts are rejected before input. Agent acquisition stil
 refuses an app with real pointer or keyboard focus. Host input cannot enter the
 agent-owned connection.
 
-Host events pass through KWin's ordinary pointer pipeline with a distinct input
+Host events pass through KWin's ordinary input pipeline with a distinct input
 device identity. An event from another device, including other automation, stops
 the host controller. Physical pointer movement, buttons, scrolling, keyboard
 activity, touch or tablet proximity therefore take priority. The spy does not
-consume the physical event. If the human presses the same button already held by
-automation, ownership of that button transfers to the human until their release.
-Other synthetic held buttons are released.
+consume the physical event. If the human presses the same button or key already
+held by automation, ownership transfers to the human until their release.
+Other synthetic held input is released.
 
 Window geometry/lifetime changes, screen lock, pointer constraints, disconnect,
 expiry or invalid host actions stop host control. Agent work in another app can

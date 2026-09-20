@@ -51,6 +51,10 @@ ca click --window WINDOW_ID --x 200 --y 150
 ca scroll --window WINDOW_ID --x 200 --y 150 --delta 20
 ca capture --window WINDOW_ID /absolute/path/new-capture.png
 
+ca --host paste --window WINDOW_ID 'Hello café 😀'
+ca --host key --window WINDOW_ID Ctrl+S
+ca --host clipboard get
+
 ca session close
 ```
 
@@ -162,7 +166,8 @@ The local control socket defaults to `$XDG_RUNTIME_DIR/computer-artist/control`.
 | Explicit host pointer and focus | Implemented for supported native Wayland toplevels |
 | Observation and image diffs | Readable main-surface captures; some GPU buffers cannot be captured |
 | Conditional programs and fragments | Typed modules, versions, guarded regions, budgets, deadlines, execution records |
-| Keyboard, clipboard, IME | Not implemented by CA in either lane |
+| Host keyboard and clipboard | Key presses/holds, UTF-8 clipboard read/write/paste; explicit `--host` |
+| Independent keyboard/clipboard, IME | Unsupported |
 | XWayland, popup grabs, app drag-and-drop | Unsupported |
 | Accessibility and automatic control discovery | Planned |
 
@@ -204,7 +209,7 @@ Integration tests launch a **separate packaged KWin with its virtual backend**. 
 | [Host lane](docs/HOST-LANE.md) | Explicit desktop input, coordination, and parallel execution |
 | [Architecture](docs/KWIN-PLUGIN.md) · [Protocol](docs/PROTOCOL.md) | How the plugin and CLI communicate |
 | [Validation](docs/VALIDATION.md) | Tested behavior and evidence boundaries |
-| [Features and roadmap](FEATURES.md) | Implemented capabilities and the next experiments |
+| [Capabilities and roadmap](docs/CAPABILITIES.md) | Implemented capabilities and the next experiments |
 
 ## Contributing and license
 

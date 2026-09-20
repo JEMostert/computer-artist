@@ -49,7 +49,7 @@ try:
     while not (base/'control').exists():
         if compositor.poll() is not None or time.monotonic()>until:raise RuntimeError('Packaged KWin/plugin startup failed: '+str(output)+' exit='+str(compositor.poll())+' socket='+str(Path(display).exists()))
         time.sleep(.1)
-    if '--check' in sys.argv:
+    if '--check' in sys.argv or '--check-text' in sys.argv:
         launch('input-device',[str(root/'build/stock-test-input'),display,'hold'],env)
         time.sleep(.3)
     app_env=dict(env,WAYLAND_DISPLAY=display,QT_QPA_PLATFORM='wayland')
@@ -68,6 +68,8 @@ try:
         subprocess.run([sys.executable,str(root/'tests/integration/check-stock-plugin.py'),str(output/'session.json')],check=True)
         subprocess.run([sys.executable,str(root/'tests/integration/check-harness.py'),str(output/'session.json')],check=True)
         subprocess.run([sys.executable,str(root/'tests/integration/check-host-lanes.py'),str(output/'session.json')],check=True)
+    if '--check' in sys.argv or '--check-text' in sys.argv:
+        subprocess.run([sys.executable,str(root/'tests/integration/check-host-text.py'),str(output/'session.json')],check=True)
     else:
         compositor.wait()
 except KeyboardInterrupt:pass

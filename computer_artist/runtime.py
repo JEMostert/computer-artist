@@ -332,22 +332,56 @@ class Context:
         finally:
             self.client.button(pressed=False)
 
-    def type(self, text):
-        if not {'focus','key'} <= set(self.capabilities.get('operations', [])):
-            raise ValueError('Backend does not support independent keyboard input')
-        self.client.text_sequence(text)
+    def _host_operations(self, *operations):
+        if self.lane != 'host' or not set(operations) <= set(self.capabilities.get('operations', [])):
+            raise ValueError('Operation requires a host context and backend support')
+
+    def clipboard_get(self):
+        self._host_operations('clipboard_get')
+        self.check_budget()
+        return self.client.clipboard_get()
+
+    def clipboard_set(self, text):
+        self._host_operations('clipboard_set')
+        self.check_budget()
+        return self.client.clipboard_set(text)
+
+    def paste(self, text, *, shortcut='Shift+Insert'):
+        from .cli import chord
+        codes = chord(shortcut)
+        self._host_operations('focus','key','clipboard_set')
+        self.client.validate_text(text)
         self._own()
         self.client.focus(self.window_id)
-        self.client.type_text(text)
+        return self.client.paste(text, shortcut=codes)
 
-    def press(self, chord):
+    def type(self, text):
+        return self.paste(text)
+
+    def press(self, chord, *, duration=0):
         from .cli import chord as parse_chord
         codes = parse_chord(chord)
-        if not {'focus','key'} <= set(self.capabilities.get('operations', [])):
-            raise ValueError('Backend does not support independent keyboard input')
+        self._host_operations('focus','key')
         self._own()
         self.client.focus(self.window_id)
-        self.client.chord(*codes)
+        self.client.chord(*codes, duration=duration)
+
+    def key_down(self, key):
+        from .cli import chord
+        codes = chord(key)
+        if len(codes) != 1: raise ValueError('key_down takes one key')
+        self._host_operations('focus','key')
+        self._own()
+        if not self.client.held_keys: self.client.focus(self.window_id)
+        return self.client.key(codes[0], True)
+
+    def key_up(self, key):
+        from .cli import chord
+        codes = chord(key)
+        if len(codes) != 1: raise ValueError('key_up takes one key')
+        self._host_operations('key')
+        self._own()
+        return self.client.key(codes[0], False)
 
     def sleep(self, seconds):
         if not math.isfinite(seconds) or seconds < 0:

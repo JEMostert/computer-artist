@@ -1,6 +1,6 @@
 # Contributing
 
-Start with [FEATURES.md](FEATURES.md) and [AGENTS.md](AGENTS.md). The goal is
+Start with [capabilities](docs/CAPABILITIES.md) and [AGENTS.md](AGENTS.md). The goal is
 independent agent input in existing applications on the user's actual desktop.
 
 ## Local checks

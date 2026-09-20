@@ -58,6 +58,14 @@ class Canvas(QWidget):
 
 
 class HumanEditor(QPlainTextEdit):
+    def keyPressEvent(self, event):
+        record('key_down', text=event.text(), key=event.key(), modifiers=event.modifiers().value, repeat=event.isAutoRepeat())
+        super().keyPressEvent(event)
+
+    def keyReleaseEvent(self, event):
+        record('key_up', text=event.text(), key=event.key(), modifiers=event.modifiers().value, repeat=event.isAutoRepeat())
+        super().keyReleaseEvent(event)
+
     def mousePressEvent(self, event):
         record('press', x=event.position().x(), y=event.position().y())
         super().mousePressEvent(event)

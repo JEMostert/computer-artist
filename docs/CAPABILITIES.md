@@ -10,14 +10,18 @@ Implemented host lane: explicit `--host` pointer input and window focus on nativ
 Wayland, separate lane leases/watchdogs, same-connection conflict checks, and
 interruption on other source-device input. Sessions auto-create on input; read-only
 commands leave them closed. Parallel programs share deadlines/budgets. Host
-keyboard injection and prevention of agent-dialog automatic focus remain absent.
-See [host-lane scope](docs/HOST-LANE.md).
+keyboard presses/holds and Unicode clipboard read/write/paste are implemented.
+Prevention of agent-dialog automatic focus remains absent.
+See [host-lane scope](HOST-LANE.md).
+The keyboard/clipboard build passed the separate KWin Qt/KWrite tests and is
+loaded on the desktop; host deployment was checked through capabilities only.
+See [recorded validation](VALIDATION.md) for the exact verification scope.
 
 Implemented in the CLI harness: typed, versioned modular Python fragments; stdin
 registration; nested calls; a shared fragment library;
 supervised deadlines; observations and pixel diffs; agent-defined guarded regions;
 condition-based waits and feedback-controlled paths; named outcome checks and
-execution records. See [the programming API](docs/WINDOW-API.md).
+execution records. See [the programming API](WINDOW-API.md).
 Automatic control discovery, accessibility/app adapters and model observers remain
 future work. A module's successful checks do not establish general compatibility.
 
@@ -25,13 +29,14 @@ Implemented: independent pointer delivery to an existing native Wayland app,
 animated agent cursor with automatic sessions and explicit close, connection ownership, human takeover, bounded Python
 programs, traces, and capture of readable main-surface buffers. A drawing workflow
 in an already-open KolourPaint window was verified on the desktop; see
-[validation](docs/VALIDATION.md). This does not establish general app compatibility.
+[validation](VALIDATION.md). This does not establish general app compatibility.
 
 The human pointer and keyboard focus must be outside the target app before
 acquisition. Returning to it revokes agent control. Working simultaneously inside
 the same app is not required; preserving the human's own cursor is the priority.
-Keyboard delivery, XWayland, clipboard, IME, menus/popups and data drag-and-drop
-are unsupported. There is no fallback to human input or focus stealing.
+Independent keyboard/clipboard delivery, XWayland, IME, menus/popups and data
+drag-and-drop are unsupported. Host keyboard and clipboard require explicit
+`--host`; text entry uses clipboard paste. There is no implicit input fallback.
 
 Dedicated harness integrations and remote desktop transport are out of scope.
 Private desktops and Xvfb do not meet the product goal. A separate stock KWin
@@ -67,7 +72,7 @@ correct. Remote transport is not required for the first local demonstration.
 2. Broaden native Wayland app testing, including scaling, geometry changes and
    capture limits. Record Qt, GTK and browser results separately; treat XWayland
    as a separate investigation.
-3. Investigate keyboard input and popup/grab behavior against packaged KWin.
+3. Investigate independent keyboard input and popup/grab behavior against packaged KWin.
    These are proposals, not implemented features. Never substitute human focus.
 4. Add continuous observation, bounded recent evidence, condition-based waits and
    adaptive gestures. Re-resolve stale targets before acting.

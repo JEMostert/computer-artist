@@ -1,5 +1,33 @@
 # Recorded validation
 
+## Host keyboard and clipboard — 20 September 2026
+
+`scripts/test.sh --integration` passed all 45 Python tests, the plugin build/link
+check, and all four separate packaged-KWin integration suites. Evidence:
+`output/2026-09-20_18-31-45-667865Z-92774c/host-text-regression.json` alongside
+the pointer, harness and host-lane reports in that directory.
+
+The new tests verify UTF-8 clipboard ownership across CLI disconnects, Unicode
+multiline paste without pointer motion, reading an application's copied text,
+key repeat, CLI/runtime methods, oversized text rejection, and bounded reads from
+an unresponsive clipboard owner while KWin remains responsive. Held keys are
+reconciled on disconnect, stale generation, watchdog, session close, focus change,
+human takeover and unload. An overlapping human Shift press remains held until
+its physical release, without leaving subsequent input shifted. KWrite received
+Unicode text through paste and saved the exact expected file through Ctrl+S.
+These establish native Wayland Qt/KWrite behavior in the separate compositor;
+GTK, browser, game and XWayland compatibility are not established by these tests.
+
+The tested build was then installed and loaded as
+`computerartist-text-3cefad7bfbd9` on the existing desktop. KWin PID 3460 and the
+packaged executable/library hashes remained unchanged. Host capability checks
+report keyboard and clipboard support; no application input or clipboard content
+access was performed during deployment. `host-installation.json` records this
+check. The canonical plugin copy was replaced atomically for future logins.
+The session remains closed. Evidence follows normal output retention.
+
+## Initial pointer implementation
+
 Recorded on 18 September 2026, using packaged KWin 6.7.5 and the native plugin.
 
 - `outputs/ca-stock-o8gtg6nu/plugin-regression.json`: separate stock KWin fixture
@@ -16,8 +44,8 @@ After removing the fork, a clean plugin build, all 12 Python tests and the full
 stock KWin integration regression passed again. Fresh evidence is in
 `outputs/ca-stock-gnolsqn0/plugin-regression.json`.
 
-These establish those workflows only. Keyboard input and XWayland support are
-not implemented. Run `scripts/test.sh --integration` for a fresh separate stock
+These establish those workflows only. At that revision, keyboard input and
+XWayland support were not implemented. Run `scripts/test.sh --integration` for a fresh separate stock
 KWin regression; each run writes its own evidence directory under `outputs/`.
 
 ## Explicit cursor sessions

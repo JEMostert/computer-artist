@@ -10,6 +10,8 @@
 #include <core/inputdevice.h>
 #include <pointer_input.h>
 #include <keyboard_input.h>
+#include <xkb.h>
+#include "clipboard.h"
 #include <wayland_server.h>
 #include <wayland/clientconnection.h>
 #include <wayland/display.h>
@@ -45,10 +47,10 @@ namespace KWin {
 // This distinct source identity lets real-device events preempt host automation.
 class HostDevice : public InputDevice {
 public:
-    QString name() const override { return QStringLiteral("Computer Artist host pointer"); }
+    QString name() const override { return QStringLiteral("Computer Artist host input"); }
     bool isEnabled() const override { return true; }
     void setEnabled(bool) override {}
-    bool isKeyboard() const override { return false; }
+    bool isKeyboard() const override { return true; }
     bool isPointer() const override { return true; }
     bool isTouchpad() const override { return false; }
     bool isTouch() const override { return false; }
@@ -74,8 +76,9 @@ public:
 private:
     void ensureSession();
     bool hostValid() const;
+    bool keyboardReady() const;
     bool acquireHost(Window *, QLocalSocket *);
-    void releaseHost(bool revoke = false, uint32_t transferredButton = 0);
+    void releaseHost(bool revoke = false, uint32_t transferredButton = 0, uint32_t transferredKey = 0);
     QJsonObject requestHost(QLocalSocket *, const QJsonObject &);
     std::chrono::microseconds hostTime() const { return std::chrono::microseconds(m_clock.nsecsElapsed()/1000); }
     HostDevice m_hostDevice;
@@ -85,6 +88,9 @@ private:
     QString m_hostLease;
     quint64 m_hostGeneration = 0;
     QSet<uint32_t> m_hostButtons;
+    QList<uint32_t> m_hostKeys;
+    bool m_hostKeyboardUsed = false;
+    Clipboard *m_clipboard = nullptr;
     QTimer m_hostWatchdog;
     bool m_releasingHost = false;
     QString m_hostStopReason;
@@ -148,7 +154,12 @@ Artist::Artist() {
         if (w && owns(w->surface())) release(true);
     });
     connect(waylandServer()->seat(), &SeatInterface::focusedKeyboardSurfaceAboutToChange,
-            this, [this](SurfaceInterface *s) { if (owns(s)) release(true); });
+            this, [this](SurfaceInterface *s) {
+        if (owns(s)) release(true);
+        if (m_hostOwner && m_hostKeyboardUsed && (!m_hostTarget || s!=m_hostTarget->surface())) {
+            m_hostStopReason="keyboard_focus_changed"; releaseHost(true);
+        }
+    });
     // Catch stationary-pointer focus changes from stacking/geometry, too. A human
     // enter may already have been sent here; release must preserve that enter.
     connect(waylandServer()->seat()->pointer(), &PointerInterface::focusedSurfaceChanged,
@@ -171,6 +182,8 @@ Artist::~Artist() {
     delete m_cursor.data();
 }
 bool Artist::start() {
+    const auto displays=waylandServer()->display()->socketNames();
+    if(!displays.isEmpty()) m_clipboard=new Clipboard(displays.first(),this);
     QString dir = qEnvironmentVariable("CA_PLUGIN_RUNTIME");
     if (dir.isEmpty()) dir = qEnvironmentVariable("XDG_RUNTIME_DIR") + "/computer-artist";
     if (!QDir().mkpath(dir)) return false;
@@ -196,11 +209,12 @@ bool Artist::start() {
             });
             connect(socket, &QLocalSocket::readyRead, this, [this,socket] {
                 while (socket->canReadLine() && !socket->property("revoked").toBool()) {
+                    if(socket->property("clipboard_pending").toBool()) { socket->abort(); return; }
                     auto line = socket->readLine(65537);
                     if (line.size() > 65536) { socket->abort(); return; }
                     auto doc = QJsonDocument::fromJson(line);
                     auto reply = doc.isObject() ? request(socket, doc.object()) : QJsonObject{{"ok",false},{"error","invalid_json"}};
-                    socket->write(QJsonDocument(reply).toJson(QJsonDocument::Compact) + '\n');
+                    if(!reply.value("pending").toBool()) socket->write(QJsonDocument(reply).toJson(QJsonDocument::Compact) + '\n');
                     if (socket->bytesToWrite() > 1024*1024) { socket->abort(); return; }
                 }
                 if (socket->bytesAvailable() > 65536) socket->abort();
@@ -253,6 +267,13 @@ bool Artist::valid() const {
     return true;
 }
 void Artist::observe(Window *w) {
+    // Release before KWin's windowActivated handler snapshots held keys for
+    // the next keyboard enter event.
+    connect(w,&Window::activeChanged,this,[this,w] {
+        if(m_hostTarget==w && m_hostKeyboardUsed && !w->isActive()) {
+            m_hostStopReason="keyboard_focus_changed"; releaseHost(true);
+        }
+    });
     auto changed = [this,w] {
         if (m_client && owns(w->surface())) { ++m_generation; release(true); }
         if (m_hostTarget == w) { ++m_hostGeneration; m_hostStopReason="target_changed"; releaseHost(true); }
@@ -365,12 +386,18 @@ QJsonObject Artist::request(QLocalSocket *socket, const QJsonObject &o) {
     if (!observation && op!="takeover" && op!="session_close" && op!="session_status" && lane=="agent" && m_owner && m_owner!=socket) reply.insert("error","controller_busy");
     else if (op=="capabilities") {
         reply = {{"protocol",3},{"backend","stock_kwin_plugin"},{"ownership","wayland_connection_pointer"},
-            {"automatic_sessions",true},{"lane",lane},{"host_pointer",true},{"host_focus",true},{"host_keyboard",false},{"host_xwayland",false},{"native_handoff",true},{"xwayland_handoff",false},{"keyboard",false},{"input_methods",false},
+            {"automatic_sessions",true},{"lane",lane},{"host_pointer",true},{"host_focus",true},{"host_keyboard",true},{"host_xwayland",false},{"native_handoff",true},{"xwayland_handoff",false},{"keyboard",false},{"input_methods",false},
             {"clipboard",false},{"data_drag_and_drop",false},{"popups",false},{"human_pointer_entry_takeover",true},
             {"operations",QJsonArray{"session_close","session_status","windows","capabilities","acquire","release","move","button","scroll","cancel","takeover","ping","capture"}}};
         if (lane=="host") {
             reply.insert("ownership","host_wayland_connection");
-            reply.insert("operations",QJsonArray{"session_close","session_status","windows","capabilities","acquire","release","move","button","scroll","focus","cancel","takeover","ping","capture"});
+            reply.insert("keyboard",true);
+            const bool clipboard=m_clipboard && m_clipboard->ready();
+            reply.insert("clipboard",clipboard);
+            reply.insert("clipboard_max_bytes",Clipboard::MaxBytes);
+            auto operations=QJsonArray{"session_close","session_status","windows","capabilities","acquire","release","move","button","scroll","focus","key","cancel","takeover","ping","capture"};
+            if(clipboard) { operations.append("clipboard_get"); operations.append("clipboard_set"); }
+            reply.insert("operations",operations);
         }
         ok=true;
     } else if (op=="windows") { reply.insert("windows",windows()); ok=true; }
@@ -431,9 +458,9 @@ QJsonObject Artist::request(QLocalSocket *socket, const QJsonObject &o) {
     reply.insert("cursor_visible",m_cursor && m_cursor->isVisible());
     reply.insert("lanes",QJsonObject{
         {"agent",QJsonObject{{"busy",bool(m_owner)},{"window",m_target?m_target->internalId().toString(QUuid::WithoutBraces):QString()}, {"buttons",int(m_buttons.size())}}},
-        {"host",QJsonObject{{"busy",bool(m_hostOwner)},{"window",m_hostTarget?m_hostTarget->internalId().toString(QUuid::WithoutBraces):QString()}, {"buttons",int(m_hostButtons.size())},{"stop_reason",m_hostStopReason}}}});
+        {"host",QJsonObject{{"busy",bool(m_hostOwner)},{"window",m_hostTarget?m_hostTarget->internalId().toString(QUuid::WithoutBraces):QString()}, {"buttons",int(m_hostButtons.size())},{"keys",int(m_hostKeys.size())},{"stop_reason",m_hostStopReason}}}});
     reply.insert("ok",ok); reply.insert("lease",lane=="host"?m_hostLease:m_lease);
-    reply.insert("generation",qint64(lane=="host"?m_hostGeneration:m_generation)); reply.insert("keyboard_ready",false);
+    reply.insert("generation",qint64(lane=="host"?m_hostGeneration:m_generation)); reply.insert("keyboard_ready",lane=="host" && keyboardReady());
     return reply;
 }
 
@@ -462,7 +489,25 @@ void Artist::pointerAxis(PointerAxisEvent *event) {
     if (m_hostOwner && event->device!=&m_hostDevice) { m_hostStopReason="external_scroll"; releaseHost(true); }
 }
 void Artist::keyboardKey(KeyboardKeyEvent *event) {
-    if (m_hostOwner && event->device!=&m_hostDevice) { m_hostStopReason="external_keyboard"; releaseHost(true); }
+    // KWin generates repeats without a source device. They belong to our held
+    // key until an actual external event transfers ownership.
+    if(event->state==KeyboardKeyState::Repeated && m_hostKeys.contains(event->nativeScanCode)) return;
+    if (m_hostOwner && event->device!=&m_hostDevice) {
+        m_hostStopReason="external_keyboard";
+        releaseHost(true,0,event->state==KeyboardKeyState::Pressed?event->nativeScanCode:0);
+        // The event was translated before spies ran. Remove released synthetic
+        // modifiers from the human event as well as KWin's keyboard state.
+        auto xkb=input()->keyboard()->xkb();
+        event->modifiers=xkb->modifiers();
+        event->modifiersRelevantForGlobalShortcuts=xkb->modifiersRelevantForGlobalShortcuts(event->nativeScanCode);
+        event->nativeVirtualKey=xkb->toKeysym(event->nativeScanCode);
+        event->key=xkb->toQtKey(event->nativeVirtualKey,event->nativeScanCode);
+        event->text=xkb->toString(event->nativeVirtualKey);
+    }
+}
+bool Artist::keyboardReady() const {
+    return m_hostOwner && hostValid() && workspace()->activeWindow()==m_hostTarget
+        && waylandServer()->seat()->focusedKeyboardSurface()==m_hostTarget->surface();
 }
 bool Artist::hostValid() const {
     if(m_hostClient) for(auto w:workspace()->stackingOrder())
@@ -484,11 +529,21 @@ bool Artist::acquireHost(Window *w, QLocalSocket *socket) {
     m_hostWatchdog.start(); ensureSession();
     return true;
 }
-void Artist::releaseHost(bool revoke, uint32_t transferredButton) {
+void Artist::releaseHost(bool revoke, uint32_t transferredButton, uint32_t transferredKey) {
     if (m_releasingHost) return;
     m_releasingHost=true;
     auto owner=m_hostOwner;
     m_hostOwner.clear(); m_hostWatchdog.stop();
+    m_hostKeyboardUsed=false;
+    auto keys=m_hostKeys; m_hostKeys.clear();
+    for(auto i=keys.crbegin();i!=keys.crend();++i) {
+        if(*i==transferredKey) {
+            // XKB counted both the synthetic and physical press. Drop only our
+            // contribution, keeping KWin's pressed-key entry and the client's
+            // held key until the physical release arrives.
+            input()->keyboard()->xkb()->updateKey(*i,KeyboardKeyState::Released);
+        } else input()->keyboard()->processKey(*i,KeyboardKeyState::Released,hostTime(),&m_hostDevice);
+    }
     auto buttons=m_hostButtons; m_hostButtons.clear();
     for (auto code : buttons) if(code!=transferredButton)
         input()->pointer()->processButton(code,PointerButtonState::Released,hostTime(),&m_hostDevice);
@@ -503,15 +558,45 @@ QJsonObject Artist::requestHost(QLocalSocket *socket,const QJsonObject &o) {
     QString error;
     if (op=="takeover") { m_hostStopReason="explicit_stop"; releaseHost(m_hostOwner!=socket); ok=true; }
     else if (m_hostOwner && m_hostOwner!=socket) error="host_controller_busy";
+    else if (op=="clipboard_get" || op=="clipboard_set") {
+        if(waylandServer()->isScreenLocked()) error="screen_locked";
+        else if(!m_clipboard || !m_clipboard->ready()) error="clipboard_unavailable";
+        else if(socket==m_hostOwner && (!hostValid() || o.value("lease").toString()!=m_hostLease
+                || o.value("generation").toInteger(-1)!=qint64(m_hostGeneration))) error="stale_host_lease_or_target";
+        else if(socket!=m_hostOwner && !o.value("lease").toString().isEmpty()) error="stale_host_lease_or_target";
+        else if(op=="clipboard_set" && !o.value("text").isString()) error="clipboard_text_required";
+        else {
+            socket->setProperty("clipboard_pending",true);
+            QPointer<QLocalSocket> receiver=socket;
+            auto done=[receiver](QJsonObject result) {
+                if(!receiver || receiver->state()!=QLocalSocket::ConnectedState) return;
+                receiver->setProperty("clipboard_pending",false);
+                result.insert("lane","host");
+                receiver->write(QJsonDocument(result).toJson(QJsonDocument::Compact)+'\n');
+            };
+            if(op=="clipboard_get") m_clipboard->read(done);
+            else m_clipboard->write(o.value("text").toString(),done);
+            return {{"pending",true}};
+        }
+    }
     else if (op=="acquire") { ok=acquireHost(find(o.value("window").toString()),socket); if(!ok) error="host_target_unavailable_or_lane_conflict"; }
     else if(op=="release") {
         if(!m_hostOwner || (socket==m_hostOwner && o.value("lease").toString()==m_hostLease)) { releaseHost(); ok=true; }
     } else if(op=="cancel") { if(socket==m_hostOwner) { releaseHost(); ok=true; } }
     else if(socket!=m_hostOwner || !hostValid() || o.value("lease").toString()!=m_hostLease
             || o.value("generation").toInteger(-1)!=qint64(m_hostGeneration)) error="stale_host_lease_or_target";
-    else if(op=="focus" && m_hostButtons.isEmpty() && find(o.value("window").toString())==m_hostTarget) {
+    else if(op=="focus" && m_hostButtons.isEmpty() && m_hostKeys.isEmpty() && find(o.value("window").toString())==m_hostTarget) {
         workspace()->activateWindow(m_hostTarget);
-        ok=hostValid() && workspace()->activeWindow()==m_hostTarget;
+        ok=keyboardReady();
+        m_hostKeyboardUsed=ok;
+    } else if(op=="key" && keyboardReady() && o.value("code").isDouble() && o.value("pressed").isBool()) {
+        double code=o.value("code").toDouble(); bool down=o.value("pressed").toBool();
+        if(code>=1 && code<=247 && code==std::floor(code) && m_hostKeys.contains(uint32_t(code))!=down) {
+            if(down) m_hostKeys.append(uint32_t(code)); else m_hostKeys.removeOne(uint32_t(code));
+            m_hostKeyboardUsed=true;
+            input()->keyboard()->processKey(uint32_t(code),down?KeyboardKeyState::Pressed:KeyboardKeyState::Released,hostTime(),&m_hostDevice);
+            ok=keyboardReady();
+        }
     } else if(op=="move" && o.value("x").isDouble() && o.value("y").isDouble()) {
         const QPointF p(o.value("x").toDouble(),o.value("y").toDouble());
         if(std::isfinite(p.x()) && std::isfinite(p.y()) && at(p)==m_hostTarget && m_hostTarget->clientGeometry().contains(p)) {
@@ -541,7 +626,7 @@ QJsonObject Artist::requestHost(QLocalSocket *socket,const QJsonObject &o) {
     if(!ok && socket==m_hostOwner) { m_hostStopReason=error.isEmpty()?"rejected_action":error; releaseHost(); }
     if(socket==m_hostOwner) m_hostWatchdog.start();
     QJsonObject reply{{"ok",ok},{"lane","host"},{"lease",m_hostLease},{"generation",qint64(m_hostGeneration)},
-        {"session",m_session},{"keyboard_ready",false}};
+        {"session",m_session},{"keyboard_ready",keyboardReady()}};
     if(!ok) reply.insert("error",error.isEmpty()?"host_operation_rejected":error);
     return reply;
 }
