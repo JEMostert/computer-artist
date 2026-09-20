@@ -24,7 +24,7 @@ before sending actions; there is no compatibility fallback.
 | `cancel` | `lane` | Agent: release held input, retain lease. Host: release input and lease |
 | `takeover` | `lane` | Stop that controller; available to another connection |
 | `ping` | `lane` | Status; only the owning connection renews its watchdog |
-| `capture` | `window`, absolute new `path` | Save readable main-surface buffer as PNG |
+| `capture` | `window`, absolute new `path` | Render client rectangle including subsurfaces as PNG; returns `source: kwin_composited_client` |
 
 `session_open` is removed. Observation, capture and status do not open sessions.
 Session creation is atomic with acquisition in KWin's single event loop. Both

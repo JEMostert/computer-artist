@@ -33,9 +33,10 @@ Host focus, keyboard and clipboard access are explicit. XWayland input is unsupp
 See [the host-lane contract](../docs/HOST-LANE.md).
 
 The module supports the existing protocol's windows/capabilities, acquire/release,
-move/button/scroll, cancel/takeover and ping. `capture` saves a readable main-surface
-buffer into a new PNG path; it may fail for unmappable GPU buffers and does not
-compose arbitrary subsurfaces, decorations or effects. Independent keyboard/clipboard,
+move/button/scroll, cancel/takeover and ping. `capture` renders the client rectangle
+through KWin's scene renderer, including subsurfaces and GPU content, at the
+window's target scale. Separate popups and compositor effects are not included.
+Capture requires a visible window and an unlocked screen. Independent keyboard/clipboard,
 IME, menus/popups, data drag-and-drop and XWayland are explicitly unsupported.
 Host text clipboard uses a nonblocking `ext-data-control-v1` client connected to
 this KWin instance, with bounded transfers and no external clipboard executable.
@@ -57,10 +58,10 @@ KWin/Qt can retain the old library mapping after plugin unload. To apply changed
 code within the same desktop process, use a distinct versioned filename and load
 that filename's plugin ID; simply reloading the old ID may run old code.
 
-Current desktop update: `computerartist-text-3cefad7bfbd9` is loaded for this login.
+Current desktop update: `computerartist-capture-b22f9f0a7203` is loaded for this login.
 The canonical `computerartist.so` also contains the new code and remains the
 configured plugin for future logins. The versioned copy defaults to disabled.
-For this login use `computerartist-text-3cefad7bfbd9` in the unload command below.
+For this login use `computerartist-capture-b22f9f0a7203` in the unload command below.
 KWin's binary plugin version interface requires rebuilding for each KWin release.
 The plugin metadata defaults to disabled; `computerartistEnabled=true` in the
 `[Plugins]` group of kwinrc enables loading on later logins.

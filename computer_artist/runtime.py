@@ -75,7 +75,7 @@ class Observations:
             observation = uuid.uuid4().hex
             path = folder / (observation+'.png')
             try:
-                self.client.request('capture', window=identity, path=str(path))
+                capture = self.client.request('capture', window=identity, path=str(path))
                 after = next((w for w in self.client.windows() if w['id'] == identity), None)
                 if after is None or geometry(after) != geometry(window):
                     raise Interrupted('Window geometry changed during capture; observe again')
@@ -111,7 +111,7 @@ class Observations:
                 record = {'id': observation, 'time': time.time(), 'window': window,
                           'image': str(output), 'full_image': str(path), 'region': region,
                           'pixel_size': list(image.size), 'sha256': digest, 'changes': changes,
-                          'sources': {'image': 'kwin_main_surface', 'accessibility': 'unavailable', 'detected_controls': 'unavailable'},
+                          'sources': {'image': (capture or {}).get('source', 'kwin_main_surface'), 'accessibility': 'unavailable', 'detected_controls': 'unavailable'},
                           'targets': self.targets(identity)}
                 atomic_json(folder / (observation+'.json'), record)
                 atomic_json(self.store.layout(identity) / 'window.json', window)

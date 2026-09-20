@@ -164,7 +164,7 @@ The local control socket defaults to `$XDG_RUNTIME_DIR/computer-artist/control`.
 | Independent pointer | Implemented; demonstrated in an existing native Wayland KolourPaint window |
 | Clicks, scrolling, continuous drags | Implemented; app behavior and compatibility still matter |
 | Explicit host pointer and focus | Implemented for supported native Wayland toplevels |
-| Observation and image diffs | Readable main-surface captures; some GPU buffers cannot be captured |
+| Observation and image diffs | Composited client captures including subsurfaces/GPU content; verified with Qt fixtures and scrcpy |
 | Conditional programs and fragments | Typed modules, versions, guarded regions, budgets, deadlines, execution records |
 | Host keyboard and clipboard | Key presses/holds, UTF-8 clipboard read/write/paste; explicit `--host` |
 | Independent keyboard/clipboard, IME | Unsupported |

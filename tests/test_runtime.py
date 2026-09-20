@@ -50,6 +50,16 @@ class RuntimeTest(unittest.TestCase):
         self.backend=Backend()
         self.ctx=Context(self.backend,'w',self.memory)
 
+    def test_capture_source_is_preserved_with_legacy_fallback(self):
+        self.assertEqual(self.ctx.observe()['sources']['image'], 'kwin_main_surface')
+        original = self.backend.request
+        def request(op, **kwargs):
+            result = original(op, **kwargs)
+            if op == 'capture': result['source'] = 'kwin_composited_client'
+            return result
+        self.backend.request = request
+        self.assertEqual(self.ctx.observe()['sources']['image'], 'kwin_composited_client')
+
     def test_scaled_crop_diff_and_observation_retention(self):
         first=self.ctx.observe()
         ImageDraw.Draw(self.backend.image).rectangle((20,20,39,39),fill='black')

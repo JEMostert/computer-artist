@@ -27,7 +27,9 @@ future work. A module's successful checks do not establish general compatibility
 
 Implemented: independent pointer delivery to an existing native Wayland app,
 animated agent cursor with automatic sessions and explicit close, connection ownership, human takeover, bounded Python
-programs, traces, and capture of readable main-surface buffers. A drawing workflow
+programs, traces, and composited client capture including subsurfaces and GPU
+content, verified with Qt fixtures and native Wayland scrcpy. See
+[capture validation](CAPTURE-VALIDATION.md). A drawing workflow
 in an already-open KolourPaint window was verified on the desktop; see
 [validation](VALIDATION.md). This does not establish general app compatibility.
 
