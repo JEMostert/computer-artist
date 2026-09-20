@@ -8,6 +8,12 @@ description: Use when a task requires testing or interacting with windowed appli
 Use `ca` from PATH or this skill's resolved checkout root. Desktop actions require
 the loaded KWin plugin. Follow **observe → map → fragment → execute → verify**.
 
+To install or refresh this skill in Codex, run `./ca setup --codex` from the
+checkout. It links `~/.agents/skills/computer-artist` to this checkout, so updates
+follow automatically. Keep the checkout in place; reload skills or start a new
+agent session after updates. For older hosts, use `--skills-dir ~/.codex/skills`
+instead of `--codex`.
+
 1. Run `ca capabilities`, `ca windows`, and `ca observe --window ID`. Open the image.
 2. Inspect `window/layout/ID/`. Before task input, map the controls and work area
    needed now. Recheck existing entries against the live window; don't map the
