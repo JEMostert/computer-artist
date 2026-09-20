@@ -13,11 +13,11 @@ commands leave them closed. Parallel programs share deadlines/budgets. Host
 keyboard injection and prevention of agent-dialog automatic focus remain absent.
 See [host-lane scope](docs/HOST-LANE.md).
 
-Implemented in the CLI harness: typed, versioned modular Python memory; stdin
-registration; nested calls; window attachment and app-library promotion;
+Implemented in the CLI harness: typed, versioned modular Python fragments; stdin
+registration; nested calls; a shared fragment library;
 supervised deadlines; observations and pixel diffs; agent-defined guarded regions;
 condition-based waits and feedback-controlled paths; named outcome checks and
-execution records. See [the programming API](docs/COMPUTER-MEMORY.md).
+execution records. See [the programming API](docs/WINDOW-API.md).
 Automatic control discovery, accessibility/app adapters and model observers remain
 future work. A module's successful checks do not establish general compatibility.
 

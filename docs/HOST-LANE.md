@@ -97,7 +97,7 @@ lane is acceptable; it does not authorize escalation. Nested calls can explicitl
 choose a context from the same execution:
 
 ```python
-ctx.memory.call('draw-shape', lane=paint, size=20)
+ctx.fragments.call('draw-shape', lane=paint, size=20)
 ```
 
 Traces record the lane. Session status includes lane targets, held-button counts,

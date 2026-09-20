@@ -54,9 +54,11 @@ def parser():
     lanes.add_argument('--agent', dest='lane', action='store_const', const='agent', help='Control the independent agent pointer (default)')
     result = argparse.ArgumentParser(prog='ca', parents=[shared], description='Computer Artist: independent agent input on your desktop')
     # Shared options are declared before child parsers copy them.
-    shared.add_argument('--memory-dir', help='Computer Memory root')
+    shared.add_argument('--window-dir', help='Window layouts and API fragments root')
+    shared.add_argument('--output-dir', help='Run output root')
+    result.add_argument('--output-dir', default=argparse.SUPPRESS)
     shared.add_argument('--budget', type=int, help='Execution request budget (default: 20000)')
-    result.add_argument('--memory-dir', default=argparse.SUPPRESS)
+    result.add_argument('--window-dir', default=argparse.SUPPRESS)
     result.add_argument('--budget', type=int, default=argparse.SUPPRESS)
     commands = result.add_subparsers(dest='command', required=True)
     from .setup import add_command
@@ -126,7 +128,7 @@ def execute(client, args):
     if args.command in ('windows', 'capabilities', 'stop', 'takeover'):
         reply = client.request('takeover' if args.command in ('stop', 'takeover') else args.command)
         if args.command == 'capabilities':
-            reply['harness'] = {'memory': True, 'typed_parameters': ['int','float','str','bool'],
+            reply['harness'] = {'fragments': True, 'typed_parameters': ['int','float','str','bool'],
                 'observations': True, 'image_diffs': True, 'guarded_regions': True,
                 'conditional_programs': True, 'hard_deadlines': True, 'version_history': True,
                 'accessibility': False, 'automatic_control_detection': False}
@@ -180,9 +182,9 @@ def execute(client, args):
 def main(argv=None):
     argument_parser = parser()
     args, extra = argument_parser.parse_known_args(argv)
-    if extra and not (args.command == 'memory' and args.memory_action == 'run'):
+    if extra and not (args.command == 'fragments' and args.fragment_action == 'run'):
         argument_parser.error('unrecognized arguments: ' + ' '.join(extra))
-    for name, default in (('socket', None), ('deadline', 120), ('trace', None), ('memory_dir', None), ('budget', 20000), ('lane', 'agent')):
+    for name, default in (('socket', None), ('deadline', 120), ('trace', None), ('window_dir', None), ('output_dir', None), ('budget', 20000), ('lane', 'agent')):
         vars(args).setdefault(name, default)
     client = None
     previous = signal.getsignal(signal.SIGTERM)
@@ -201,7 +203,7 @@ def main(argv=None):
         if reply is not None:
             print(json.dumps(reply, indent=2))
             return 0
-        if args.command == 'execute' or (args.command == 'memory' and args.memory_action == 'run'):
+        if args.command == 'execute' or (args.command == 'fragments' and args.fragment_action == 'run'):
             reply = run_worker(args, extra, socket_path(args.socket))
             print(json.dumps(reply, indent=2))
             return 0 if reply['ok'] else 1

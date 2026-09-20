@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""End-to-end Computer Memory checks against the separate packaged KWin fixture."""
+"""End-to-end Window layouts and API fragments checks against the separate packaged KWin fixture."""
 import json
 import os
 from pathlib import Path
@@ -12,7 +12,7 @@ session=json.loads(Path(sys.argv[1]).read_text())
 assert session['compositor']=='/usr/bin/kwin_wayland'
 assert '/ca-stock-' in session['wayland'] and session['wayland'].endswith('/wayland-test')
 out=Path(session['output'])
-env=dict(os.environ,CA_SOCKET=session['control'],CA_MEMORY_DIR=str(out/'computer-memory'))
+env=dict(os.environ,CA_SOCKET=session['control'],CA_WINDOW_DIR=str(out/'window'),CA_OUTPUT_DIR=str(out/'output'))
 
 def ca(*args,source=None,success=True):
     result=subprocess.run([str(root/'ca'),*args],input=source,text=True,capture_output=True,env=env,timeout=20)
@@ -34,23 +34,31 @@ def run(ctx, y: float):
 def verify(ctx, result):
     return {"check": "canvas pixels changed after stroke", "passed": result["condition"] == "drawing_changed", "evidence": result}
 '''
-created=ca('memory','create',identity,'line',source=source)['result']
-assert ca('memory','list',identity)['result'][0]['parameters']['y']['type']=='float'
-ca('memory','create',identity,'line',source=source,success=False)
+created=ca('fragments','create','line',source=source)['result']
+assert ca('fragments','list')['result'][0]['parameters']['y']['type']=='float'
+ca('fragments','create','line',source=source,success=False)
 report['stdin_registration_and_no_overwrite']=True
 try:
-    first=ca('memory','run',identity,'line','--y','.78')
+    first=ca('fragments','run','line','--window',identity,'--y','.78')
+    run_folder=out/'output'/first['run_id']
+    assert (run_folder/'trace.json').is_file()
+    assert (run_folder/'result.json').is_file()
+    assert list((run_folder/'captures'/identity).glob('*.png'))
+    assert not list((out/'window').rglob('*.png'))
+    assert (out/'window'/'api-fragmants'/'line'/'module.py').is_file()
+    assert (out/'window'/'layout'/identity/'window.json').is_file()
+    report['layout_fragments_and_run_output_separated']=True
     assert first['status']=='verified',first
-    second=ca('memory','run',identity,'line','--args','{"y":0.85}')
+    second=ca('fragments','run','line','--window',identity,'--args','{"y":0.85}')
     assert second['status']=='verified',second
     report['reused_module_with_typed_inputs_and_pixel_verification']=True
     assert ca('session','status')['session']
     assert not any(w['agent'] for w in ca('windows')['windows'])
     report['returns_app_preserves_session']=True
-    invalid=ca('memory','run',identity,'line','--y','2',success=False)
+    invalid=ca('fragments','run','line','--window',identity,'--y','2',success=False)
     assert 'range' in invalid['error']
-    ca('memory','create',identity,'nested',source='def run(ctx):\n    return ctx.memory.call("line", y=.7)')
-    nested=ca('memory','run',identity,'nested')
+    ca('fragments','create','nested',source='def run(ctx):\n    return ctx.fragments.call("line", y=.7)')
+    nested=ca('fragments','run','nested','--window',identity)
     assert len(nested['modules'])==2,nested
     assert 'trace' not in nested
     stored=ca('runs','show',nested['run_id'])['result']
@@ -69,22 +77,19 @@ try:
     assert feedback['result']['points']==1
     report['feedback_controlled_gesture']=True
     # An infinite loop while holding a drag must not outlive the supervisor deadline.
-    ca('memory','create',identity,'stall',source='def run(ctx):\n    ctx.path([(0.2+i/10000,.8) for i in range(500)],relative=True,interval=.1)')
+    ca('fragments','create','stall',source='def run(ctx):\n    ctx.path([(0.2+i/10000,.8) for i in range(500)],relative=True,interval=.1)')
     count=release_count()
-    timed=ca('memory','run',identity,'stall','--deadline','1',success=False)
+    timed=ca('fragments','run','stall','--window',identity,'--deadline','1',success=False)
     assert timed['status']=='interrupted',timed
     end=time.monotonic()+3
     while release_count()<=count and time.monotonic()<end:time.sleep(.05)
     assert release_count()>count
     assert not any(w['agent'] for w in ca('windows')['windows'])
     report['hard_deadline_releases_held_drag']=True
-    ca('memory','promote',identity,'line','--app','fixture')
-    ca('memory','attach','future-window','--from-app','fixture')
-    assert ca('memory','list','future-window')['result'][0]['compatibility']=='unverified'
-    ca('memory','update',identity,'line',source=source+'\n# revision 2\n')
-    assert len(ca('memory','history',identity,'line')['result'])==2
-    assert ca('memory','show',identity,'line','--version',created['version'])['result']['manifest']['version']==created['version']
-    report['attach_promotion_and_version_history']=True
+    ca('fragments','update','line',source=source+'\n# revision 2\n')
+    assert len(ca('fragments','history','line')['result'])==2
+    assert ca('fragments','show','line','--version',created['version'])['result']['manifest']['version']==created['version']
+    report['shared_fragment_version_history']=True
 finally:
     ca('session','close')
 report.update(passed=True,compositor='/usr/bin/kwin_wayland',window=identity)

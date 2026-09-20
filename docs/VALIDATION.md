@@ -32,7 +32,7 @@ The desktop plugin was updated without restarting KWin (PID 3357 unchanged).
 The final session is closed and reports `cursor_visible: false`. No host app input
 was sent during this update.
 
-## Computer Memory and execution API
+## Window layouts, API fragments, and execution API
 
 `outputs/ca-stock-h5834i1_/harness-regression.json` records end-to-end tests
 against a separate packaged KWin instance. They registered a module via stdin,
@@ -58,7 +58,7 @@ Keyboard, automatic control discovery and accessibility adapters remain absent.
 The current interface supersedes the earlier explicit `session open` workflow.
 All 28 Python tests passed. Separate packaged-KWin evidence is recorded in
 `outputs/ca-stock-v7t0so0u/host-lanes-regression.json`, alongside the passing
-plugin and Computer Memory regressions. Checks include:
+plugin and Window layouts and API fragments regressions. Checks include:
 
 - Read-only commands leave a session closed; input opens one automatically.
 - Real pointer movement, application-delivered scrolling, and simultaneous
@@ -84,3 +84,27 @@ were queried and the session remained closed. No host-lane actions were sent to
 the user's apps during installation. Installation evidence is in
 `outputs/stock-plugin-host/host-lane-update.json`. Keyboard injection and prevention
 of the initial agent-dialog focus change remain unimplemented.
+
+## Window layouts, API fragments, and dated output
+
+On 20 September 2026, all 43 Python tests passed after replacing Computer Memory
+with `window/layout`, `window/api-fragmants`, and dated `output` run folders.
+New tests cover startup rotation at five runs, layout use after its source image
+expires, image-free window storage, and shared capture folders within a run.
+
+Separate packaged-KWin integration evidence is in
+`output/2026-09-20_15-23-52-398568Z-565d52/`. The harness explicitly checks fragment,
+layout, trace, and capture locations. Plugin, execution, and host-lane regressions
+run against the isolated compositor, not the running host. Output evidence rotates
+under the normal five-run policy. The bundled skill passed its structural validator.
+
+## Shared fragment library correction
+
+The fragment library now lives directly under `window/api-fragmants/NAME/`.
+Registration and inspection take no window ID; execution selects a live window
+with `--window`. Attachment and app-promotion commands have been removed.
+All 44 Python tests passed, including one fragment used against two independent
+window layouts without copying its code. The installed skill passed validation.
+The isolated packaged-KWin plugin, fragment harness, and host-lane checks also
+passed; evidence is in `output/2026-09-20_15-37-59-441693Z-e319b8/` and follows
+normal output retention. No host compositor replacement was performed.

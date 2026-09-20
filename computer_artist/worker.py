@@ -6,7 +6,7 @@ import sys
 import time
 
 from .client import Client
-from .memory import Memory, atomic_json, contract, bind
+from .fragments import WindowStore, atomic_json, contract, bind
 from .runtime import Context, Interrupted, YieldToAgent
 
 
@@ -17,7 +17,7 @@ def main(folder):
     ctx = None
     with Client(spec['socket'],deadline=spec['deadline'],action_budget=spec['budget'],lane=spec.get('lane','agent')) as client:
         try:
-            ctx = Context(client,spec['window'],Memory(spec['memory']))
+            ctx = Context(client,spec['window'],WindowStore(spec['window_root'], spec['output_root'], folder))
             with redirect_stdout(sys.stderr):
                 if 'module' in spec:
                     value = ctx.call(spec['module'],spec['arguments'],version=spec['version'])

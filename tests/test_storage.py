@@ -6,7 +6,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from computer_artist.memory import atomic_json
+from computer_artist.fragments import atomic_json
 from computer_artist.storage import MARKER, managed_run, cleanup, inspect, preserve
 
 
@@ -30,9 +30,18 @@ class StorageTest(unittest.TestCase):
         external=Path(self.temp.name)/'external';external.mkdir()
         (self.root/'linked').symlink_to(external,target_is_directory=True)
         report=cleanup(self.root)
-        self.assertEqual(report['removed'],['0','1','2'])
+        self.assertEqual(report['removed'],[str(i) for i in range(13)])
         self.assertTrue(unmanaged.exists());self.assertTrue(external.exists())
-        self.assertEqual(len(inspect(self.root)['runs']),15)
+        self.assertEqual(len(inspect(self.root)['runs']),5)
+
+    def test_starting_sixth_run_rotates_oldest_before_work(self):
+        for i in range(5): self.run_folder(str(i), i)
+        with managed_run(self.root) as folder:
+            self.assertRegex(folder.name, r'^\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}-\d{6}Z-[a-f0-9]{6}$')
+            self.assertFalse((self.root/'0').exists())
+            self.assertEqual(len(inspect(self.root)['runs']), 5)
+            self.assertTrue(next(e for e in inspect(self.root)['runs'] if e['id'] == folder.name)['active'])
+        self.assertEqual(len(inspect(self.root)['runs']), 5)
 
     def test_active_and_preserved_runs_survive_size_pressure(self):
         self.run_folder('old',1,10000);preserve(self.root,'old')
@@ -95,8 +104,8 @@ class StorageTest(unittest.TestCase):
         module=Path(self.temp.name)/'windows'/'app'/'module.py'
         module.parent.mkdir(parents=True);module.write_text('saved work')
         ca=Path(__file__).resolve().parents[1]/'ca'
-        result=subprocess.run([str(ca),'storage','keep','old','--scope','runs',
-                               '--memory-dir',self.temp.name,'--socket','/does/not/exist'],
+        result=subprocess.run([str(ca),'storage','keep','old','--output-dir',str(self.root),
+                               '--window-dir',str(Path(self.temp.name)/'window'),'--socket','/does/not/exist'],
                               capture_output=True,text=True)
         self.assertEqual(result.returncode,0,result.stdout+result.stderr)
         self.assertTrue(inspect(self.root)['runs'][0]['preserved'])

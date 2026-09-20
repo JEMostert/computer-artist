@@ -1,10 +1,10 @@
 /build/
 /local/
-/outputs/
+/output/
 __pycache__/
 *.pyc
 
-/computer-memory/
+/window/
 .venv/
 .env
 .env.*

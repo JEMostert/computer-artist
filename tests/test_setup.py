@@ -16,7 +16,7 @@ class SetupTest(unittest.TestCase):
         self.addCleanup(self.temp.cleanup)
         self.home = Path(self.temp.name)
         self.env = {**os.environ, 'HOME': str(self.home), 'CA_SOCKET': '/no-socket',
-                    'XDG_RUNTIME_DIR': '', 'CA_MEMORY_DIR': str(self.home/'memory')}
+                    'XDG_RUNTIME_DIR': '', 'CA_WINDOW_DIR': str(self.home/'fragments')}
 
     def cli(self, *args, ok=True):
         result = subprocess.run([sys.executable, str(ROOT/'ca'), 'setup', *args],
@@ -32,7 +32,7 @@ class SetupTest(unittest.TestCase):
         self.assertTrue((target/'references/programs.md').is_file())
         self.assertEqual(target.resolve(), ROOT/'skills/computer-artist')
         self.assertEqual(self.cli('--codex')['action'], 'unchanged')
-        self.assertFalse((self.home/'memory').exists())
+        self.assertFalse((self.home/'fragments').exists())
 
     def test_dry_run_and_custom_destination(self):
         root = self.home/'custom skills'

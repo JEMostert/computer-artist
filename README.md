@@ -10,7 +10,7 @@
 <p align="center">
   <a href="#see-it-paint">See it paint</a> ·
   <a href="#try-ca">Try CA</a> ·
-  <a href="#teach-it-a-small-action">Computer Memory</a> ·
+  <a href="#teach-it-a-small-action">Window layouts and API fragments</a> ·
   <a href="#what-works-today">Current capabilities</a> ·
   <a href="#build-and-test">Build</a>
 </p>
@@ -100,28 +100,28 @@ Coordinates are logical pixels relative to window content. Choose a clear canvas
 
 Programs can branch, wait for observed changes, use guarded regions, compose modules, and record named outcome checks. They share deadlines, request budgets, and application ownership.
 
-**[Explore the programming API →](docs/COMPUTER-MEMORY.md)**
+**[Explore the programming API →](docs/WINDOW-API.md)**
 
 ## Teach it a small action
 
-Computer Memory stores **modular Python actions** with typed inputs and immutable versions. Save a useful primitive, then compose it into different tasks.
+The fragment library stores **modular Python actions** with typed inputs and immutable versions. Save a useful primitive, then compose it into different tasks.
 
 ```bash
-ca memory create WINDOW_ID stroke --description "Drag between two canvas points" <<'PY'
+ca fragments create stroke --description "Drag between two canvas points" <<'PY'
 CONTRACT = {'requires': ['move', 'button']}
 
 def run(ctx, x1: float, y1: float, x2: float, y2: float):
     ctx.path([(x1, y1), (x2, y2)], interval=.03)
 PY
 
-ca memory list WINDOW_ID
-ca memory run WINDOW_ID stroke --x1 160 --y1 180 --x2 360 --y2 260
+ca fragments list
+ca fragments run stroke --window WINDOW_ID --x1 160 --y1 180 --x2 360 --y2 260
 ca session close
 ```
 
-Modules live under `computer-memory/windows/WINDOW_ID/`. They can declare parameter constraints and window requirements, call other modules, retain version history, and record explicit checks. Registration parses source without executing it. Modules are local Python programs with the user's privileges, not a sandbox.
+Modules live under `window/api-fragmants/`. They can declare parameter constraints and window requirements, call other modules, retain version history, and record explicit checks. Registration parses source without executing it. Modules are local Python programs with the user's privileges, not a sandbox.
 
-Use `ca runs show RUN_ID` to inspect an execution record without replaying its actions. The legacy `ca run task.py` API remains available; use `execute` and `memory run` for supervised programs.
+Use `ca runs show RUN_ID` to inspect an execution record without replaying its actions. The legacy `ca run task.py` API remains available; use `execute` and `fragments run` for supervised programs.
 
 ## Two lanes, explicit control
 
@@ -161,7 +161,7 @@ The local control socket defaults to `$XDG_RUNTIME_DIR/computer-artist/control`.
 | Clicks, scrolling, continuous drags | Implemented; app behavior and compatibility still matter |
 | Explicit host pointer and focus | Implemented for supported native Wayland toplevels |
 | Observation and image diffs | Readable main-surface captures; some GPU buffers cannot be captured |
-| Conditional programs and memory | Typed modules, versions, guarded regions, budgets, deadlines, execution records |
+| Conditional programs and fragments | Typed modules, versions, guarded regions, budgets, deadlines, execution records |
 | Keyboard, clipboard, IME | Not implemented by CA in either lane |
 | XWayland, popup grabs, app drag-and-drop | Unsupported |
 | Accessibility and automatic control discovery | Planned |
@@ -172,9 +172,10 @@ The painting demo’s final file save used KDE's clipboard outside CA plus expli
 
 ## Storage stays bounded
 
-Temporary runs retain the newest **15 completed runs**, with a **256 MiB** budget
-per managed store. Active runs and explicitly preserved results are protected.
-Reusable Computer Memory modules and published artwork are kept separately.
+Dated `output/` folders retain **five runs**, including the new run, with a
+**256 MiB** budget. Startup removes the oldest eligible run. Active and preserved
+runs are protected. Maps live in `window/layout/`, reusable code in
+`window/api-fragmants/`, and images in output.
 
 ```bash
 ca storage status
@@ -199,7 +200,7 @@ Integration tests launch a **separate packaged KWin with its virtual backend**. 
 
 | Read next | What you will find |
 | --- | --- |
-| [Programming API and Computer Memory](docs/COMPUTER-MEMORY.md) | Modules, conditions, observations, verification, and execution records |
+| [Window layouts and programming API](docs/WINDOW-API.md) | Modules, conditions, observations, verification, and execution records |
 | [Host lane](docs/HOST-LANE.md) | Explicit desktop input, coordination, and parallel execution |
 | [Architecture](docs/KWIN-PLUGIN.md) · [Protocol](docs/PROTOCOL.md) | How the plugin and CLI communicate |
 | [Validation](docs/VALIDATION.md) | Tested behavior and evidence boundaries |

@@ -5,7 +5,7 @@ import math
 import time
 import uuid
 
-from .memory import Memory, atomic_json, bind, key
+from .fragments import WindowStore, atomic_json, bind, key
 
 
 class Interrupted(RuntimeError):
@@ -38,19 +38,28 @@ def image_box(rect, window, image):
 class Observations:
     limit = 15
 
-    def __init__(self, memory, client):
-        self.memory, self.client = memory, client
+    def __init__(self, store, client):
+        self.store, self.client = store, client
 
     def directory(self, window):
-        return self.memory.scope(window) / 'observations'
+        return self.store.run_folder / 'captures' / key(window)
 
     def load(self, window, identity):
         try:
-            return json.loads((self.directory(window) / (key(identity)+'.json')).read_text())
+            paths = list(self.store.output.glob('*/captures/' + key(window) + '/' + key(identity) + '.json'))
+            if not paths: raise FileNotFoundError(identity)
+            return json.loads(paths[0].read_text())
         except FileNotFoundError:
             raise ValueError('Observation expired or belongs to another window; observe again') from None
 
     def capture(self, identity, *, since=None, region=None):
+        if self.store.run_folder is None:
+            from .storage import managed_run
+            with managed_run(self.store.output) as folder:
+                store = WindowStore(self.store.root, self.store.output, folder)
+                observer = Observations(store, self.client)
+                observer.limit = self.limit
+                return observer.capture(identity, since=since, region=region)
         from PIL import Image, ImageChops
         from .storage import limits
         _, max_bytes = limits()
@@ -60,7 +69,7 @@ class Observations:
         if not window.get('native') or not window.get('visible'):
             raise Interrupted('Target is not a visible native Wayland window')
         previous = self.load(identity, since) if since else None
-        with self.memory.locked():
+        with self.store.locked():
             folder = self.directory(identity)
             folder.mkdir(parents=True, exist_ok=True)
             observation = uuid.uuid4().hex
@@ -77,7 +86,7 @@ class Observations:
                 changed_box = None
                 if previous:
                     changes['geometry_changed'] = geometry(previous['window']) != geometry(window)
-                    with Image.open(folder / (key(since)+'.png')) as prior:
+                    with Image.open(previous['full_image']) as prior:
                         old = prior.convert('RGB')
                     if old.size == image.size:
                         changed_box = ImageChops.difference(image, old).getbbox()
@@ -105,7 +114,7 @@ class Observations:
                           'sources': {'image': 'kwin_main_surface', 'accessibility': 'unavailable', 'detected_controls': 'unavailable'},
                           'targets': self.targets(identity)}
                 atomic_json(folder / (observation+'.json'), record)
-                atomic_json(self.memory.scope(identity) / 'window.json', window)
+                atomic_json(self.store.layout(identity) / 'window.json', window)
                 records = sorted(folder.glob('*.json'), key=lambda p: p.stat().st_mtime)
                 total = sum(p.stat().st_size for p in folder.iterdir() if p.is_file() and not p.is_symlink())
                 remaining = len(records)
@@ -124,7 +133,7 @@ class Observations:
                 raise
 
     def targets(self, window):
-        folder = self.memory.scope(window) / 'targets'
+        folder = self.store.layout(window) / 'targets'
         return [json.loads(p.read_text()) for p in sorted(folder.glob('*.json'))]
 
     def target(self, window, name, observation, rect):
@@ -134,17 +143,17 @@ class Observations:
         with Image.open(record['full_image']) as im:
             patch = im.convert('RGB').crop(image_box(rect, record['window'], im))
         target = {'name': key(name.lstrip('@')), 'observation': observation, 'rect': rect,
+                  'geometry': list(geometry(record['window'])),
                   'source': 'agent_defined_region', 'sha256': hashlib.sha256(patch.tobytes()).hexdigest()}
-        atomic_json(self.memory.scope(window) / 'targets' / (target['name']+'.json'), target)
+        atomic_json(self.store.layout(window) / 'targets' / (target['name']+'.json'), target)
         return target
 
     def resolve(self, window, name):
         from PIL import Image
         name = key(name.lstrip('@'))
-        target = json.loads((self.memory.scope(window) / 'targets' / (name+'.json')).read_text())
-        original = self.load(window, target['observation'])
+        target = json.loads((self.store.layout(window) / 'targets' / (name+'.json')).read_text())
         current = self.capture(window)
-        if geometry(original['window']) != geometry(current['window']):
+        if tuple(target['geometry']) != geometry(current['window']):
             raise Interrupted(f'Target @{name} has stale geometry; redefine it from a fresh observation')
         with Image.open(current['full_image']) as im:
             patch = im.convert('RGB').crop(image_box(target['rect'], current['window'], im))
@@ -166,12 +175,13 @@ class ModuleCalls:
 
 
 class Context:
-    def __init__(self, client, window, memory=None, *, execution=None):
+    def __init__(self, client, window, store=None, *, execution=None):
         self.client, self.window_id = client, key(window)
         self.lane = getattr(client, "lane", "agent")
-        self.store = memory or Memory()
+        self.store = store or WindowStore()
+        self.output = self.store.run_folder
         self.observations = Observations(self.store, client)
-        self.memory = ModuleCalls(self)
+        self.fragments = ModuleCalls(self)
         self.events = []
         self.stack = []
         self.checks = []
@@ -399,7 +409,7 @@ class Context:
     def call(self, name, values, *, version=None):
         if len(self.stack) >= 16 or name in self.stack:
             raise ValueError('Recursive module call or nesting limit exceeded')
-        manifest, source = self.store.load(self.window_id, name, version)
+        manifest, source = self.store.load(name, version)
         arguments = bind(manifest, values)
         if manifest.get('lane','any') not in ('any',self.lane):
             raise PermissionError(f"Module requires the {manifest['lane']} lane; select it explicitly")
@@ -419,7 +429,7 @@ class Context:
         self.events.append(record)
         self.stack.append(name)
         try:
-            namespace = {'__name__': '__computer_memory__', '__file__': str(self.store.folder(self.window_id,name)/'versions'/manifest['version']/'module.py')}
+            namespace = {'__name__': '__computer_artist_fragment__', '__file__': str(self.store.folder(name)/'versions'/manifest['version']/'module.py')}
             exec(compile(source, namespace['__file__'], 'exec'), namespace)
             before = len(self.checks)
             result = namespace['run'](self, **arguments)

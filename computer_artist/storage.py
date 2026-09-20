@@ -1,5 +1,6 @@
 """Bounded, explicitly managed run directories. Never adopts arbitrary files."""
 from contextlib import contextmanager
+from datetime import datetime, timezone
 import fcntl
 import json
 import os
@@ -8,13 +9,17 @@ import shutil
 import time
 import uuid
 
-from .memory import atomic_json, key
+from .fragments import atomic_json, key
 
 MARKER = '.ca-run.json'
 
 
+def run_name():
+    return datetime.now(timezone.utc).strftime('%Y-%m-%d_%H-%M-%S-%fZ') + '-' + uuid.uuid4().hex[:6]
+
+
 def limits():
-    count = int(os.environ.get('CA_RUN_LIMIT', '15'))
+    count = int(os.environ.get('CA_RUN_LIMIT', '5'))
     size = int(os.environ.get('CA_RUN_MAX_MB', '256')) * 1024 * 1024
     if count < 1 or size < 1:
         raise ValueError('CA_RUN_LIMIT and CA_RUN_MAX_MB must be positive integers')
@@ -84,7 +89,7 @@ def cleanup(root, *, dry_run=False, count=None, max_bytes=None, protect=()):
         total = sum(e['bytes'] for e in entries)
         deleted = []
         # Keep the newest result available even if it alone exceeds the byte cap.
-        remaining = len(eligible)
+        remaining = sum(not e['preserved'] for e in entries)
         for entry in eligible[:-1]:
             if entry['id'] in protect: continue
             if remaining <= count and total <= max_bytes: break
@@ -109,7 +114,7 @@ def preserve(root, identity, value=True):
 def managed_run(root, identity=None):
     limits()  # Validate policy before starting work.
     with locked(root) as root:
-        folder = root / key(identity or uuid.uuid4().hex)
+        folder = root / key(identity or run_name())
         folder.mkdir(mode=0o700)
         fd = os.open(folder/'.active.lock', os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
         fcntl.flock(fd, fcntl.LOCK_SH)

@@ -14,10 +14,10 @@ root=Path(__file__).resolve().parents[2]
 if '--private-bus' not in sys.argv:
     os.execvp('dbus-run-session',['dbus-run-session','--',sys.executable,str(Path(__file__).resolve()),'--private-bus',*sys.argv[1:]])
 base=Path(tempfile.mkdtemp(prefix='ca-stock-',dir=os.environ['XDG_RUNTIME_DIR']))
-output=root/'outputs'/base.name
+output=root/'output'/base.name
 sys.path.insert(0,str(root))
 from computer_artist.storage import managed_run
-run_storage=managed_run(root/'outputs',base.name)
+run_storage=managed_run(root/'output')
 output=run_storage.__enter__()
 run_fd=os.open(output/'.active.lock',os.O_RDWR)
 fcntl.flock(run_fd,fcntl.LOCK_SH)

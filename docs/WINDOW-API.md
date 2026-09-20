@@ -1,6 +1,6 @@
-# Computer Memory and agent programs
+# Window layouts, API fragments, and programs
 
-Computer Memory stores small Python actions the agent can compose. Each action
+The fragment library stores small Python actions the agent can compose. Each action
 has a typed interface, an immutable version, optional preconditions and explicit
 outcome checks. It is intended for steps such as drawing a shape or selecting an
 object; a module need not encode an entire task.
@@ -16,7 +16,7 @@ No such Blender workflow has been validated by this change.
 
 ```bash
 ca windows
-ca memory create WINDOW_ID move-to-point --description "Position the agent pointer" <<'PY'
+ca fragments create move-to-point --description "Position the agent pointer" <<'PY'
 CONTRACT = {
     'requires': ['move'],
     'parameters': {
@@ -30,10 +30,10 @@ def run(ctx, x: float, y: float):
     return {'position': [x, y]}
 PY
 
-ca memory list WINDOW_ID
-ca memory inspect WINDOW_ID move-to-point
-ca memory run WINDOW_ID move-to-point --x .5 --y .4
-ca memory run WINDOW_ID move-to-point --args '{"x":0.7,"y":0.6}'
+ca fragments list
+ca fragments inspect move-to-point
+ca fragments run move-to-point --window WINDOW_ID --x .5 --y .4
+ca fragments run move-to-point --window WINDOW_ID --args '{"x":0.7,"y":0.6}'
 ca session close
 ```
 
@@ -43,8 +43,8 @@ annotations. Defaults must be literal values. CLI booleans use `true` or `false`
 Unknown parameters and invalid values are rejected before execution. Parameters
 that share names with CLI options (such as `deadline`) can be passed in `--args`.
 
-Registration works offline and does not require a running window. The ID becomes
-the module's namespace. Execution resolves that exact window and checks that it
+Registration works offline in a shared fragment library. Execution selects a
+live window with `--window` and checks that it
 is native Wayland and visible. The human pointer and keyboard focus must be
 outside the application before the first input action.
 
@@ -62,16 +62,16 @@ lane-aware module calls. No module silently escalates to host control.
 ```bash
 ca execute --window WINDOW_ID --deadline 8 --budget 300 <<'PY'
 def run(ctx):
-    ctx.memory.call('move-to-point', x=.3, y=.4)
+    ctx.fragments.call('move-to-point', x=.3, y=.4)
     ctx.sleep(.2)
-    ctx.memory.call('move-to-point', x=.6, y=.4)
+    ctx.fragments.call('move-to-point', x=.6, y=.4)
     return {'finished': True}
 PY
 ```
 
 `ca execute` reads Python defining `run(ctx)` from stdin. The same optional
 `CONTRACT` and `verify` hook work for inline programs. `ca run task.py` remains the
-legacy `main(client)` API; use `execute` or `memory run` for the new context and
+legacy `main(client)` API; use `execute` or `fragments run` for the new context and
 supervised hard deadline.
 
 Available context methods:
@@ -87,7 +87,7 @@ Available context methods:
 | `ctx.path(..., until=predicate, observe_every=10)` | Observe during a drag and stop when `predicate(observation)` returns true |
 | `ctx.wait_for(conditions, timeout=5, interval=.15)` | Poll named conditions locally; return the first matching name and observation |
 | `ctx.sleep(seconds)` | Wait while checking deadline, geometry and ownership |
-| `ctx.memory.call(name, **arguments)` | Invoke another module in the same window/context |
+| `ctx.fragments.call(name, **arguments)` | Invoke another module in the same window/context |
 | `ctx.verify(name, boolean, evidence=...)` | Record an explicit check; stop on failure |
 | `ctx.yield_to_agent(reason)` | Stop and return control with available observation evidence |
 | `ctx.type(text)`, `ctx.press('Ctrl+S')` | Capability-gated; rejected on the current pointer-only plugin |
@@ -121,8 +121,8 @@ This deliberately conservative check can reject animated controls. It does not
 prove semantic identity or that the rest of the page is unchanged, and there
 remains a capture-to-action race. KWin also validates the actual input target.
 
-Only the newest 15 observations per window are retained. Targets referring to an
-evicted observation expire and must be defined again. Observation IDs from other
+Only the newest 15 observations per window within a run are retained. Targets
+store geometry and pixel hashes independently of their source observations. Observation IDs from other
 windows cannot be used. Captures are main-surface buffers: decorations and
 subsurfaces are excluded, and GPU buffers may be unreadable.
 
@@ -162,40 +162,28 @@ quality depends on the module author. Input dispatch alone never implies success
 Nested modules can contribute checks, and the run records exactly what they
 checked. Use an outer verification hook for the larger composition's outcome.
 
-## Versions and reuse across windows
+## Versions and reuse
 
 ```bash
-ca memory update WINDOW_ID move-to-point <<'PY'
-def run(ctx, x: float, y: float):
-    ctx.move(relative=(x, y))
-    return [x, y]
-PY
-ca memory history WINDOW_ID move-to-point
-ca memory show WINDOW_ID move-to-point --version VERSION
-ca memory run WINDOW_ID move-to-point --version VERSION --x .4 --y .5
-ca memory attach NEW_WINDOW_ID --from OLD_WINDOW_ID
-ca memory promote WINDOW_ID move-to-point --app blender
-ca memory list blender --app-scope
-ca memory attach NEW_WINDOW_ID --from-app blender --name move-to-point
-ca memory remove WINDOW_ID move-to-point
+ca fragments update move-to-point < fragment.py
+ca fragments history move-to-point
+ca fragments show move-to-point --version VERSION
+ca fragments run move-to-point --window WINDOW_ID --version VERSION --x .4 --y .5
+ca fragments remove move-to-point
 ```
 
-A window ID is a runtime identity, not a permanent application identity. Closing
-a window does not delete its memory. Attach explicitly copies modules into the
-new namespace; promotion creates an application-library copy. Neither declares
-the new window compatible, nor rewrites code for it. Copies remain `unverified`
-and preserve provenance. Preconditions still run on every invocation.
+Fragments are shared code, not owned by a window or application namespace.
+Select a live window when executing; its layout supplies named targets. Check
+layout and tool assumptions before reuse. Preconditions still run every time.
 
 `CONTRACT['window']` supports `title_contains`, `min_width`, `min_height`,
-`max_width` and `max_height`. `requires` lists backend operation names. `lane` may require `agent` or `host`;
-without it either explicitly selected lane is allowed. Modules
-can express additional preconditions directly in Python before acting.
+`max_width`, and `max_height`. `requires` lists backend operations; `lane` can
+require `agent` or `host`. Other checks can run in Python before acting.
 
-Create and attach refuse collisions. Update creates an immutable version and
-atomically switches the current revision. A run pins its top-level version;
-nested calls record the versions resolved when invoked. Remove archives the
-module under `trash/` so its history survives. Source hashes detect accidental
-changes to an immutable revision.
+Create refuses name collisions. Update creates an immutable version and switches
+the current revision atomically. Top-level runs pin their version; nested calls
+record resolved versions. Remove archives the fragment under `api-fragmants/trash/`.
+Source hashes detect changes to immutable revisions.
 
 ## Records and limits
 
@@ -222,29 +210,22 @@ network/filesystem calls and separately detached processes are not mediated by
 that API. Run records, logs and observation history follow the managed storage
 limits below. There is no model inference service hidden inside the runtime.
 
-Default storage (`CA_MEMORY_DIR` or `--memory-dir` overrides it):
+Storage separates maps, reusable code, and output:
 
 ```text
-computer-memory/
-  windows/WINDOW_ID/
-    window.json
-    move-to-point/
-      module.py -> current/module.py
-      manifest.json -> current/manifest.json
-      current -> versions/VERSION
-      versions/VERSION/{module.py,manifest.json}
-    observations/
-    targets/
-  apps/blender/
-  runs/RUN_ID/{request.json,result.json,program.log}
-  trash/
+window/layout/WINDOW_ID/{window.json,targets/}
+window/api-fragmants/NAME/
+output/DATE_RUN/{request.json,result.json,trace.json,program.log,captures/}
 ```
 
-The example `examples/memory/draw-rectangle.py` can be registered with stdin
+Use `--window-dir` / `CA_WINDOW_DIR` and `--output-dir` / `CA_OUTPUT_DIR`
+to override locations. `ctx.output` is the current run directory for artifacts.
+
+The example `examples/fragments/draw-rectangle.py` can be registered with stdin
 redirection. It assumes the correct drawing tool/canvas is already selected and
 checks only that pixels changed. Do not treat it as a verified app-specific
 rectangle workflow.
 
 Execution records are retained by the [managed storage policy](STORAGE.md):
-15 completed unpreserved runs, with a configurable size budget. Reusable module
+five unpreserved runs, counting the active new run, with a configurable size budget. Reusable module
 versions are never pruned by this policy.

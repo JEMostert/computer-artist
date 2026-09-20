@@ -10,7 +10,7 @@ python -m pip install Pillow
 ./scripts/test.sh
 ```
 
-Python tests cover the client, CLI, memory, and supervised runtime. GitHub Actions
+Python tests cover the client, CLI, fragments, and supervised runtime. GitHub Actions
 runs these checks without a compositor. For changes to input delivery, ownership,
 or the plugin, also run the isolated stock-KWin integration harness:
 
@@ -30,9 +30,9 @@ specific application. Native Wayland and XWayland are separate compatibility cas
 
 For input bugs, include KWin/Qt versions, application/backend, display scaling,
 the command or minimal program, expected behavior, and observed behavior. Share
-only the relevant, redacted trace or capture; local memory and run artifacts can
+only the relevant, redacted trace or capture; local layouts, fragments, and run artifacts can
 contain private desktop content.
 
-Build products, captures, local Computer Memory modules, and execution records
+Build products, captures, local layouts and API fragments, and execution records
 stay ignored. Documentation artwork intended for publication belongs in
 `docs/assets/`.

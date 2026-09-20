@@ -5,7 +5,7 @@ import time
 import unittest
 from PIL import Image, ImageDraw
 
-from computer_artist.memory import Memory
+from computer_artist.fragments import WindowStore
 from computer_artist.runtime import Context, Observations, Interrupted
 
 
@@ -46,7 +46,7 @@ class RuntimeTest(unittest.TestCase):
     def setUp(self):
         self.tmp=tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
-        self.memory=Memory(self.tmp.name)
+        self.memory=WindowStore(Path(self.tmp.name)/'window')
         self.backend=Backend()
         self.ctx=Context(self.backend,'w',self.memory)
 
@@ -57,9 +57,36 @@ class RuntimeTest(unittest.TestCase):
         self.assertTrue(second['changes']['pixels_changed'])
         self.assertEqual(second['region'],[10,10,10,10])
         with Image.open(second['image']) as im: self.assertEqual(im.size,(20,20))
+        self.memory.run_folder = self.memory.output/'test-run'
         self.ctx.observations.limit=2
+        # Per-run pruning is tested below; earlier standalone observations are separate runs.
+        first=self.ctx.observe()
+        self.ctx.observe()
         self.ctx.observe()
         with self.assertRaises(ValueError): self.ctx.observations.load('w',first['id'])
+
+    def test_layout_survives_output_rotation_without_storing_images(self):
+        first = self.ctx.observe()
+        self.ctx.target('button', observation=first['id'], rect=[10,10,20,20])
+        for _ in range(5): self.ctx.observe()
+        self.assertFalse(Path(first['full_image']).exists())
+        self.ctx.click(target='@button')
+        self.assertEqual(self.backend.actions, [(120,220,272)])
+        self.assertTrue((self.memory.root/'layout'/'w'/'targets'/'button.json').exists())
+        self.assertEqual(list(self.memory.root.rglob('*.png')), [])
+        self.assertEqual(len(list(self.memory.output.glob('*/.ca-run.json'))), 5)
+
+    def test_execution_observations_stay_in_one_run(self):
+        from computer_artist.storage import managed_run, inspect
+        with managed_run(self.memory.output) as folder:
+            store = WindowStore(self.memory.root, self.memory.output, folder)
+            context = Context(self.backend, 'w', store)
+            first = context.observe()
+            second = context.observe(since=first['id'])
+            self.assertEqual(context.output, folder)
+            self.assertTrue(Path(first['full_image']).is_relative_to(folder/'captures'))
+            self.assertTrue(Path(second['full_image']).is_relative_to(folder/'captures'))
+            self.assertEqual(len(inspect(store.output)['runs']), 1)
 
     def test_named_target_checks_pixels_before_input(self):
         observation=self.ctx.observe()
@@ -77,9 +104,25 @@ class RuntimeTest(unittest.TestCase):
         self.backend.window['width']=100
         with self.assertRaises(Interrupted): self.ctx.click(relative=(.5,.5))
 
+    def test_one_fragment_uses_each_live_windows_layout(self):
+        self.memory.write('select-tool', "def run(ctx): ctx.click(target='@tool')")
+        first = self.ctx.observe()
+        self.ctx.target('tool', observation=first['id'], rect=[10,10,20,20])
+        other = Backend()
+        other.window.update(id='other', x=400, y=300)
+        second_context = Context(other, 'other', self.memory)
+        second = second_context.observe()
+        second_context.target('tool', observation=second['id'], rect=[40,20,20,20])
+        self.ctx.fragments.call('select-tool')
+        second_context.fragments.call('select-tool')
+        self.assertEqual(self.backend.actions, [(120,220,272)])
+        self.assertEqual(other.actions, [(450,330,272)])
+        self.assertEqual(len(self.memory.list()), 1)
+        self.assertFalse((self.memory.root/'api-fragmants'/'windows').exists())
+
     def test_nested_modules_share_lease_and_budget_and_verify_named_checks(self):
-        self.memory.write('w','point','def run(ctx, x: float):\n    ctx.click(relative=(x, .5))\n    return x')
-        self.memory.write('w','pair','def run(ctx):\n    a=ctx.memory.call("point",x=.2)\n    b=ctx.memory.call("point",x=.8)\n    return [a,b]\ndef verify(ctx,result):\n    return {"check":"two returned coordinates", "passed":result==[.2,.8], "evidence":result}')
+        self.memory.write('point','def run(ctx, x: float):\n    ctx.click(relative=(x, .5))\n    return x')
+        self.memory.write('pair','def run(ctx):\n    a=ctx.fragments.call("point",x=.2)\n    b=ctx.fragments.call("point",x=.8)\n    return [a,b]\ndef verify(ctx,result):\n    return {"check":"two returned coordinates", "passed":result==[.2,.8], "evidence":result}')
         remaining=self.backend.budget
         self.assertEqual(self.ctx.call('pair',{}),[.2,.8])
         self.assertEqual(self.backend.acquire_count,1)
@@ -88,9 +131,9 @@ class RuntimeTest(unittest.TestCase):
         self.assertEqual(self.ctx.events[1]['status'],'returned_unverified')
 
     def test_recursive_or_unsupported_modules_do_not_dispatch(self):
-        self.memory.write('w','keyboard','CONTRACT={"requires":["focus"]}\ndef run(ctx): ctx.click(relative=(.5,.5))')
+        self.memory.write('keyboard','CONTRACT={"requires":["focus"]}\ndef run(ctx): ctx.click(relative=(.5,.5))')
         with self.assertRaises(ValueError): self.ctx.call('keyboard',{})
-        self.memory.write('w','recursive','def run(ctx): ctx.memory.call("recursive")')
+        self.memory.write('recursive','def run(ctx): ctx.fragments.call("recursive")')
         with self.assertRaises(ValueError): self.ctx.call('recursive',{})
         self.assertEqual(self.backend.actions,[])
 
@@ -111,7 +154,7 @@ class RuntimeTest(unittest.TestCase):
 
     def test_host_context_and_host_only_module_require_explicit_lane(self):
         with self.assertRaises(PermissionError): self.ctx.host.window('w')
-        self.memory.write('w','host-only','CONTRACT={"lane":"host"}\ndef run(ctx): return 1')
+        self.memory.write('host-only','CONTRACT={"lane":"host"}\ndef run(ctx): return 1')
         with self.assertRaises(PermissionError): self.ctx.call('host-only',{})
         with self.assertRaises(PermissionError): self.ctx.focus()
         self.assertEqual(self.backend.acquire_count,0)

@@ -16,7 +16,7 @@ s=json.loads(Path(sys.argv[1]).read_text())
 assert s['compositor']=='/usr/bin/kwin_wayland'
 assert '/ca-stock-' in s['wayland'] and s['wayland'].endswith('/wayland-test')
 out=Path(s['output'])
-env=dict(os.environ,CA_SOCKET=s['control'],CA_MEMORY_DIR=str(out/'lane-memory'))
+env=dict(os.environ,CA_SOCKET=s['control'],CA_WINDOW_DIR=str(out/'lane-window'),CA_OUTPUT_DIR=str(out/'lane-output'))
 report={}
 
 def human(*args):
@@ -43,7 +43,7 @@ with Client(s['control']) as observer:
     ax,ay=agent_window['x']+200,agent_window['y']+300
     hx,hy=host_window['x']+180,host_window['y']+300
     assert not observer.request('session_status')['session']
-    ca('--host','capabilities');ca('windows');ca('memory','list',hid)
+    ca('--host','capabilities');ca('windows');ca('fragments','list')
     assert not observer.request('session_status')['session']
     report['read_only_does_not_open_session']=True
     ca('--host','move','--window',hid,'--x','180','--y','300')

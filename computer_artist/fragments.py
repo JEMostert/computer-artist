@@ -15,7 +15,7 @@ import uuid
 def key(value):
     value = str(value).strip('{}')
     if not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_.-]{0,127}', value) or value in ('.', '..'):
-        raise ValueError(f'Invalid memory identifier: {value!r}')
+        raise ValueError(f'Invalid window/fragment identifier: {value!r}')
     return value
 
 
@@ -47,7 +47,7 @@ def validate_value(name, value, spec):
 
 def contract(source, description=''):
     tree = ast.parse(source)
-    compile(tree, '<memory-registration>', 'exec')
+    compile(tree, '<fragment-registration>', 'exec')
     functions = [n for n in tree.body if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and n.name == 'run']
     if len(functions) != 1 or isinstance(functions[0], ast.AsyncFunctionDef):
         raise ValueError('Define exactly one synchronous run(ctx, ...) function')
@@ -126,18 +126,20 @@ def bind(manifest, values):
     return result
 
 
-class Memory:
-    def __init__(self, root=None):
-        self.root = Path(root or os.environ.get('CA_MEMORY_DIR') or Path(__file__).resolve().parents[1] / 'computer-memory').resolve()
+class WindowStore:
+    def __init__(self, root=None, output=None, run_folder=None):
+        self.root = Path(root or os.environ.get('CA_WINDOW_DIR') or Path(__file__).resolve().parents[1] / 'window').resolve()
+        self.output = Path(output or os.environ.get('CA_OUTPUT_DIR') or self.root.parent / 'output').resolve()
+        self.run_folder = Path(run_folder) if run_folder else None
 
-    def scope(self, identity, app=False):
-        return self.root / ('apps' if app else 'windows') / key(identity)
+    def layout(self, identity):
+        return self.root / 'layout' / key(identity)
 
-    def folder(self, identity, name, app=False):
+    def folder(self, name):
         name = key(name)
-        if name in ('observations','targets','window.json'):
-            raise ValueError('That module name is reserved for window metadata')
-        return self.scope(identity, app) / name
+        if name == 'trash':
+            raise ValueError('That name is reserved for archived fragments')
+        return self.root / 'api-fragmants' / name
 
     @contextmanager
     def locked(self):
@@ -146,8 +148,8 @@ class Memory:
             fcntl.flock(lock, fcntl.LOCK_EX)
             yield
 
-    def load(self, identity, name, version=None, app=False):
-        folder = self.folder(identity, name, app)
+    def load(self, name, version=None):
+        folder = self.folder(name)
         revision = folder / 'versions' / key(version) if version else folder / 'current'
         manifest = json.loads((revision / 'manifest.json').read_text())
         # Pin source to the manifest revision even if current changes concurrently.
@@ -156,16 +158,16 @@ class Memory:
             raise ValueError('Module source differs from its recorded hash')
         return manifest, source
 
-    def write(self, identity, name, source, *, description='', update=False, origin=None, app=False):
+    def write(self, name, source, *, description='', update=False):
         info = contract(source, description)
         with self.locked():
-            folder = self.folder(identity, name, app)
+            folder = self.folder(name)
             exists = (folder / 'current').exists()
             if exists != update:
                 raise ValueError('Module already exists; use update' if exists else 'Module does not exist; use create')
             version = uuid.uuid4().hex[:16]
             manifest = dict(info, name=key(name), version=version, sha256=hashlib.sha256(source.encode()).hexdigest(),
-                            created=time.time(), origin=origin, compatibility='unverified')
+                            created=time.time(), compatibility='unverified')
             revision = folder / 'versions' / version
             revision.mkdir(parents=True)
             (revision / 'module.py').write_text(source)
@@ -178,44 +180,28 @@ class Memory:
                     (folder / filename).symlink_to('current/' + filename)
             return manifest
 
-    def list(self, identity, app=False):
-        scope = self.scope(identity, app)
+    def list(self):
+        scope = self.root / 'api-fragmants'
         if not scope.exists():
             return []
         result = []
         for path in sorted(scope.iterdir()):
             if path.is_dir() and (path / 'current').exists():
-                info, _ = self.load(identity, path.name, app=app)
+                info, _ = self.load(path.name)
                 result.append({**{k: info[k] for k in ('name', 'description', 'parameters', 'requires', 'version', 'compatibility')}, 'lane': info.get('lane','any')})
         return result
 
-    def history(self, identity, name, app=False):
-        folder = self.folder(identity, name, app) / 'versions'
+    def history(self, name):
+        folder = self.folder(name) / 'versions'
         return sorted((json.loads(p.read_text()) for p in folder.glob('*/manifest.json')), key=lambda v: v['created'])
 
-    def remove(self, identity, name, app=False):
+    def remove(self, name):
         with self.locked():
-            path = self.folder(identity, name, app)
+            path = self.folder(name)
             if not path.exists():
                 raise ValueError('Module does not exist')
-            archive = self.root / 'trash' / (key(name) + '-' + uuid.uuid4().hex)
+            archive = self.root / 'api-fragmants' / 'trash' / (key(name) + '-' + uuid.uuid4().hex)
             archive.parent.mkdir(exist_ok=True)
             path.rename(archive)
             return {'archived': str(archive)}
 
-    def attach(self, target, source, *, from_app=False, name=None):
-        entries = [self.load(source, name, app=from_app)[0]] if name else self.list(source, app=from_app)
-        # Preflight all collisions before copying any modules.
-        if any((self.folder(target, e['name']) / 'current').exists() for e in entries):
-            raise ValueError('Destination has a module with the same name; nothing copied')
-        copied = []
-        for entry in entries:
-            info, code = self.load(source, entry['name'], version=entry['version'], app=from_app)
-            copied.append(self.write(target, entry['name'], code, description=info['description'],
-                                     origin={'scope': 'apps' if from_app else 'windows', 'id': source, 'version': info['version']}))
-        return copied
-
-    def promote(self, identity, name, app):
-        info, source = self.load(identity, name)
-        return self.write(app, name, source, app=True, description=info['description'],
-                          origin={'scope': 'windows', 'id': identity, 'version': info['version']})
