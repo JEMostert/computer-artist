@@ -32,10 +32,12 @@ class ExecutionBudget:
 
 
 class Client:
-    def __init__(self, path, *, deadline=120, action_budget=20000, lane="agent", shared=None):
+    def __init__(self, path, *, deadline=120, action_budget=20000, lane="agent", shared=None, window_dir=None):
         if lane not in ("agent", "host"):
             raise ValueError("lane must be agent or host")
         self.lane, self.socket_path = lane, str(path)
+        from .fragments import WindowStore
+        self.window_store = WindowStore(window_dir)
         self.shared = shared or ExecutionBudget(deadline, action_budget)
         self.socket = socket.socket(socket.AF_UNIX)
         self.socket.settimeout(3)
@@ -134,10 +136,10 @@ class Client:
         reply = self.request('windows')
         # Explicit observation is the only operation that refreshes geometry.
         self.generation = reply['generation']
-        return reply['windows']
+        return self.window_store.display_windows(reply['windows'])
 
     def acquire(self, window_id):
-        reply = self.request('acquire', window=window_id)
+        reply = self.request('acquire', window=self.window_store.resolve_window(window_id))
         self.lease, self.generation = reply['lease'], reply['generation']
         return self.lease
 
@@ -160,7 +162,7 @@ class Client:
 
     def focus(self, window_id):
         """Focus a leased host window without moving the pointer."""
-        return self.request('focus', window=window_id)
+        return self.request('focus', window=self.window_store.resolve_window(window_id))
 
     def button(self, code=272, pressed=True):
         return self.request('button', code=code, pressed=pressed)

@@ -45,20 +45,25 @@ After [building and loading the plugin](plugin/README.md), run `./ca` from this 
 ```bash
 ca capabilities
 ca windows
-ca observe --window WINDOW_ID
+ca set WINDOW_ID --name kolourpaint
+ca observe --window kolourpaint
 
-ca click --window WINDOW_ID --x 200 --y 150
-ca scroll --window WINDOW_ID --x 200 --y 150 --delta 20
-ca capture --window WINDOW_ID /absolute/path/new-capture.png
+ca click --window kolourpaint --x 200 --y 150
+ca scroll --window kolourpaint --x 200 --y 150 --delta 20
+ca capture --window kolourpaint /absolute/path/new-capture.png
 
-ca --host paste --window WINDOW_ID 'Hello café 😀'
-ca --host key --window WINDOW_ID Ctrl+S
+ca --host paste --window kolourpaint 'Hello café 😀'
+ca --host key --window kolourpaint Ctrl+S
 ca --host clipboard get
 
 ca session close
 ```
 
 Keep your pointer and keyboard focus outside the target application's connection before agent input. Capture paths must be new. Read-only commands do not open sessions; there is no `session open` step.
+`ca set` saves a short name for the exact open window ID. `ca windows` shows the
+name beside its ID. Names work in later commands and program window contexts;
+layouts and new captures use the name as their folder. Reassign the name if the
+application opens with a new ID.
 
 ### Teach your agent to use CA
 

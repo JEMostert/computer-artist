@@ -23,6 +23,7 @@ class CLITest(unittest.TestCase):
         self.reject_focus = False
         self.old_plugin = False
         self.acquire_reply_delay = 0
+        self.window_ids = ['target']
         test = self
 
         class Handler(socketserver.StreamRequestHandler):
@@ -44,8 +45,9 @@ class CLITest(unittest.TestCase):
                     self.lease = lease
                     reply = {'ok': True, 'lease': lease, 'generation': 2, 'keyboard_ready': True}
                     if op == 'windows':
-                        reply['windows'] = [{'id': 'target', 'native': True, 'visible': True,
-                                             'x': 100, 'y': 200, 'width': 300, 'height': 400}]
+                        reply['windows'] = [{'id': identity, 'native': True, 'visible': True,
+                                             'x': 100, 'y': 200, 'width': 300, 'height': 400}
+                                            for identity in test.window_ids]
                     if op == 'capabilities':
                         reply['operations'] = ['focus','key','clipboard_get','clipboard_set']
                         if not test.old_plugin:
@@ -69,7 +71,8 @@ class CLITest(unittest.TestCase):
         self.server = socketserver.ThreadingUnixStreamServer(str(self.path/'control'), Handler)
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
         self.thread.start()
-        self.env = dict(os.environ, CA_SOCKET=str(self.path/'control'))
+        self.env = dict(os.environ, CA_SOCKET=str(self.path/'control'),
+                        CA_WINDOW_DIR=str(self.path/'window'), CA_OUTPUT_DIR=str(self.path/'output'))
 
     def tearDown(self):
         self.server.shutdown()
@@ -150,6 +153,41 @@ class CLITest(unittest.TestCase):
         self.assertEqual(self.events,[])
         self.assertEqual(self.ca('focus','--window','target').returncode,1)
         self.assertFalse(any(e['op']=='acquire' for e in self.events))
+
+    def test_set_name_resolves_actions_and_renames_existing_layout(self):
+        old = self.path/'window'/'layout'/'target'
+        old.mkdir(parents=True)
+        (old/'window.json').write_text('{"id":"target"}')
+        result = self.ca('set', 'target', '--name', 'kolourpaint')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout)['window'], 'target')
+        self.assertTrue((self.path/'window'/'layout'/'kolourpaint'/'window.json').exists())
+        self.assertFalse(old.exists())
+        listed = json.loads(self.ca('windows').stdout)['windows']
+        self.assertEqual(listed[0]['name'], 'kolourpaint')
+        self.events.clear()
+        self.assertEqual(self.ca('click', '--window', 'kolourpaint', '--x', '20', '--y', '30').returncode, 0)
+        self.assertEqual(next(e['window'] for e in self.events if e['op']=='acquire'), 'target')
+        self.assertEqual(self.ca('set','target','--name','paint').returncode, 0)
+        self.assertTrue((self.path/'window'/'layout'/'paint'/'window.json').exists())
+        self.assertFalse((self.path/'window'/'layout'/'kolourpaint').exists())
+
+    def test_live_name_collision_and_stale_name_rebinding(self):
+        self.window_ids = ['target', 'other']
+        self.assertEqual(self.ca('set','target','--name','paint').returncode, 0)
+        collision = self.ca('set','other','--name','paint')
+        self.assertEqual(collision.returncode, 1)
+        self.assertIn('already belongs', collision.stderr)
+        self.assertEqual(self.ca('set','other','--name','../unsafe').returncode, 1)
+        self.assertEqual(self.ca('click','--window','paint','--x','1','--y','1').returncode, 0)
+        self.window_ids = ['other']
+        self.events.clear()
+        self.assertEqual(self.ca('click','--window','paint','--x','1','--y','1').returncode, 1)
+        self.assertFalse(any(e['op']=='acquire' for e in self.events))
+        self.assertEqual(self.ca('set','other','--name','paint').returncode, 0)
+        self.events.clear()
+        self.assertEqual(self.ca('click','--window','paint','--x','1','--y','1').returncode, 0)
+        self.assertEqual(next(e['window'] for e in self.events if e['op']=='acquire'), 'other')
 
     def test_host_old_plugin_is_rejected_before_input(self):
         self.old_plugin=True

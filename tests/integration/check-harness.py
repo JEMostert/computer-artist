@@ -23,8 +23,21 @@ def ca(*args,source=None,success=True):
 def release_count():
     return sum(json.loads(line)['event']=='release' for line in (out/'agent-events.jsonl').read_text().splitlines())
 
-identity=next(w['id'] for w in ca('windows')['windows'] if w['title']=='Agent canvas')
+window_id=next(w['id'] for w in ca('windows')['windows'] if w['title']=='Agent canvas')
+identity='agent-canvas'
 report={}
+before_name=ca('observe','--window',window_id)['observation']
+ca('target',window_id,'blank','--observation',before_name['id'],'--rect','40','40','30','30')
+named=ca('set',window_id,'--name',identity)
+assert named['window']==window_id
+assert (out/'window'/'layout'/identity/'targets'/'blank.json').is_file()
+assert not (out/'window'/'layout'/window_id).exists()
+assert next(w['name'] for w in ca('windows')['windows'] if w['id']==window_id)==identity
+after_name=ca('observe','--window',identity,'--since',before_name['id'])['observation']
+assert after_name['window']['id']==window_id
+assert identity in Path(after_name['full_image']).parts
+assert ca('capture','--window',identity,str(out/'named-capture.png'))['ok']
+report['named_window_resolves_observation_and_legacy_capture']=True
 source='''CONTRACT = {"requires": ["move", "button", "capture"], "parameters": {"y": {"min": 0.1, "max": 0.9, "unit": "fraction"}}}
 def run(ctx, y: float):
     before = ctx.observe()
@@ -70,7 +83,7 @@ try:
     ca('target',identity,'blank','--observation',observed['id'],'--rect','40','40','30','30')
     inline=ca('execute','--window',identity,source='def run(ctx):\n    ctx.move(target="@blank")\n    return ctx.window["id"]')
     assert inline['status']=='returned_unverified'
-    assert inline['result']==identity
+    assert inline['result']==window_id
     report['named_target_and_inline_execution']=True
     feedback=ca('execute','--window',identity,source='def run(ctx):\n    return ctx.path([(0.3,.65),(0.4,.65),(0.5,.65)],relative=True,until=lambda observation: True,observe_every=1)')
     assert feedback['result']['status']=='condition_observed'
@@ -92,6 +105,6 @@ try:
     report['shared_fragment_version_history']=True
 finally:
     ca('session','close')
-report.update(passed=True,compositor='/usr/bin/kwin_wayland',window=identity)
+report.update(passed=True,compositor='/usr/bin/kwin_wayland',window=window_id,name=identity)
 (out/'harness-regression.json').write_text(json.dumps(report,indent=2)+'\n')
 print(json.dumps(report,indent=2))

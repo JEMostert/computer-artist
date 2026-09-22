@@ -42,17 +42,22 @@ class Observations:
         self.store, self.client = store, client
 
     def directory(self, window):
-        return self.store.run_folder / 'captures' / key(window)
+        return self.store.run_folder / 'captures' / self.store.label(window)
 
     def load(self, window, identity):
         try:
-            paths = list(self.store.output.glob('*/captures/' + key(window) + '/' + key(identity) + '.json'))
-            if not paths: raise FileNotFoundError(identity)
-            return json.loads(paths[0].read_text())
+            window_id = self.store.resolve_window(window)
+            for label in dict.fromkeys((self.store.label(window), window_id)):
+                for path in self.store.output.glob('*/captures/' + label + '/' + key(identity) + '.json'):
+                    record = json.loads(path.read_text())
+                    if record['window']['id'] == window_id:
+                        return record
+            raise FileNotFoundError(identity)
         except FileNotFoundError:
             raise ValueError('Observation expired or belongs to another window; observe again') from None
 
     def capture(self, identity, *, since=None, region=None):
+        identity = self.store.resolve_window(identity)
         if self.store.run_folder is None:
             from .storage import managed_run
             with managed_run(self.store.output) as folder:
@@ -176,9 +181,9 @@ class ModuleCalls:
 
 class Context:
     def __init__(self, client, window, store=None, *, execution=None):
-        self.client, self.window_id = client, key(window)
-        self.lane = getattr(client, "lane", "agent")
         self.store = store or WindowStore()
+        self.client, self.window_id = client, self.store.resolve_window(window)
+        self.lane = getattr(client, "lane", "agent")
         self.output = self.store.run_folder
         self.observations = Observations(self.store, client)
         self.fragments = ModuleCalls(self)

@@ -16,6 +16,7 @@ No such Blender workflow has been validated by this change.
 
 ```bash
 ca windows
+ca set WINDOW_ID --name kolourpaint
 ca fragments create move-to-point --description "Position the agent pointer" <<'PY'
 CONTRACT = {
     'requires': ['move'],
@@ -43,7 +44,12 @@ annotations. Defaults must be literal values. CLI booleans use `true` or `false`
 Unknown parameters and invalid values are rejected before execution. Parameters
 that share names with CLI options (such as `deadline`) can be passed in `--args`.
 
-Registration works offline in a shared fragment library. Execution selects a
+Registration works offline in a shared fragment library. Use `ca set ID --name NAME`
+to bind a short name to an exact live window. Names work in `--window`, `ca target`,
+`ca runs list --window`, and `ctx.agent.window()` / `ctx.host.window()`.
+`ca windows` reports both name and ID. A stale name fails when its window closes;
+assign it to the new ID to reuse it. Names are safe folder names using letters,
+digits, `_`, `-`, or `.`. Execution selects a
 live window with `--window` and checks that it
 is native Wayland and visible. The human pointer and keyboard focus must be
 outside the application before the first input action.
@@ -216,7 +222,8 @@ limits below. There is no model inference service hidden inside the runtime.
 Storage separates maps, reusable code, and output:
 
 ```text
-window/layout/WINDOW_ID/{window.json,targets/}
+window/names.json
+window/layout/NAME/{window.json,targets/}
 window/api-fragmants/NAME/
 output/DATE_RUN/{request.json,result.json,trace.json,program.log,captures/}
 ```

@@ -16,12 +16,12 @@ class Execution:
     def window(self, lane, identity):
         if lane == 'host' and not self.allow_host:
             raise PermissionError('Host input requires invoking this program with --host')
-        identity = identity.strip('{}')
+        identity = self.root.store.resolve_window(identity.strip('{}'))
         with self.lock:
             if (lane, identity) not in self.contexts:
                 from .runtime import Context
                 parent = self.root.client
-                client = Client(parent.socket_path, lane=lane, shared=parent.shared)
+                client = Client(parent.socket_path, lane=lane, shared=parent.shared, window_dir=self.root.store.root)
                 try:
                     context = Context(client, identity, self.root.store, execution=self)
                 except BaseException:

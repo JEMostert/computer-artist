@@ -68,6 +68,9 @@ def parser():
                             ('stop', 'Revoke the current agent lease and return its app'),
                             ('takeover', 'Alias for stop')]:
         commands.add_parser(name, parents=[shared], help=help_text)
+    name_window = commands.add_parser('set', parents=[shared], help='Give an open window a short reusable name')
+    name_window.add_argument('window', help='Exact live window ID from ca windows')
+    name_window.add_argument('--name', required=True, help='Name, such as kolourpaint')
     session = commands.add_parser('session', parents=[shared], help='Inspect or close the automatically opened cursor session')
     session.add_argument('action', choices=('status', 'close'))
     clipboard = commands.add_parser('clipboard', parents=[shared], help='Read or write the shared host text clipboard')
@@ -75,7 +78,7 @@ def parser():
     clipboard.add_argument('text', nargs='?', help='Text to set; omit to read stdin')
     for name in ('click', 'move', 'type', 'paste', 'key', 'scroll', 'focus'):
         command = commands.add_parser(name, parents=[shared], help=f'{name.capitalize()} in an explicitly selected window')
-        command.add_argument('--window', required=True, help='Exact ID from ca windows')
+        command.add_argument('--window', required=True, help='Window ID or saved name')
         if name in ('click', 'move', 'scroll'):
             command.add_argument('--x', required=True, type=finite_number, help='Logical pixels from the left of the window content')
             command.add_argument('--y', required=True, type=finite_number, help='Logical pixels from the top of the window content')
@@ -94,7 +97,7 @@ def parser():
     run = commands.add_parser('run', parents=[shared], help='Run a Python file defining main(client)')
     run.add_argument('program')
     capture = commands.add_parser('capture', parents=[shared], help='Capture a window with a backend that supports capture')
-    capture.add_argument('--window', required=True)
+    capture.add_argument('--window', required=True, help='Window ID or saved name')
     capture.add_argument('output', help='New PNG file; existing files are not overwritten')
     from .harness import add_commands
     add_commands(commands, shared)
@@ -113,6 +116,7 @@ def socket_path(explicit):
 
 
 def find_window(client, identity):
+    identity = client.window_store.resolve_window(identity)
     window = next((w for w in client.windows() if w['id'] == identity), None)
     if window is None:
         raise ValueError(f'Window {identity!r} was not found; run ca windows')
@@ -132,16 +136,21 @@ def execute(client, args):
         return client.request('session_' + args.action)
     if args.command in ('windows', 'capabilities', 'stop', 'takeover'):
         reply = client.request('takeover' if args.command in ('stop', 'takeover') else args.command)
+        if args.command == 'windows':
+            reply['windows'] = client.window_store.display_windows(reply['windows'])
         if args.command == 'capabilities':
             reply['harness'] = {'fragments': True, 'typed_parameters': ['int','float','str','bool'],
                 'observations': True, 'image_diffs': True, 'guarded_regions': True,
                 'conditional_programs': True, 'hard_deadlines': True, 'version_history': True,
                 'accessibility': False, 'automatic_control_detection': False}
         return reply
+    if args.command == 'set':
+        from .fragments import WindowStore
+        return {'ok': True, **WindowStore(args.window_dir, args.output_dir).assign(args.window.strip('{}'), args.name, client.windows())}
     if args.command == 'capture':
         if 'capture' not in client.request('capabilities').get('operations', []):
             raise ValueError('This backend does not support window capture')
-        return client.request('capture', window=args.window.strip('{}'), path=str(Path(args.output).resolve()))
+        return client.request('capture', window=client.window_store.resolve_window(args.window.strip('{}')), path=str(Path(args.output).resolve()))
     if args.command == 'run':
         with redirect_stdout(sys.stderr):
             program = runpy.run_path(args.program)
@@ -158,7 +167,7 @@ def execute(client, args):
             return {'ok':True, 'text':client.clipboard_get(), 'lane':'host'}
         text = args.text if args.text is not None else sys.stdin.read(8193)
         return client.clipboard_set(text)
-    identity = args.window.strip('{}')
+    identity = client.window_store.resolve_window(args.window.strip('{}'))
     find_window(client, identity)
     if args.command in ('focus','type','paste','key') and client.lane != 'host':
         raise ValueError('Desktop focus, keyboard and paste require explicit --host')
@@ -225,7 +234,7 @@ def main(argv=None):
             Client.validate_text(args.text)
         path = socket_path(args.socket)
         try:
-            client = Client(path, deadline=args.deadline, lane=args.lane)
+            client = Client(path, deadline=args.deadline, lane=args.lane, window_dir=args.window_dir)
         except OSError as error:
             raise ConnectionError(f'Cannot connect to the agent compositor at {path}: {error.strerror}. Set CA_SOCKET or use --socket for your test session.') from None
         try:

@@ -2,7 +2,8 @@
 
 ```text
 window/
-  layout/WINDOW_ID/
+  names.json
+  layout/NAME/
     window.json
     targets/NAME.json
   api-fragmants/
@@ -18,10 +19,16 @@ output/
     result.json
     trace.json
     program.log
-    captures/WINDOW_ID/
+    captures/NAME/
 ```
 
 `window/layout` stores geometry and named regions with pixel hashes.
+`ca set WINDOW_ID --name NAME` records an exact live window ID in `names.json`.
+Commands accept either the ID or name. Named windows use `NAME` for their layout
+folder and new capture folders; unnamed windows use their ID. Naming a window
+moves its existing layout folder. Older captures stay in their original folders
+and remain available to `--since` while retained. Rebind the name when the app
+reopens with a new ID.
 `window/api-fragmants` stores reusable Python code and its versions. Neither is
 an image archive or task journal. Layout targets retain their own geometry/hash,
 so pruning their source screenshot does not erase the map. Using a target still

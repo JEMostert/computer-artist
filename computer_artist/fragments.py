@@ -133,7 +133,54 @@ class WindowStore:
         self.run_folder = Path(run_folder) if run_folder else None
 
     def layout(self, identity):
-        return self.root / 'layout' / key(identity)
+        return self.root / 'layout' / self.label(identity)
+
+    def names(self):
+        path = self.root / 'names.json'
+        if not path.exists():
+            return {}
+        names = json.loads(path.read_text())
+        if not isinstance(names, dict) or any(key(name) != name or key(identity) != identity
+                                                for name, identity in names.items()):
+            raise ValueError('Invalid window name registry')
+        return names
+
+    def resolve_window(self, identity):
+        identity = key(identity)
+        return self.names().get(identity, identity)
+
+    def label(self, identity):
+        identity = self.resolve_window(identity)
+        return next((name for name, target in self.names().items() if target == identity), identity)
+
+    def display_windows(self, windows):
+        aliases = {identity: name for name, identity in self.names().items()}
+        return [{**window, **({'name': aliases[window['id']]} if window['id'] in aliases else {})}
+                for window in windows]
+
+    def assign(self, identity, name, windows):
+        identity, name = key(identity), key(name)
+        if not any(window['id'] == identity for window in windows):
+            raise ValueError(f'Window {identity!r} is not open; run ca windows')
+        if any(window['id'] == name for window in windows):
+            raise ValueError('A window name cannot be a live window ID')
+        with self.locked():
+            names = self.names()
+            old = next((label for label, target in names.items() if target == identity), None)
+            current = names.get(name)
+            if current and current != identity and any(window['id'] == current for window in windows):
+                raise ValueError(f'Name {name!r} already belongs to an open window')
+            source = self.root / 'layout' / (old or identity)
+            destination = self.root / 'layout' / name
+            if source != destination and source.exists() and destination.exists():
+                raise ValueError(f'Both {source} and {destination} exist; move or archive one before naming')
+            if source != destination and source.exists():
+                source.rename(destination)
+            if old and old != name:
+                names.pop(old)
+            names[name] = identity
+            atomic_json(self.root / 'names.json', names)
+        return {'name': name, 'window': identity, 'layout': str(destination)}
 
     def folder(self, name):
         name = key(name)
@@ -204,4 +251,3 @@ class WindowStore:
             archive.parent.mkdir(exist_ok=True)
             path.rename(archive)
             return {'archived': str(archive)}
-

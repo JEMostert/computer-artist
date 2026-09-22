@@ -14,8 +14,9 @@ follow automatically. Keep the checkout in place; reload skills or start a new
 agent session after updates. For older hosts, use `--skills-dir ~/.codex/skills`
 instead of `--codex`.
 
-1. Run `ca capabilities`, `ca windows`, and `ca observe --window ID`. Open the image.
-2. Inspect `window/layout/ID/`. Before task input, map the controls and work area
+1. Run `ca capabilities` and `ca windows`. Use `ca set ID --name APP` once for an
+   open window, then `ca observe --window APP`. Rebind after the app reopens. Open the image.
+2. Inspect `window/layout/APP/`. Before task input, map the controls and work area
    needed now. Recheck existing entries against the live window; don't map the
    entire app. Raw UI coordinates are for creating or repairing maps.
 3. Check `ca fragments list`. Reuse or register small parameterized fragments in
@@ -28,7 +29,7 @@ instead of `--codex`.
 6. Inspect the result; verify requested saves from the file. Close with
    `ca session close`. A dispatched action is not verified completion.
 
-Map stable controls with `ca target ID NAME --observation OBS --rect X Y W H`;
+Map stable controls with `ca target APP NAME --observation OBS --rect X Y W H`;
 use `ctx.click(target='@NAME')`. Selection highlights may need separately mapped
 states. Map changing canvases by geometry; use canvas-relative drawing coordinates,
 not an exact pixel guard on artwork. See [workflow](references/programs.md).

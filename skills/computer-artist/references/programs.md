@@ -2,12 +2,13 @@
 
 ## 1. Map what the task needs
 
-Find a live ID, observe it, and open the image. Inspect `window/layout/ID/`.
+Find a live ID, name it, observe it, and open the image. Inspect `window/layout/APP/`.
 Convert screenshot pixels to logical content coordinates before defining regions.
 
 ```bash
-ca observe --window ID
-ca target ID polygon --observation OBS --rect X Y W H
+ca set ID --name APP
+ca observe --window APP
+ca target APP polygon --observation OBS --rect X Y W H
 ```
 
 Map tools, modes, and palette entries needed now. Use meaningful names. A selected
@@ -15,7 +16,7 @@ button can look different: record idle/selected variants from observed states;
 accept only those states, not arbitrary mismatches. Bootstrap coordinates belong
 in mapping code, never copied into reusable actions.
 
-For changing work areas, record geometry separately in `window/layout/ID/areas.json`:
+For changing work areas, record geometry separately in `window/layout/APP/areas.json`:
 
 ```json
 {"canvas": {"geometry": [100, 200, 800, 600], "rect": [50, 40, 700, 500]}}
@@ -56,14 +57,14 @@ Use typed parameters (`int`, `float`, `str`, `bool`) and literal defaults.
 For nested calls, avoid fragment parameters named `name` or `lane`: the call
 wrapper reserves them. `CONTRACT` may declare `requires`, `lane`, `window`, and parameter bounds.
 Create parses without executing. Update with `ca fragments update NAME < code.py`;
-inspect with `show`/`history`. Fragments are shared; choose `--window ID` only at run
+inspect with `show`/`history`. Fragments are shared; choose `--window APP` only at run
 time. Check their layout assumptions on each new window.
 
 ## 3. Execute and inspect
 
 ```bash
-ca fragments run select-polygon --window ID
-ca execute --window ID --deadline 15 --budget 1000 <<'PY'
+ca fragments run select-polygon --window APP
+ca execute --window APP --deadline 15 --budget 1000 <<'PY'
 def run(ctx):
     ctx.fragments.call('select-polygon')
     # Compose mapped fragments for the first intended shape, then inspect.

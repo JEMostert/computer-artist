@@ -15,7 +15,7 @@ def main(folder):
     spec = json.loads((folder/'request.json').read_text())
     result = {'ok': False, 'status': 'failed'}
     ctx = None
-    with Client(spec['socket'],deadline=spec['deadline'],action_budget=spec['budget'],lane=spec.get('lane','agent')) as client:
+    with Client(spec['socket'],deadline=spec['deadline'],action_budget=spec['budget'],lane=spec.get('lane','agent'),window_dir=spec['window_root']) as client:
         try:
             ctx = Context(client,spec['window'],WindowStore(spec['window_root'], spec['output_root'], folder))
             with redirect_stdout(sys.stderr):

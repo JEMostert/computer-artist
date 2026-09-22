@@ -18,7 +18,8 @@ loaded on the desktop; host deployment was checked through capabilities only.
 See [recorded validation](VALIDATION.md) for the exact verification scope.
 
 Implemented in the CLI harness: typed, versioned modular Python fragments; stdin
-registration; nested calls; a shared fragment library;
+registration; persistent names for exact live window IDs and named layout/capture
+folders; nested calls; a shared fragment library;
 supervised deadlines; observations and pixel diffs; agent-defined guarded regions;
 condition-based waits and feedback-controlled paths; named outcome checks and
 execution records. See [the programming API](WINDOW-API.md).

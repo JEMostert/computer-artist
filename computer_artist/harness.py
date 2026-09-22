@@ -97,7 +97,7 @@ def local_command(args, extra):
         for path in sorted((store.output).glob('*/result.json'), key=lambda p:p.stat().st_mtime, reverse=True):
             if not (path.parent/'request.json').exists(): continue
             request = json.loads((path.parent/'request.json').read_text())
-            if args.window and request['window'] != args.window.strip('{}'): continue
+            if args.window and request['window'] != store.resolve_window(args.window.strip('{}')): continue
             record = json.loads(path.read_text())
             entries.append({'id':path.parent.name,'window':request['window'],'module':request.get('module'),
                             'version':request.get('version'),'status':record['status'],'duration':record.get('duration')})
@@ -124,7 +124,7 @@ def local_command(args, extra):
 
 def run_worker(args, extra, socket_path):
     store = WindowStore(args.window_dir, args.output_dir)
-    spec = {'socket': socket_path, 'window': args.window.strip('{}'), 'window_root': str(store.root), 'output_root': str(store.output),
+    spec = {'socket': socket_path, 'window': store.resolve_window(args.window.strip('{}')), 'window_root': str(store.root), 'output_root': str(store.output),
             'deadline': args.deadline, 'budget': args.budget, 'lane': args.lane}
     if args.budget <= 0:
         raise ValueError('budget must be positive')
