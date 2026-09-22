@@ -33,8 +33,8 @@ PY
 
 ca fragments list
 ca fragments inspect move-to-point
-ca fragments run move-to-point --window WINDOW_ID --x .5 --y .4
-ca fragments run move-to-point --window WINDOW_ID --args '{"x":0.7,"y":0.6}'
+ca fragments run move-to-point --window kolourpaint --x .5 --y .4
+ca fragments run move-to-point --window kolourpaint --args '{"x":0.7,"y":0.6}'
 ca session close
 ```
 
@@ -47,11 +47,13 @@ that share names with CLI options (such as `deadline`) can be passed in `--args`
 Registration works offline in a shared fragment library. Use `ca set ID --name NAME`
 to bind a short name to an exact live window. Names work in `--window`, `ca target`,
 `ca runs list --window`, and `ctx.agent.window()` / `ctx.host.window()`.
-`ca windows` reports both name and ID. A stale name fails when its window closes;
-assign it to the new ID to reuse it. Names are safe folder names using letters,
-digits, `_`, `-`, or `.`. Execution selects a
-live window with `--window` and checks that it
-is native Wayland and visible. The human pointer and keyboard focus must be
+`ca windows` reports both name and ID. A stale name fails when its window closes.
+Rebind with an exact ID or `ca set --name NAME --title TEXT`, which requires one
+case-insensitive title match. The result reports the old binding and whether the
+existing layout needs revalidation. Observe the new window and check mapped
+controls and work areas before using that layout. Names are safe folder names
+using letters, digits, `_`, `-`, or `.`. Execution selects a live window with
+`--window` and checks that it is native Wayland and visible. The human pointer and keyboard focus must be
 outside the application before the first input action.
 
 Input acquisition opens a cursor session automatically. Modules reuse it, acquire an app
@@ -66,7 +68,7 @@ lane-aware module calls. No module silently escalates to host control.
 ## Compose modules and write conditional programs
 
 ```bash
-ca execute --window WINDOW_ID --deadline 8 --budget 300 <<'PY'
+ca execute --window kolourpaint --deadline 8 --budget 300 <<'PY'
 def run(ctx):
     ctx.fragments.call('move-to-point', x=.3, y=.4)
     ctx.sleep(.2)
@@ -111,10 +113,10 @@ These checks do not provide a universal modal-dialog detector.
 ## Observe and reference
 
 ```bash
-ca observe --window WINDOW_ID
-ca observe --window WINDOW_ID --since OBSERVATION_ID
-ca observe --window WINDOW_ID --region 20 40 300 200
-ca target WINDOW_ID add-button --observation OBSERVATION_ID --rect 20 40 80 30
+ca observe --window kolourpaint
+ca observe --window kolourpaint --since OBSERVATION_ID
+ca observe --window kolourpaint --region 20 40 300 200
+ca target kolourpaint add-button --observation OBSERVATION_ID --rect 20 40 80 30
 ```
 
 Observations include a PNG path, full image path, image dimensions, logical
@@ -177,7 +179,7 @@ checked. Use an outer verification hook for the larger composition's outcome.
 ca fragments update move-to-point < fragment.py
 ca fragments history move-to-point
 ca fragments show move-to-point --version VERSION
-ca fragments run move-to-point --window WINDOW_ID --version VERSION --x .4 --y .5
+ca fragments run move-to-point --window kolourpaint --version VERSION --x .4 --y .5
 ca fragments remove move-to-point
 ```
 
@@ -197,7 +199,7 @@ Source hashes detect changes to immutable revisions.
 ## Records and limits
 
 ```bash
-ca runs list --window WINDOW_ID
+ca runs list --window kolourpaint
 ca runs show RUN_ID
 ```
 

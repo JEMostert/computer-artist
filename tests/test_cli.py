@@ -24,6 +24,7 @@ class CLITest(unittest.TestCase):
         self.old_plugin = False
         self.acquire_reply_delay = 0
         self.window_ids = ['target']
+        self.window_titles = {'target': 'Untitled — KolourPaint'}
         test = self
 
         class Handler(socketserver.StreamRequestHandler):
@@ -45,7 +46,8 @@ class CLITest(unittest.TestCase):
                     self.lease = lease
                     reply = {'ok': True, 'lease': lease, 'generation': 2, 'keyboard_ready': True}
                     if op == 'windows':
-                        reply['windows'] = [{'id': identity, 'native': True, 'visible': True,
+                        reply['windows'] = [{'id': identity, 'title': test.window_titles.get(identity, identity),
+                                             'native': True, 'visible': True,
                                              'x': 100, 'y': 200, 'width': 300, 'height': 400}
                                             for identity in test.window_ids]
                     if op == 'capabilities':
@@ -175,6 +177,8 @@ class CLITest(unittest.TestCase):
     def test_live_name_collision_and_stale_name_rebinding(self):
         self.window_ids = ['target', 'other']
         self.assertEqual(self.ca('set','target','--name','paint').returncode, 0)
+        (self.path/'window'/'layout'/'paint').mkdir(parents=True)
+        (self.path/'window'/'layout'/'paint'/'window.json').write_text(json.dumps({'title':'Untitled — KolourPaint'}))
         collision = self.ca('set','other','--name','paint')
         self.assertEqual(collision.returncode, 1)
         self.assertIn('already belongs', collision.stderr)
@@ -184,10 +188,28 @@ class CLITest(unittest.TestCase):
         self.events.clear()
         self.assertEqual(self.ca('click','--window','paint','--x','1','--y','1').returncode, 1)
         self.assertFalse(any(e['op']=='acquire' for e in self.events))
-        self.assertEqual(self.ca('set','other','--name','paint').returncode, 0)
+        rebound = self.ca('set','--name','paint','--title','other')
+        self.assertEqual(rebound.returncode, 0, rebound.stderr)
+        binding = json.loads(rebound.stdout)
+        self.assertEqual(binding['previous_window'], 'target')
+        self.assertTrue(binding['layout_revalidation_required'])
+        self.assertEqual(binding['previous_layout_title'], 'Untitled — KolourPaint')
         self.events.clear()
         self.assertEqual(self.ca('click','--window','paint','--x','1','--y','1').returncode, 0)
         self.assertEqual(next(e['window'] for e in self.events if e['op']=='acquire'), 'other')
+
+    def test_title_match_must_be_unique(self):
+        self.window_ids = ['target', 'other']
+        self.window_titles['other'] = 'Another KolourPaint'
+        result = self.ca('set','--name','paint','--title','KolourPaint')
+        self.assertEqual(result.returncode, 1)
+        self.assertIn('matched 2 windows', result.stderr)
+        self.assertFalse((self.path/'window'/'names.json').exists())
+        self.assertEqual(self.ca('set','--name','paint','--title','missing').returncode, 1)
+        self.assertEqual(self.ca('set','target','--name','paint','--title','Untitled').returncode, 1)
+        chosen = self.ca('set','--name','paint','--title','Untitled')
+        self.assertEqual(chosen.returncode, 0, chosen.stderr)
+        self.assertEqual(json.loads(chosen.stdout)['window'], 'target')
 
     def test_host_old_plugin_is_rejected_before_input(self):
         self.old_plugin=True

@@ -28,8 +28,9 @@ identity='agent-canvas'
 report={}
 before_name=ca('observe','--window',window_id)['observation']
 ca('target',window_id,'blank','--observation',before_name['id'],'--rect','40','40','30','30')
-named=ca('set',window_id,'--name',identity)
+named=ca('set','--name',identity,'--title','Agent canvas')
 assert named['window']==window_id
+assert named['title']=='Agent canvas'
 assert (out/'window'/'layout'/identity/'targets'/'blank.json').is_file()
 assert not (out/'window'/'layout'/window_id).exists()
 assert next(w['name'] for w in ca('windows')['windows'] if w['id']==window_id)==identity

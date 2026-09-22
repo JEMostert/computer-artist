@@ -64,6 +64,10 @@ Keep your pointer and keyboard focus outside the target application's connection
 name beside its ID. Names work in later commands and program window contexts;
 layouts and new captures use the name as their folder. Reassign the name if the
 application opens with a new ID.
+If its title uniquely identifies it, rebind with
+`ca set --name kolourpaint --title KolourPaint`. The result shows the previous
+window and whether an existing layout needs revalidation. Observe the new window
+and check its mapped controls and work area before using that layout.
 
 ### Teach your agent to use CA
 
@@ -92,7 +96,7 @@ explicit host input. Setup works offline and does not install or restart KWin.
 On a drawing canvas with a drawing tool selected, send a continuous stroke as one bounded Python program:
 
 ```bash
-ca execute --window WINDOW_ID --deadline 15 --budget 1000 <<'PY'
+ca execute --window kolourpaint --deadline 15 --budget 1000 <<'PY'
 import math
 
 def run(ctx):
@@ -124,7 +128,7 @@ def run(ctx, x1: float, y1: float, x2: float, y2: float):
 PY
 
 ca fragments list
-ca fragments run stroke --window WINDOW_ID --x1 160 --y1 180 --x2 360 --y2 260
+ca fragments run stroke --window kolourpaint --x1 160 --y1 180 --x2 360 --y2 260
 ca session close
 ```
 

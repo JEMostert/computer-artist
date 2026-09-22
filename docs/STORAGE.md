@@ -29,6 +29,11 @@ folder and new capture folders; unnamed windows use their ID. Naming a window
 moves its existing layout folder. Older captures stay in their original folders
 and remain available to `--since` while retained. Rebind the name when the app
 reopens with a new ID.
+
+`ca set --name NAME --title TEXT` selects a window only when its title match is
+unique. A rebind reports whether an existing layout needs revalidation; observe
+the new window and check saved controls and work areas before using them.
+
 `window/api-fragmants` stores reusable Python code and its versions. Neither is
 an image archive or task journal. Layout targets retain their own geometry/hash,
 so pruning their source screenshot does not erase the map. Using a target still

@@ -69,8 +69,9 @@ def parser():
                             ('takeover', 'Alias for stop')]:
         commands.add_parser(name, parents=[shared], help=help_text)
     name_window = commands.add_parser('set', parents=[shared], help='Give an open window a short reusable name')
-    name_window.add_argument('window', help='Exact live window ID from ca windows')
+    name_window.add_argument('window', nargs='?', help='Exact live window ID from ca windows')
     name_window.add_argument('--name', required=True, help='Name, such as kolourpaint')
+    name_window.add_argument('--title', help='Select one open window whose title contains this text (case insensitive)')
     session = commands.add_parser('session', parents=[shared], help='Inspect or close the automatically opened cursor session')
     session.add_argument('action', choices=('status', 'close'))
     clipboard = commands.add_parser('clipboard', parents=[shared], help='Read or write the shared host text clipboard')
@@ -146,7 +147,18 @@ def execute(client, args):
         return reply
     if args.command == 'set':
         from .fragments import WindowStore
-        return {'ok': True, **WindowStore(args.window_dir, args.output_dir).assign(args.window.strip('{}'), args.name, client.windows())}
+        windows = client.windows()
+        if bool(args.window) == bool(args.title):
+            raise ValueError('Provide exactly one window ID or --title')
+        if args.title:
+            matches = [w for w in windows if args.title.casefold() in w.get('title', '').casefold()]
+            if len(matches) != 1:
+                choices = [{'id': w['id'], 'title': w.get('title', '')} for w in matches]
+                raise ValueError(f'--title matched {len(matches)} windows; use a more specific title or exact ID. Matches: {choices}')
+            identity = matches[0]['id']
+        else:
+            identity = args.window.strip('{}')
+        return {'ok': True, **WindowStore(args.window_dir, args.output_dir).assign(identity, args.name, windows)}
     if args.command == 'capture':
         if 'capture' not in client.request('capabilities').get('operations', []):
             raise ValueError('This backend does not support window capture')

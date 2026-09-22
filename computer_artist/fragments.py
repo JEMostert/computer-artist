@@ -172,6 +172,9 @@ class WindowStore:
                 raise ValueError(f'Name {name!r} already belongs to an open window')
             source = self.root / 'layout' / (old or identity)
             destination = self.root / 'layout' / name
+            prior_layout = destination / 'window.json'
+            prior_window = json.loads(prior_layout.read_text()) if prior_layout.is_file() else None
+            revalidate = current is not None and current != identity and destination.exists()
             if source != destination and source.exists() and destination.exists():
                 raise ValueError(f'Both {source} and {destination} exist; move or archive one before naming')
             if source != destination and source.exists():
@@ -180,7 +183,11 @@ class WindowStore:
                 names.pop(old)
             names[name] = identity
             atomic_json(self.root / 'names.json', names)
-        return {'name': name, 'window': identity, 'layout': str(destination)}
+        selected = next(w for w in windows if w['id'] == identity)
+        return {'name': name, 'window': identity, 'title': selected.get('title'),
+                'previous_window': current if current != identity else None,
+                'layout': str(destination), 'layout_revalidation_required': revalidate,
+                'previous_layout_title': prior_window.get('title') if isinstance(prior_window, dict) else None}
 
     def folder(self, name):
         name = key(name)

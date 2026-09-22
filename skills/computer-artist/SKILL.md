@@ -15,15 +15,21 @@ agent session after updates. For older hosts, use `--skills-dir ~/.codex/skills`
 instead of `--codex`.
 
 1. Run `ca capabilities` and `ca windows`. Use `ca set ID --name APP` once for an
-   open window, then `ca observe --window APP`. Rebind after the app reopens. Open the image.
+   open window, then `ca observe --window APP`. After reopening, rebind with
+   `ca set --name APP --title TITLE` only when the title matches one window.
+   Inspect the returned old/new window details and revalidate an old layout
+   before using it. Open the image.
 2. Inspect `window/layout/APP/`. Before task input, map the controls and work area
    needed now. Recheck existing entries against the live window; don't map the
    entire app. Raw UI coordinates are for creating or repairing maps.
-3. Check `ca fragments list`. Reuse or register small parameterized fragments in
-   `window/api-fragmants/`. Fragments read named layout entries; never duplicate
-   toolbar/palette coordinates inside them. Keep task-specific geometry in the task.
-4. Compose fragments in bounded `ca execute` programs. Inspect the first intended
-   result after a tool/mode change before repeating it. Use local condition waits.
+3. For editing software and longer tasks, check `ca fragments list`. Reuse or
+   register small parameterized fragments in `window/api-fragmants/`. Fragments
+   read named layout entries; never duplicate toolbar/palette coordinates inside
+   them. Keep task-specific geometry in the task.
+4. Compose fragments in bounded `ca execute` programs to plan and perform related
+   steps together. A simple one-off action can use a direct command. Observe after
+   each fragment; if the result could be better, revisit and correct earlier steps
+   before continuing. Use local condition waits.
 5. On mismatch, inspect and repair the map or its supported UI-state variants.
    Change a fragment only when behavior changes. Never bypass a failed guard.
 6. Inspect the result; verify requested saves from the file. Close with
