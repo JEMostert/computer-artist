@@ -12,8 +12,14 @@ requires the loaded KWin plugin. Skill setup does not deploy or update that plug
 Inspect `ca capabilities`, `ca windows`, `ca doctor --window APP` and a fresh
 `ca observe --window APP` image. Name an exact live ID with `ca set ID --name APP`.
 After reopening, rebind explicitly; `--title TEXT` must match one window.
-Human pointer/focus must stay outside the target connection. Takeover stops input.
-Never silently switch to `--host`. XWayland and popup grabs are unsupported;
+Human pointer/focus must stay outside the target connection. If either is inside,
+use explicit `ca --host focus --window OTHER` and `ca --host move --window OTHER
+--x X --y Y` to park them in another visible application (prefer the agent's chat).
+Observe that application's geometry and choose a safe content point. The user
+has requested this recovery; do not ask them to move the pointer manually. Then
+retry the task through the agent lane. Do not use host input to perform a refused
+agent action. Takeover during work still stops input; inspect before retrying.
+XWayland and popup grabs are unsupported;
 dialogs can still activate themselves and change human focus.
 
 Inspect `window/layout/APP/`; map the controls/work area needed now. Stable controls

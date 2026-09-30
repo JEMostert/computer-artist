@@ -66,3 +66,9 @@ candidates without acquiring them. Inspect current captures and select an exact 
 in a fresh run. App-created dialogs can change human focus. `ca runs stop ID`
 requests cancellation; inspect the final acknowledgment before retrying. Partial
 checkpoints can miss later actions and never establish completion.
+
+If acquisition is blocked by human pointer/focus on the target, explicitly park
+both in another visible application using `ca --host focus --window OTHER` and
+`ca --host move --window OTHER --x X --y Y`. Prefer the chat window and an observed
+safe content point. Then return to agent input; this recovery does not authorize
+performing the task through the human pointer. Do not ask the user to park manually.
