@@ -1,0 +1,22 @@
+{
+  "clipboard_unicode_survives_cli_disconnect_without_focus_or_session": true,
+  "unicode_multiline_paste_delivered_without_pointer_motion": true,
+  "application_copy_and_held_key_repeat": true,
+  "stalled_clipboard_owner_times_out_without_blocking_compositor": true,
+  "cli_and_runtime_paste_and_key_holds": true,
+  "oversized_text_rejected_before_mutation": true,
+  "disconnect_releases_held_key": true,
+  "stale_releases_held_key": true,
+  "watchdog_releases_held_key": true,
+  "close_releases_held_key": true,
+  "focus_releases_held_key": true,
+  "external_key_preempts_and_removes_synthetic_shift": true,
+  "same_key_transfers_to_human_until_physical_release": true,
+  "reusable_save_text_example_verified_in_kwrite": true,
+  "kwrite_actual_saved_file_named_verified_outcome": true,
+  "stale_saved_file_is_interrupted_with_named_failed_evidence": true,
+  "saved_outcome_inspection_and_html_review_work_offline": true,
+  "kwrite_unicode_paste_and_shortcut_save_verified_from_file": true,
+  "unload_releases_held_key": true,
+  "passed": true
+}

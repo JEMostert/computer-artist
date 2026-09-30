@@ -1,13 +1,15 @@
 """Two explicit lanes sharing a deadline and budget; KWin arbitrates ownership."""
-from concurrent.futures import ThreadPoolExecutor, wait, FIRST_EXCEPTION
+
 import threading
+from concurrent.futures import FIRST_EXCEPTION, ThreadPoolExecutor, wait
 
 from .client import Client
 
 
 class Execution:
-    def __init__(self, root):
+    def __init__(self, root, *, context_factory):
         self.root = root
+        self.context_factory = context_factory
         self.allow_host = getattr(root.client, 'lane', 'agent') == 'host'
         self.contexts = {(getattr(root.client, 'lane', 'agent'), root.window_id): root}
         self.locks = {'agent': threading.RLock(), 'host': threading.RLock()}
@@ -19,11 +21,17 @@ class Execution:
         identity = self.root.store.resolve_window(identity.strip('{}'))
         with self.lock:
             if (lane, identity) not in self.contexts:
-                from .runtime import Context
                 parent = self.root.client
-                client = Client(parent.socket_path, lane=lane, shared=parent.shared, window_dir=self.root.store.root)
+                client = Client(
+                    parent.socket_path,
+                    lane=lane,
+                    shared=parent.shared,
+                    window_dir=self.root.store.root,
+                )
                 try:
-                    context = Context(client, identity, self.root.store, execution=self)
+                    context = self.context_factory(
+                        client, identity, self.root.store, execution=self
+                    )
                 except BaseException:
                     client.close()
                     raise
@@ -31,8 +39,14 @@ class Execution:
             return self.contexts[(lane, identity)]
 
     def close(self):
+        failure = None
         for context in list(self.contexts.values()):
-            context.client.close()
+            try:
+                context.client.close()
+            except Exception as error:
+                failure = failure or error
+        if failure:
+            raise failure
 
 
 class Lane:
@@ -58,15 +72,23 @@ class Parallel:
 
         def run():
             with self.execution.locks[context.lane]:
+                failed = False
                 try:
                     context.check_budget()
                     return function(context, *args, **kwargs)
                 except BaseException:
+                    failed = True
                     self.execution.root.client.shared.cancelled.set()
                     raise
                 finally:
-                    try: context.client.release()
-                    finally: context.owned = False
+                    try:
+                        context.client.release()
+                    except BaseException:
+                        self.execution.root.client.shared.cancelled.set()
+                        if not failed:
+                            raise
+                    finally:
+                        context.owned = False
 
         future = self.pool.submit(run)
         self.futures.append(future)

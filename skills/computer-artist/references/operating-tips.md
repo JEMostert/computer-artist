@@ -1,38 +1,21 @@
-# Operating tips
+# Coordinates and recovery
 
-## Coordinates
+For full screenshot pixel `(px, py)`, image size `(Pw, Ph)` and logical content
+size `(W, H)`, use `x = px * W / Pw`, `y = py * H / Ph`. For a displayed crop
+point `(dx, dy)`, displayed size `(Dw, Dh)` and logical region `(rx, ry, rw, rh)`,
+use `x = rx + dx * rw / Dw`, `y = ry + dy * rh / Dh`.
 
-For full screenshot pixels `(px, py)`, image size `(Pw, Ph)`, and logical
-content size `(W, H)`:
+Use the actual displayed size. Observation `pixel_size` describes the full capture
+even when `image` is cropped; `full_image` is the full-window reference. Canvas
+zoom/scroll can invalidate coordinates without changing window geometry.
 
-```text
-x = px * W / Pw
-y = py * H / Ph
-```
+Batch a coherent layer, color group or interaction through `ca execute`. Inspect
+tool changes, dialogs, layers and saves. Prepare geometry before input; paths cap
+at 20,000 points and must fit the remaining budget. Group non-overlapping tiles by
+color while preserving layer order for overlapping artwork.
 
-For a displayed crop `(dx, dy)`, displayed size `(Dw, Dh)`, and logical crop
-region `(rx, ry, rw, rh)`:
-
-```text
-x = rx + dx * rw / Dw
-y = ry + dy * rh / Dh
-```
-
-Use the size actually displayed. Observation `pixel_size` describes the full
-capture, even when `image` is cropped. `full_image` is the full-window reference.
-Canvas zoom/scroll can invalidate drawing coordinates without resizing the window.
-
-## Batch and recover
-
-- Batch one coherent layer, color group, or interaction in `ca execute`.
-- Inspect transitions: tool changes, dialogs, completed layers, saves.
-- Prepare geometry before input. Paths allow at most 20,000 points and must fit
-  the remaining request budget. Resample to useful precision.
-- Group non-overlapping tiles by color; preserve layer order for overlapping art.
-- Record completed operation indices and evidence. After interruption, inspect:
-  actions after the checkpoint may already have landed.
-- Use guarded targets for stable controls, fresh coordinates for changing canvases.
-- Keep fragments small and parameterized. Record required tool, color, coordinate
-  origin, and layout assumptions. Reusing code requires checking the new window.
-- Inspect the final full canvas and details. A screenshot is not proof of a save;
-  check that the requested file exists and decodes correctly.
+Use guarded targets for stable controls and fresh geometry for changing canvases.
+Reusable fragments should state tool/color/origin/layout assumptions and check the
+new window. After interruption, inspect actual state before retrying: actions after
+a checkpoint may have landed. Check the final canvas and details, then verify the
+requested saved file exists and decodes; a screenshot does not prove a save.

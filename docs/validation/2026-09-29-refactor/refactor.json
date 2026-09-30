@@ -1,0 +1,75 @@
+{
+  "date": "2026-09-29",
+  "scope": "Module boundaries, shared program execution, native capture extraction and development checks",
+  "unit_tests": {
+    "count": 114,
+    "passed": true
+  },
+  "lint": {
+    "passed": true,
+    "tool": "ruff 0.16.9"
+  },
+  "format": {
+    "passed": true,
+    "files": 46
+  },
+  "native_build_and_link": {
+    "passed": true
+  },
+  "isolated_kwin_suites": {
+    "count": 4,
+    "passed": true,
+    "evidence_directory": "/tmp/ca-integration-output-yZ87aR/2026-09-29_21-17-58-803951Z-7036bb"
+  },
+  "editable_install": {
+    "passed": true
+  },
+  "wheel_install_outside_checkout": {
+    "passed": true,
+    "version": "0.2.0",
+    "checks": [
+      "Entry point",
+      "Bundled skill setup",
+      "Doctor with writable temporary data paths",
+      "Refactored imports and legacy runtime.image_box",
+      "No obsolete harness module"
+    ]
+  },
+  "pip_check": {
+    "passed": true
+  },
+  "data_before": {
+    "window": {
+      "files": 488,
+      "sha256": "6774f6dd2f7544b74094cf03fd39827ac9ae7aba3ea6084ab2d7a774cbebd6e1"
+    },
+    "output": {
+      "files": 151,
+      "sha256": "1a4b3722f62187c4870498da9ee84a87711c06e15ee0cc71fb5add9d56857b4c"
+    }
+  },
+  "data_after": {
+    "window": {
+      "files": 488,
+      "sha256": "6774f6dd2f7544b74094cf03fd39827ac9ae7aba3ea6084ab2d7a774cbebd6e1"
+    },
+    "output": {
+      "files": 151,
+      "sha256": "1a4b3722f62187c4870498da9ee84a87711c06e15ee0cc71fb5add9d56857b4c"
+    }
+  },
+  "data_hash_exclusions": [
+    "Lock metadata"
+  ],
+  "data_unchanged": true,
+  "host_checks": [
+    "Read-only doctor",
+    "Read-only session status: closed and lanes idle"
+  ],
+  "host_mutations": false,
+  "limits": [
+    "Native Wayland Qt fixtures and KWrite in separate stock KWin",
+    "No new general GTK/browser or XWayland compatibility claim",
+    "No host plugin deployment or host application input"
+  ]
+}

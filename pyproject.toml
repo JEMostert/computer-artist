@@ -1,0 +1,40 @@
+[build-system]
+requires = ["setuptools==82.0.1"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "computer-artist"
+version = "0.2.0"
+description = "Independent desktop input and verified CLI programs for KDE Wayland"
+readme = "README.md"
+requires-python = ">=3.12"
+license = "GPL-2.0-or-later"
+dependencies = ["Pillow==12.3.0"]
+
+[project.optional-dependencies]
+dev = ["ruff==0.16.9"]
+
+[project.scripts]
+ca = "computer_artist.cli:main"
+
+[tool.setuptools]
+packages = ["computer_artist"]
+
+[tool.setuptools.data-files]
+"share/computer-artist/skills/computer-artist" = ["skills/computer-artist/SKILL.md"]
+"share/computer-artist/skills/computer-artist/references" = ["skills/computer-artist/references/programs.md", "skills/computer-artist/references/pointer-techniques.md", "skills/computer-artist/references/operating-tips.md"]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+extend-exclude = ["window", "output", "build", ".venv"]
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "I"]
+
+[tool.ruff.lint.per-file-ignores]
+# Standalone integration scripts add the checkout before importing its client.
+"tests/integration/*.py" = ["E402"]
+
+[tool.ruff.format]
+quote-style = "single"

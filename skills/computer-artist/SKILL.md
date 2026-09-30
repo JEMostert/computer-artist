@@ -1,58 +1,44 @@
 ---
 name: computer-artist
-description: Use when a task requires testing or interacting with windowed applications on KDE Wayland, such as Vivaldi, image and video editors, drawing tools, or game engines.
+description: Use the ca CLI to interact with supported windowed applications on KDE Wayland, including drawing, conditional programs and verified saves.
 ---
 
 # Computer Artist
 
-Use `ca` from PATH or this skill's resolved checkout root. Desktop actions require
-the loaded KWin plugin. Follow **observe → map → fragment → execute → verify**.
+Use `ca` from PATH or this skill's checkout. The CLI is the interface; Python
+`run(ctx)` programs are submitted through it, not a separate SDK. Desktop work
+requires the loaded KWin plugin. Skill setup does not deploy or update that plugin.
 
-To install or refresh this skill in Codex, run `./ca setup --codex` from the
-checkout. It links `~/.agents/skills/computer-artist` to this checkout, so updates
-follow automatically. Keep the checkout in place; reload skills or start a new
-agent session after updates. For older hosts, use `--skills-dir ~/.codex/skills`
-instead of `--codex`.
+Inspect `ca capabilities`, `ca windows`, `ca doctor --window APP` and a fresh
+`ca observe --window APP` image. Name an exact live ID with `ca set ID --name APP`.
+After reopening, rebind explicitly; `--title TEXT` must match one window.
+Human pointer/focus must stay outside the target connection. Takeover stops input.
+Never silently switch to `--host`. XWayland and popup grabs are unsupported;
+dialogs can still activate themselves and change human focus.
 
-1. Run `ca capabilities` and `ca windows`. Use `ca set ID --name APP` once for an
-   open window, then `ca observe --window APP`. After reopening, rebind with
-   `ca set --name APP --title TITLE` only when the title matches one window.
-   Inspect the returned old/new window details and revalidate an old layout
-   before using it. Open the image.
-2. Inspect `window/layout/APP/`. Before task input, map the controls and work area
-   needed now. Recheck existing entries against the live window; don't map the
-   entire app. Raw UI coordinates are for creating or repairing maps.
-3. For editing software and longer tasks, check `ca fragments list`. Reuse or
-   register small parameterized fragments in `window/api-fragmants/`. Fragments
-   read named layout entries; never duplicate toolbar/palette coordinates inside
-   them. Keep task-specific geometry in the task.
-4. Compose fragments in bounded `ca execute` programs to plan and perform related
-   steps together. A simple one-off action can use a direct command. Observe after
-   each fragment; if the result could be better, revisit and correct earlier steps
-   before continuing. Use local condition waits.
-5. On mismatch, inspect and repair the map or its supported UI-state variants.
-   Change a fragment only when behavior changes. Never bypass a failed guard.
-6. Inspect the result; verify requested saves from the file. Close with
-   `ca session close`. A dispatched action is not verified completion.
+Inspect `window/layout/APP/`; map the controls/work area needed now. Stable controls
+use `ca target APP NAME --observation OBS --rect X Y W H` and guarded
+`ctx.click(target='@NAME')`. Recheck old maps; do not bypass failed guards.
+Changing canvases use verified geometry, not artwork pixel hashes. Coordinates
+are logical content pixels; account for capture/display scaling.
 
-Map stable controls with `ca target APP NAME --observation OBS --rect X Y W H`;
-use `ctx.click(target='@NAME')`. Selection highlights may need separately mapped
-states. Map changing canvases by geometry; use canvas-relative drawing coordinates,
-not an exact pixel guard on artwork. See [workflow](references/programs.md).
+Reuse or register small typed fragments under `window/api-fragmants/`, then compose
+bounded `ca execute` programs with conditions and loops. Inspect actual transitions
+and correct unexpected results before continuing. Task-specific geometry belongs
+in the task; reusable fragments read maps. See [programs](references/programs.md).
 
-Keep maps/code in `window/`; images, task scripts, and logs in `output/DATE_RUN/`.
-Five runs rotate; preserve needed evidence with `ca storage keep RUN_ID`.
+Independent physical keys require advertised keyboard support and ready target
+resources. Use `ctx.press`, `key_down`, `key_up`; verify effects before release.
+Unicode paste uses explicit host focus/clipboard within the task's authorization.
+Snapshot the destination before saving and use `ctx.verify_file` afterwards.
+Dispatch, a screenshot or a child's passing checks do not verify the outer task.
 
-Default input is independent; human pointer/focus must be outside the target
-connection. Stop on human takeover. Never silently switch to `--host`.
-Use explicit `--host` clipboard and keyboard operations as needed for the task,
-unless the user prohibits them. Prefer clipboard paste (`ctx.paste(text)`) for
-text entry. Use keys only for interactions that require them, such as game
-controls or application shortcuts; use pointer scrolling for scrolling.
-Check host capabilities first. Host input shares desktop focus and clipboard.
-XWayland and popup grabs remain unsupported.
-Coordinates are logical content pixels; account for screenshot scaling.
-Re-observe after geometry changes or uncertain replies.
+Use `ca watch` for bounded JSONL observation, `ca runs inspect ID` for evidence,
+`ca runs stop ID` for targeted stopping and `ctx.handoff(reason)` to release/yield.
+Inspect related-window candidates and choose an exact ID in a fresh run; interrupted
+contexts cannot resume. Checkpoints can miss recent actions and never prove completion.
+Keep required evidence with `ca storage keep ID`; five eligible runs rotate and
+captures are separately bounded. Close the cursor session with `ca session close`.
 
-For drawing, read [techniques](references/pointer-techniques.md); for coordinate
-conversion and recovery, read [operating tips](references/operating-tips.md).
+For drawing read [pointer techniques](references/pointer-techniques.md); for
+scaling/recovery read [operating tips](references/operating-tips.md).

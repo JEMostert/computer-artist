@@ -1,50 +1,33 @@
 # KolourPaint techniques
 
-Observed in the desktop painting demo; verify against the current app and layout.
+These were observed in a specific painting workflow; verify the current app/layout.
 
-## Shapes and strokes
+Use held-button `ctx.path` for freehand contours and vertex clicks for polygons.
+The tested Polygon tool used fill-only, left-click vertices and right-click the
+last vertex to commit; double-click was different. Close clicks can become double
+clicks. The demo used about 16 logical pixels spacing or .45-second pauses for
+close vertices; adjust timing without discarding geometry.
 
-- Freehand contours: held-button `ctx.path`. Polygons: individual vertex clicks.
-- In the tested Polygon tool, select fill-only, left-click vertices, then
-  right-click the final vertex to commit. Double-click is not equivalent.
-- Close, rapid vertex clicks can become double-clicks. The demo used roughly
-  16 logical pixels spacing or .45-second pauses for close pairs. Adjust timing
-  without discarding needed geometry.
-- Bucket fill respects existing color boundaries. Use opaque filled polygons or
-  ellipses to cover earlier artwork, then restore outlines/details.
-- Draw back-to-front: background, rear objects, main forms, foreground, outlines,
-  highlights. Use brush width for broad marks; offset pencil paths can look uneven.
+Bucket fill follows existing color boundaries. Opaque filled polygons/ellipses can
+cover earlier art; restore outlines afterwards. Draw back-to-front: background,
+rear objects, main forms, foreground, outlines, highlights. Broad brush marks are
+smoother than unevenly offset pencil paths.
 
-## Reference reconstruction
-
-Quantize the reference, merge equal-color horizontal runs, then merge matching
-runs across rows into rectangles. Draw them with the app's filled-rectangle tool.
-The demo used 48 colors and a 224×332 grid; choose resolution for the current task.
-Group non-overlapping tiles by color to reduce dialog work.
-
-Inspect adjacent tiles early. The demo needed a one-logical-pixel extension at
-far drag endpoints to close gaps; measure at the current zoom before applying it.
+For reference reconstruction, quantize colors, merge equal-color horizontal runs,
+then matching rows into rectangles. Draw through the filled-rectangle tool and
+group non-overlapping tiles by color. The demo used 48 colors on a 224×332 grid;
+choose resolution for the task. Inspect adjacent tiles early. A one-logical-pixel
+extension closed endpoint gaps in the demo; measure at the current zoom first.
 Importing a finished bitmap does not demonstrate drawing through app input.
 
-## Colors and dialogs
+Double-clicking a palette swatch opened Select Color. Observe its exact current
+window ID; activation can interrupt the agent and change human focus. Use explicit
+host recovery only within the task's authorization. In the tested RGB spinboxes,
+positive scrolling lowered values and a large delta clamped to zero; `-10 * value`
+raised them to the desired value. Allow processing time and read back fields and
+preview. Scroll direction/scale is app-specific. Confirm, then click the edited
+swatch to select the drawing foreground; these are separate actions.
 
-1. Double-click a palette swatch to open Select Color. Find the dialog's current ID.
-2. It may activate itself and interrupt agent control. If host control is authorized,
-   focus another app and move the real pointer outside the target connection.
-3. In the tested RGB spinboxes, positive scroll lowered values. A large positive
-   delta clamped to zero; `-10 * value` raised to the desired value. Allow roughly
-   .1 seconds and read back the fields/preview. Direction and scale are app-specific.
-4. Confirm, then click the edited swatch to select the drawing foreground.
-   Closing the dialog may require focus recovery again.
-
-Palette editing and foreground selection are separate actions. Group compatible
-work by color. Scope large scroll deltas to the correct spinbox.
-
-## Saving
-
-Select the filename field, then use host `ctx.paste(filename)` and click Save.
-Inspect the pasted name. Paste changes the shared text clipboard and leaves it
-available to the app; it does not automatically restore previous clipboard data.
-
-Verify the saved file, not just a screenshot. If CA cannot read a GPU buffer,
-use an available authorized capture method and account for its borders/scaling.
+For save dialogs, inspect/select the filename field, use explicit host paste and
+confirm the pasted name before Save. Paste changes the shared clipboard. Verify
+actual saved bytes and decoded artwork; dialog closure alone is not completion.

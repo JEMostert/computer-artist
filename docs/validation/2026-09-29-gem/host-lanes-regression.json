@@ -1,0 +1,22 @@
+{
+  "read_only_does_not_open_session": true,
+  "host_auto_session_and_real_pointer_position": true,
+  "readiness_reports_both_lane_conflicts": true,
+  "same_connection_conflicts_rejected": true,
+  "simultaneous_two_lane_drags": true,
+  "external_pointer_preempts_host_preserves_agent": true,
+  "external_click_and_keyboard_preempt_host": true,
+  "host_disconnect_releases_button": true,
+  "host_scroll_reaches_application": true,
+  "host_watchdog_releases_button": true,
+  "parallel_runtime_and_lane_traces": true,
+  "parallel_failure_cancels_sibling": true,
+  "host_worker_hard_deadline": true,
+  "no_implicit_host_escalation": true,
+  "explicit_host_focus_recovers_agent_dialog": true,
+  "session_close_releases_both_lanes": true,
+  "host_unload_release_reload_and_stale_generation": true,
+  "passed": true,
+  "compositor": "/usr/bin/kwin_wayland",
+  "external_input_source": "private test fake-input device"
+}

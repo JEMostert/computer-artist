@@ -29,6 +29,14 @@ int main(int argc,char **argv) {
         org_kde_kwin_fake_input_keyboard_key(input,42,0);
         org_kde_kwin_fake_input_keyboard_key(input,48,1);org_kde_kwin_fake_input_keyboard_key(input,48,0);
     }
+    else if(!strcmp(argv[2],"shift-wait")) {
+        org_kde_kwin_fake_input_keyboard_key(input,42,1);
+        wl_display_roundtrip(display);
+        puts("held");fflush(stdout);
+        usleep(600000);
+        org_kde_kwin_fake_input_keyboard_key(input,30,1);org_kde_kwin_fake_input_keyboard_key(input,30,0);
+        org_kde_kwin_fake_input_keyboard_key(input,42,0);
+    }
     else if(!strcmp(argv[2],"hold")) { while(wl_display_dispatch(display)>=0) {} return 0; }
     else return 2;
     wl_display_roundtrip(display);wl_display_disconnect(display);return 0;

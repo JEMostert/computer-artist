@@ -8,6 +8,7 @@ find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Quick DBus Network)
 find_package(KWin 6.7 REQUIRED CONFIG)
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(WaylandClient REQUIRED IMPORTED_TARGET wayland-client)
+pkg_check_modules(XkbCommon REQUIRED IMPORTED_TARGET xkbcommon)
 pkg_get_variable(WaylandProtocolsDir wayland-protocols pkgdatadir)
 find_program(WaylandScanner wayland-scanner REQUIRED)
 set(DataControlXml "${WaylandProtocolsDir}/staging/ext-data-control/ext-data-control-v1.xml")
@@ -15,8 +16,8 @@ add_custom_command(OUTPUT data-control-client.h data-control-protocol.c
     COMMAND ${WaylandScanner} client-header ${DataControlXml} data-control-client.h
     COMMAND ${WaylandScanner} private-code ${DataControlXml} data-control-protocol.c
     DEPENDS ${DataControlXml})
-add_library(computerartist MODULE main.cpp clipboard.cpp data-control-client.h data-control-protocol.c)
+add_library(computerartist MODULE main.cpp capture.cpp clipboard.cpp keyboard.cpp data-control-client.h data-control-protocol.c)
 target_include_directories(computerartist PRIVATE ${CMAKE_CURRENT_BINARY_DIR})
-target_link_libraries(computerartist PRIVATE KWin::kwin Qt6::Network PkgConfig::WaylandClient)
+target_link_libraries(computerartist PRIVATE KWin::kwin Qt6::Network PkgConfig::WaylandClient PkgConfig::XkbCommon)
 set_target_properties(computerartist PROPERTIES PREFIX "" LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/kwin/plugins")
 install(TARGETS computerartist DESTINATION lib/qt6/plugins/kwin/plugins)

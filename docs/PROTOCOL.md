@@ -1,52 +1,42 @@
-# Local controller protocol, version 3
+# Socket protocol
 
-The plugin serves user-only `$XDG_RUNTIME_DIR/computer-artist/control`. Requests
-and replies are newline-delimited JSON, bounded to 64 KiB per request. Input means
-dispatched, never independently verified. `lane` is `agent` (default) or `host`.
-The host client must negotiate `protocol >= 3`, `lane: host` and `host_pointer: true`
-before sending actions; there is no compatibility fallback.
+User-only `$XDG_RUNTIME_DIR/computer-artist/control`; newline-delimited JSON,
+64 KiB limit. `lane` is `agent` (default) or `host`. Replies report dispatch only.
+Host negotiation requires `protocol >= 3`, `lane: host`, `host_pointer: true`.
 
-| Operation | Fields | Behavior |
-| --- | --- | --- |
-| `capabilities` | `lane` | Operations/limits for the chosen lane |
-| `windows` | — | Native windows, geometry, ownership and real active window |
-| `session_status` | — | Session ID, lane targets/button counts and real pointer position |
-| `session_close` | — | Release both lanes, hide agent cursor, close session |
-| `acquire` | `window`, `lane` | Acquire visible native target; auto-create session on success |
-| `release` | `lease`, `lane` | Release held input and return that lane's app |
-| `move` | `x`, `y`, `lease`, `generation`, `lane` | Absolute logical content coordinates; unobscured target only |
-| `button` | `code`, `pressed`, lease fields | Evdev mouse button 272–274 |
-| `scroll` | `axis`, `delta`, lease fields | Vertical/horizontal scroll |
-| `focus` | `window`, lease fields, `lane: host` | Request real desktop focus for that exact target |
-| `key` | `code`, boolean `pressed`, lease fields, `lane: host` | Physical Linux key 1–247; exact host target must have keyboard focus |
-| `clipboard_get` | `lane: host`, lease fields if acquired | Read UTF-8 text; no focus or session required |
-| `clipboard_set` | `text`, `lane: host`, lease fields if acquired | Replace shared clipboard text; at most 8192 UTF-8 bytes |
-| `cancel` | `lane` | Agent: release held input, retain lease. Host: release input and lease |
-| `takeover` | `lane` | Stop that controller; available to another connection |
-| `ping` | `lane` | Status; only the owning connection renews its watchdog |
-| `capture` | `window`, absolute new `path` | Render client rectangle including subsurfaces as PNG; returns `source: kwin_composited_client` |
+| Operation | Fields/behavior |
+| --- | --- |
+| `capabilities`, `windows` | Lane operations/restrictions, geometry, ownership |
+| `session_status`, `session_close` | Inspect or release both lanes and hide cursor |
+| `acquire`, `release` | Exact `window` to acquire; owning `lease` to release |
+| `move` | Absolute logical desktop `x`, `y` within unobscured target content |
+| `button`, `scroll` | Evdev `code` 272–274/boolean `pressed`; `axis`/signed `delta` |
+| `focus` | Exact leased host `window`; real desktop focus |
+| `keyboard_begin`, `key` | Agent initialization; physical Linux `code` 1–247/boolean `pressed` |
+| `clipboard_get`, `clipboard_set` | Host UTF-8 only; `text`, at most 8192 bytes |
+| `cancel`, `takeover` | Release held input; revoke lane from another connection |
+| `ping` | Status; only owner renews five-second watchdog |
+| `capture` | Exact `window`, absolute new `path`; composited client/subsurface PNG |
 
-`session_open` is removed. Observation, capture and status do not open sessions.
-Session creation is atomic with acquisition in KWin's single event loop. Both
-lanes may be owned concurrently, but not for the same Wayland connection. One
-controller per lane. A lease has its own UUID and geometry generation; stale
-input is rejected. Keyboard and clipboard operations require the host lane.
+Input carries `lease` and `generation`; stale ownership/geometry is rejected.
+Replies include `ok`, lease/generation, session and lane `keyboard_ready`; failures
+include `error`. Clipboard replies are asynchronous; send one request at a time.
+Clipboard operations neither open sessions nor renew leases. Agent cancel keeps
+its lease; host cancel releases it.
 
-Ordinary replies include `ok`, `lease`, `generation`, `keyboard_ready`, and `session`.
-`keyboard_ready` is true only when a valid host target has real keyboard focus.
-Clipboard replies are asynchronous, containing `ok`, `lane`, and `text` for reads;
-send one request at a time per connection. Clipboard get/set never renew a lease.
-Transfers time out after 1.5 seconds per stage and reject oversized/non-UTF-8 data.
-Failures contain `error`. Common observational replies additionally contain
-`cursor_visible`, `host_position`, and `lanes`. Agent/host geometry generations
-are independent. Host action replies report `lane: host`. A host stop reason is
-available under `lanes.host.stop_reason` in session status.
-`lanes.host.keys` counts held synthetic keys. Clipboard reads/writes do not create
-a session. The clipboard source survives socket disconnect and session close.
+One owner per lane; lanes cannot own one Wayland connection together. Human
+pointer/focus return, target changes, disconnect, screen lock and watchdog expiry
+reconcile held input. Status/capture do not open sessions; acquisition does.
+Sessions outlive leases and close explicitly.
 
-Disconnect, watchdog expiry, target changes and session close release held input.
-Other devices interrupt host automation; human pointer/focus entry into an
-agent-owned connection revokes agent ownership. Agent popup automatic activation
-remains a known limitation. Host focus is explicit recovery, never an implicit
-agent fallback. Host DND, constrained pointers, popup grabs and XWayland are
-unsupported. Input separation is not a security sandbox.
+Independent keyboard requires `keyboard: true`, operation `key` and ready target
+resources. Existing keyboard resources receive separate XKB state; there is no
+additional advertised seat or change to human modifiers. Pointer-only acquisition
+sends no keyboard enter. Python sends `keyboard_begin` before keys so Qt can process
+activation. Changed resources/keymaps revoke readiness; verify effects before release.
+
+Window acquisition fields snapshot real checks but can become stale; older plugins
+may omit them. Capture publishes by atomic no-replace hard link; existing paths,
+symlinks and unsupported hard-link filesystems are refused. XWayland, independent
+clipboard/IME, popup grabs and data drag-and-drop are unsupported. Dialogs can
+activate themselves. Input separation is not a sandbox.

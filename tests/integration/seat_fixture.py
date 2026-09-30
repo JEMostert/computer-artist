@@ -1,12 +1,22 @@
 #!/usr/bin/env python3
 """Real Qt Wayland clients for the seat experiment; not an input simulator."""
+
 import json
 import os
 import sys
 from pathlib import Path
-from PySide6.QtCore import Qt, QPointF, QTimer
+
+from PySide6.QtCore import QPointF, Qt, QTimer
 from PySide6.QtGui import QColor, QImage, QPainter, QPen
-from PySide6.QtWidgets import QApplication, QWidget, QVBoxLayout, QLabel, QPlainTextEdit, QDialog, QPushButton
+from PySide6.QtWidgets import (
+    QApplication,
+    QDialog,
+    QLabel,
+    QPlainTextEdit,
+    QPushButton,
+    QVBoxLayout,
+    QWidget,
+)
 
 role = sys.argv[1]
 out = Path(os.environ['CA_EXPERIMENT_OUTPUT'])
@@ -59,11 +69,23 @@ class Canvas(QWidget):
 
 class HumanEditor(QPlainTextEdit):
     def keyPressEvent(self, event):
-        record('key_down', text=event.text(), key=event.key(), modifiers=event.modifiers().value, repeat=event.isAutoRepeat())
+        record(
+            'key_down',
+            text=event.text(),
+            key=event.key(),
+            modifiers=event.modifiers().value,
+            repeat=event.isAutoRepeat(),
+        )
         super().keyPressEvent(event)
 
     def keyReleaseEvent(self, event):
-        record('key_up', text=event.text(), key=event.key(), modifiers=event.modifiers().value, repeat=event.isAutoRepeat())
+        record(
+            'key_up',
+            text=event.text(),
+            key=event.key(),
+            modifiers=event.modifiers().value,
+            repeat=event.isAutoRepeat(),
+        )
         super().keyReleaseEvent(event)
 
     def mousePressEvent(self, event):
@@ -89,7 +111,13 @@ layout = QVBoxLayout(window)
 heading = QLabel('AGENT' if role == 'agent' else 'YOU')
 heading.setStyleSheet('font-size: 26px; font-weight: bold; color: #b4b9c8;')
 layout.addWidget(heading)
-layout.addWidget(QLabel('The gray cursor draws here.' if role == 'agent' else 'Click below and type while the agent draws.'))
+layout.addWidget(
+    QLabel(
+        'The gray cursor draws here.'
+        if role == 'agent'
+        else 'Click below and type while the agent draws.'
+    )
+)
 if role == 'agent':
     content = Canvas()
     window.resize(750, 740)
@@ -98,15 +126,34 @@ else:
     previous = os.environ.get('CA_PREVIOUS_TEXT')
     if previous and Path(previous).is_file():
         content.setPlainText(Path(previous).read_text())
-    content.setPlaceholderText('Your mouse and keyboard stay yours.\n\nTry typing a sentence and holding Shift.')
+    content.setPlaceholderText(
+        'Your mouse and keyboard stay yours.\n\nTry typing a sentence and holding Shift.'
+    )
     content.textChanged.connect(lambda: (out / 'human-text.txt').write_text(content.toPlainText()))
     window.resize(500, 740)
 layout.addWidget(content)
-window.setStyleSheet('QWidget { background: #20232b; color: #eef0f6; font-size: 17px; } QPlainTextEdit { background: #15171d; padding: 14px; }')
+window.setStyleSheet(
+    'QWidget { background: #20232b; color: #eef0f6; font-size: 17px; } QPlainTextEdit { background: #15171d; padding: 14px; }'
+)
 window.show()
 content.setFocus()
+
+
 # A test-only trigger exercises application-created dialog activation.
 def maybe_dialog():
+    sibling_trigger = out / (role + '-open-sibling')
+    if sibling_trigger.exists():
+        sibling_trigger.unlink()
+        sibling = QWidget()
+        sibling.setWindowTitle('Agent sibling document')
+        sibling.resize(240, 160)
+        sibling.show()
+        sibling.activateWindow()
+        window.test_sibling = sibling
+    close_sibling = out / (role + '-close-sibling')
+    if close_sibling.exists():
+        close_sibling.unlink()
+        window.test_sibling.close()
     trigger = out / (role + '-open-dialog')
     if not trigger.exists():
         return
@@ -123,6 +170,7 @@ def maybe_dialog():
     window.test_dialog = dialog
     dialog.show()
     dialog.activateWindow()
+
 
 trigger_timer = QTimer(window)
 trigger_timer.timeout.connect(maybe_dialog)
