@@ -10,6 +10,12 @@ pointer/capture, programs, host lanes, host text, independent keys and recovery.
 See the [fresh check record](validation/2026-09-30-simplification.json).
 These checks cover the exercised native Qt/KWrite workflows, not general app compatibility.
 
+On 4 October 2026, 222 Python tests and all separate-KWin suites, now including a
+Qt menu popup check, passed with the rebuilt plugin. Private environments were
+exercised with rootless Podman: Qt and terminal apps in containers, four concurrent
+environments, a private portal and host Vivaldi. See the
+[environment record](validation/2026-10-04-environments.json) for limits.
+
 Historical evidence from 29 September 2026:
 
 - [Pointer/capture](validation/2026-09-29-gem/plugin-regression.json)

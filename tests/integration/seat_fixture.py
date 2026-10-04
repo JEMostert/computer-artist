@@ -12,6 +12,7 @@ from PySide6.QtWidgets import (
     QApplication,
     QDialog,
     QLabel,
+    QMenu,
     QPlainTextEdit,
     QPushButton,
     QVBoxLayout,
@@ -19,7 +20,8 @@ from PySide6.QtWidgets import (
 )
 
 role = sys.argv[1]
-out = Path(os.environ['CA_EXPERIMENT_OUTPUT'])
+# Container environments have no experiment folder; their HOME is readable on the host.
+out = Path(os.environ.get('CA_EXPERIMENT_OUTPUT') or os.environ['HOME'])
 app = QApplication(sys.argv)
 app.setApplicationName('computer-artist-' + role)
 
@@ -44,6 +46,15 @@ class Canvas(QWidget):
         p.drawImage(QPointF(0, 0), self.image)
 
     def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.RightButton:
+            menu = QMenu(self)
+            menu.addAction('Choose test item', lambda: record('menu_selected'))
+            submenu = menu.addMenu('More choices')
+            submenu.addAction('Choose nested item', lambda: record('submenu_selected'))
+            self.test_menu = menu
+            menu.popup(event.globalPosition().toPoint())
+            record('menu_opened')
+            return
         self.previous = event.position()
         record('press', x=self.previous.x(), y=self.previous.y())
 

@@ -17,7 +17,8 @@ class Workspace:
             output or os.environ.get('CA_OUTPUT_DIR') or default_output_dir(self.root)
         ).resolve()
         self.run_folder = Path(run_folder) if run_folder else None
-        self.fragments = FragmentStore(self.root)
+        # Environments keep their own names and maps but share reusable fragments.
+        self.fragments = FragmentStore(os.environ.get('CA_FRAGMENT_ROOT') or self.root)
 
     def locked(self):
         return directory_lock(self.root)

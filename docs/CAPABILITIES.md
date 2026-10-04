@@ -6,6 +6,7 @@ that goal. Separate KWin instances are development test harnesses.
 
 | Capability | Implemented scope |
 | --- | --- |
+| Private environments | Per-agent KWin desktop, seat, clipboard and session bus; rootless Podman apps, recipes, startup apps, private browser profiles |
 | Independent input | Animated pointer and physical keys with separate modifier state; native Wayland |
 | Human takeover | Pointer/focus return revokes the lease; cleanup on target loss, disconnect, lock and watchdog |
 | Explicit host input | Real pointer/focus, physical keys and shared UTF-8 clipboard; requires `--host` |
@@ -21,6 +22,11 @@ Native pointer workflows were demonstrated in KolourPaint, Qt fixtures and scrcp
 Independent keyboard save/concurrent typing was reported for KWrite in separate
 KWin. These are specific workflows, not general toolkit compatibility;
 see [validation](VALIDATION.md).
+
+Private environments are a development and testing mode, not the product goal:
+they let several agents test apps in parallel without the user's desktop. Their
+own seat is driven through the host lane; XWayland windows there are observable
+only. Four concurrent container environments were exercised on 4 October 2026.
 
 Human pointer/focus must stay outside the target connection. Simultaneous editing
 within one application is not required. Two lanes cannot own the same connection.

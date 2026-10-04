@@ -20,6 +20,8 @@ def writable_destination(path):
 
 def diagnose(args):
     store = Workspace(args.window_dir, args.output_dir)
+    lane = getattr(args, 'lane', 'agent')
+    environment = getattr(args, 'environment_info', None)
     checks = []
     warnings = []
 
@@ -75,7 +77,7 @@ def diagnose(args):
             'Repair window/names.json from your backup before using saved names.',
         )
     broken_fragments = []
-    scope = store.root / 'api-fragmants'
+    scope = store.fragments.root / 'api-fragmants'
     try:
         folders = sorted(scope.iterdir()) if scope.exists() else []
     except OSError as error:
@@ -200,10 +202,14 @@ def diagnose(args):
         if args.window:
             identity = store.resolve_window(args.window.strip('{}'))
             selected = next((w for w in windows if w['id'] == identity), None)
+            # Judge readiness for the lane the command would actually use.
+            ready = selected and (
+                selected['host_candidate'] if lane == 'host' else selected['agent_candidate']
+            )
             check(
                 'selected_window',
-                selected is not None and selected['agent_candidate'],
-                selected or f'Window {identity} is not open',
+                bool(ready),
+                {**selected, 'lane': lane} if selected else f'Window {identity} is not open',
                 'Inspect ca windows and the reported restrictions; no host fallback is performed.',
             )
         if host_backend and not host_backend.get('clipboard'):
@@ -257,6 +263,8 @@ def diagnose(args):
     return {
         'ok': all(c['passed'] for c in checks),
         'command': 'doctor',
+        'lane': lane,
+        'environment': environment,
         'checks': checks,
         'warnings': warnings,
         'backend': backend,

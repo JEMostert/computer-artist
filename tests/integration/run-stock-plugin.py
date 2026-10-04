@@ -176,6 +176,15 @@ try:
     (output / 'session.json').write_text(json.dumps(state, indent=2) + '\n')
     (root / 'build/stock-plugin-session.json').write_text(json.dumps(state, indent=2) + '\n')
     print(json.dumps(state), flush=True)
+    if '--check-compatibility' in sys.argv:
+        subprocess.run(
+            [
+                sys.executable,
+                str(root / 'tests/integration/check-compatibility.py'),
+                str(output / 'session.json'),
+            ],
+            check=True,
+        )
     if '--check' in sys.argv:
         subprocess.run(
             [
@@ -228,7 +237,7 @@ try:
             ],
             check=True,
         )
-    elif '--check-independent' not in sys.argv:
+    elif '--check-independent' not in sys.argv and '--check-compatibility' not in sys.argv:
         compositor.wait()
 except KeyboardInterrupt:
     pass

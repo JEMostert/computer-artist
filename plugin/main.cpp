@@ -18,6 +18,7 @@
 #include <wayland/clientconnection.h>
 #include <wayland/display.h>
 #include <wayland/surface.h>
+#include <wayland/xdgshell.h>
 #include <wayland/seat.h>
 #include <wayland/pointer.h>
 #include <scene/imageitem.h>
@@ -44,6 +45,7 @@
 #include <cmath>
 #include <numbers>
 #include <functional>
+#include <utility>
 
 namespace KWin {
 // This distinct source identity lets real-device events preempt host automation.
@@ -103,6 +105,9 @@ private:
     Window *find(const QString &id) const;
     bool visible(Window *) const;
     Window *at(const QPointF &) const;
+    bool popupFor(Window *, Window *) const;
+    bool pointerTarget(Window *) const;
+    bool pointerReady() const;
     bool owns(SurfaceInterface *s) const { return m_client && s && s->client() == m_client; }
     QList<uint32_t> pointers(ClientConnection *client = nullptr) const;
     QStringList acquisitionReasons(Window *, bool host) const;
@@ -121,6 +126,7 @@ private:
     QPointer<ClientConnection> m_client;
     QPointer<Window> m_target;
     QPointer<SurfaceInterface> m_surface;
+    QList<QPointer<Window>> m_agentPopups;
     QPointer<QLocalSocket> m_owner;
     QList<uint32_t> m_resources;
     QSet<uint32_t> m_buttons;
@@ -170,10 +176,30 @@ Artist::Artist() {
     // enter may already have been sent here; release must preserve that enter.
     connect(waylandServer()->seat()->pointer(), &PointerInterface::focusedSurfaceChanged,
             this, [this] { if (owns(waylandServer()->seat()->focusedPointerSurface())) release(true); });
+    // A client-specific agent enter does not establish a host-seat grab. Keep
+    // popups created during our lease out of KWin's global popup input filter.
+    // This connection runs at creation, before the client's grab request.
+    connect(waylandServer(), &WaylandServer::windowCreated, this, [this](Window *w) {
+        if (!m_client || !valid() || !w->inherits("KWin::XdgPopupWindow") || !owns(w->surface())) return;
+        struct Lookup { SurfaceInterface *surface; XdgPopupInterface *popup = nullptr; } lookup{w->surface()};
+        wl_client_for_each_resource(m_client->client(), [](wl_resource *r, void *data) {
+            auto lookup=static_cast<Lookup *>(data);
+            if (strcmp(wl_resource_get_class(r), "xdg_popup")==0) {
+                auto popup=XdgPopupInterface::get(r);
+                if (popup && popup->surface()==lookup->surface) lookup->popup=popup;
+            }
+            return WL_ITERATOR_CONTINUE;
+        }, &lookup);
+        if (!lookup.popup) return;
+        auto parent=waylandServer()->findWindow(lookup.popup->parentSurface());
+        if (parent!=m_target && !popupFor(parent, m_target)) return;
+        if (QObject::disconnect(lookup.popup, SIGNAL(grabRequested(KWin::SeatInterface*,quint32)), w, nullptr))
+            m_agentPopups.append(w);
+    });
     for (auto w : workspace()->stackingOrder()) observe(w);
     connect(workspace(), &Workspace::windowAdded, this, [this](Window *w) {
         observe(w);
-        if (w->surface() && owns(w->surface())) release(true);
+        if (w->surface() && owns(w->surface()) && !popupFor(w, m_target)) release(true);
         if (m_hostClient && w->surface() && w->surface()->client()==m_hostClient) {
             m_hostStopReason="new_application_window"; releaseHost(true);
         }
@@ -243,6 +269,28 @@ Window *Artist::at(const QPointF &p) const {
     for (auto it=order.crbegin(); it!=order.crend(); ++it) if (visible(*it) && (*it)->hitTest(p)) return *it;
     return nullptr;
 }
+// Only explicitly parented native popup descendants belong to a target. A
+// second document, dialog, tooltip or unrelated client is not an input target.
+bool Artist::popupFor(Window *w, Window *target) const {
+    if (!w || !target || !w->inherits("KWin::XdgPopupWindow")
+        || !w->surface() || !target->surface()
+        || w->surface()->client()!=target->surface()->client()) return false;
+    QSet<Window *> seen;
+    for (auto parent=w->transientFor(); parent && !seen.contains(parent); parent=parent->transientFor()) {
+        if (parent==target) return true;
+        seen.insert(parent);
+    }
+    return false;
+}
+bool Artist::pointerTarget(Window *w) const {
+    return w && (w==m_target || popupFor(w, m_target)) && visible(w);
+}
+bool Artist::pointerReady() const {
+    auto w=at(m_position);
+    if (!pointerTarget(w) || !w->surface() || !m_surface) return false;
+    const auto [surface, local]=w->surface()->mapToInputSurface(w->inputTransformation().map(m_position));
+    return surface==m_surface && !surface->lockedPointer() && !surface->confinedPointer();
+}
 QList<uint32_t> Artist::pointers(ClientConnection *client) const {
     QList<uint32_t> result;
     if (!client) client = m_client;
@@ -271,7 +319,7 @@ bool Artist::valid() const {
     auto seat = waylandServer()->seat();
     if (owns(seat->focusedPointerSurface()) || owns(seat->focusedKeyboardSurface()) || seat->isDrag() || seat->isTouchSequence()) return false;
     if (m_agentKeyboard.initialized() && !m_agentKeyboard.ready()) return false;
-    for (auto w : workspace()->stackingOrder()) if (owns(w->surface()) && (w->hasPopupGrab() || w->isSpecialWindow())) return false;
+    for (auto w : workspace()->stackingOrder()) if (owns(w->surface()) && (w->hasPopupGrab() || (w->isSpecialWindow() && !(w==m_target && w->inherits("KWin::XdgPopupWindow")) && !popupFor(w, m_target)))) return false;
     return true;
 }
 void Artist::observe(Window *w) {
@@ -283,7 +331,7 @@ void Artist::observe(Window *w) {
         }
     });
     auto changed = [this,w] {
-        if (m_client && owns(w->surface())) { ++m_generation; release(true); }
+        if (m_client && owns(w->surface()) && !popupFor(w, m_target)) { ++m_generation; release(true); }
         if (m_hostTarget == w) { ++m_hostGeneration; m_hostStopReason="target_changed"; releaseHost(true); }
     };
     connect(w, &Window::closed, this, changed);
@@ -299,7 +347,8 @@ QStringList Artist::acquisitionReasons(Window *w, bool host) const {
     auto seat = waylandServer()->seat();
     auto sameClient = [client](SurfaceInterface *surface) { return surface && surface->client() == client; };
     if (client == waylandServer()->xWaylandConnection()) reasons.append("xwayland_unsupported");
-    if (!w->inherits("KWin::XdgToplevelWindow") || w->isSpecialWindow()) reasons.append("window_type_unsupported");
+    if ((!w->inherits("KWin::XdgToplevelWindow") && !w->inherits("KWin::XdgPopupWindow"))
+        || (w->isSpecialWindow() && !w->inherits("KWin::XdgPopupWindow"))) reasons.append("window_type_unsupported");
     if (waylandServer()->isScreenLocked()) reasons.append("screen_locked");
     if (seat->isDrag() || seat->isTouchSequence()) reasons.append("seat_gesture_active");
     if (!input()->keyboard()->pressedKeys().isEmpty()) reasons.append("keyboard_keys_held");
@@ -313,7 +362,8 @@ QStringList Artist::acquisitionReasons(Window *w, bool host) const {
     if (host ? bool(m_hostOwner) : bool(m_client)) reasons.append("lane_busy");
     if (host ? owns(w->surface()) : m_hostClient == client) reasons.append("other_lane_owns_application");
     for (auto sibling : workspace()->stackingOrder()) {
-        if (sameClient(sibling->surface()) && (sibling->hasPopupGrab() || sibling->isSpecialWindow())) {
+        if (sameClient(sibling->surface()) && (sibling->hasPopupGrab() || (sibling->isSpecialWindow()
+                && !( !host && (sibling==w || popupFor(sibling, w) || popupFor(w, sibling)))))) {
             reasons.append("application_popup_or_special_window"); break;
         }
     }
@@ -344,7 +394,7 @@ bool Artist::acquire(Window *w, QLocalSocket *socket) {
 bool Artist::move(const QPointF &p) {
     if (!valid() || !std::isfinite(p.x()) || !std::isfinite(p.y()) || pointers() != m_resources) return false;
     auto w = at(p);
-    if (!w || w != m_target || !w->clientGeometry().contains(p)) return false;
+    if (!w || !pointerTarget(w) || !w->clientGeometry().contains(p)) return false;
     auto [surface, local] = w->surface()->mapToInputSurface(w->inputTransformation().map(p));
     if (!surface || surface->lockedPointer() || surface->confinedPointer()) return false;
     local = surface->toSurfaceLocal(local);
@@ -366,7 +416,7 @@ bool Artist::move(const QPointF &p) {
     return true;
 }
 bool Artist::button(uint32_t code, bool down) {
-    if (!valid() || !m_surface || pointers()!=m_resources || at(m_position)!=m_target
+    if (!valid() || !m_surface || pointers()!=m_resources || !pointerReady()
         || (code < 272 || code > 274) || m_buttons.contains(code)==down) return false;
     if (down) { m_buttons.insert(code); m_lastClick=m_clock.elapsed(); } else m_buttons.remove(code);
     auto serial = waylandServer()->display()->nextSerial();
@@ -401,6 +451,8 @@ void Artist::release(bool revoke) {
     auto owner = m_owner;
     m_owner.clear();
     m_watchdog.stop();
+    const auto popups=std::exchange(m_agentPopups, {});
+    for (auto it=popups.crbegin(); it!=popups.crend(); ++it) if (*it) (*it)->popupDone();
     cancelPointer();
     m_agentKeyboard.end(uint32_t(m_clock.elapsed()));
     disconnect(m_clientClosed);
@@ -417,6 +469,10 @@ QJsonArray Artist::windows() const {
         const auto hostReasons = acquisitionReasons(w, true);
         result.append(QJsonObject{{"id",w->internalId().toString(QUuid::WithoutBraces)}, {"title",w->caption()},
             {"pid",int(w->surface()->client()->processId())},{"native",native},{"backend",native?"wayland":"xwayland"},
+            {"parent",w->transientFor()?w->transientFor()->internalId().toString(QUuid::WithoutBraces):QString()},
+            {"role",w->inherits("KWin::XdgPopupWindow")?"popup":w->isDialog()?"dialog":"toplevel"},
+            {"popup_grab",w->hasPopupGrab()},{"modal",w->isModal()},
+            {"observable",visible(w) && (!w->isSpecialWindow() || w->inherits("KWin::XdgPopupWindow"))},
             {"agent_keyboard",native && !ArtistKeyboard::resources(w->surface()->client()).isEmpty()},
             {"visible",visible(w)},{"agent",owns(w->surface())},{"host",m_hostClient && w->surface()->client()==m_hostClient},{"human_active",workspace()->activeWindow()==w},
             {"acquirable",agentReasons.isEmpty()},
@@ -437,9 +493,9 @@ QJsonObject Artist::request(QLocalSocket *socket, const QJsonObject &o) {
     bool ok=false;
     if (!observation && op!="takeover" && op!="session_close" && op!="session_status" && lane=="agent" && m_owner && m_owner!=socket) reply.insert("error","controller_busy");
     else if (op=="capabilities") {
-        reply = {{"protocol",3},{"backend","stock_kwin_plugin"},{"ownership","wayland_connection_pointer_keyboard"},
+        reply = {{"environment",qEnvironmentVariable("CA_ENVIRONMENT")},{"protocol",3},{"backend","stock_kwin_plugin"},{"ownership","wayland_connection_pointer_keyboard"},
             {"automatic_sessions",true},{"lane",lane},{"host_pointer",true},{"host_focus",true},{"host_keyboard",true},{"host_xwayland",false},{"native_handoff",true},{"xwayland_handoff",false},{"keyboard",true},{"input_methods",false},
-            {"clipboard",false},{"data_drag_and_drop",false},{"popups",false},{"human_pointer_entry_takeover",true},
+            {"clipboard",false},{"data_drag_and_drop",false},{"popups",false},{"popup_observation",true},{"ungrabbed_popup_pointer",true},{"capture_transients",true},{"human_pointer_entry_takeover",true},
             {"operations",QJsonArray{"session_close","session_status","windows","capabilities","acquire","release","move","button","scroll","keyboard_begin","key","cancel","takeover","ping","capture"}}};
         if (lane=="host") {
             reply.insert("ownership","host_wayland_connection");
@@ -483,7 +539,7 @@ QJsonObject Artist::request(QLocalSocket *socket, const QJsonObject &o) {
     else if (op=="capture") {
         auto w=find(o.value("window").toString());
         const auto path=o.value("path").toString();
-        if (!waylandServer()->isScreenLocked() && w && !w->isSpecialWindow() && w->surface() && visible(w)
+        if (!waylandServer()->isScreenLocked() && w && (!w->isSpecialWindow() || w->inherits("KWin::XdgPopupWindow")) && w->surface() && visible(w)
             && QFileInfo(path).isAbsolute() && !QFileInfo::exists(path)) {
             auto image = captureClient(w);
             if (!image.isNull()) {
@@ -515,7 +571,7 @@ QJsonObject Artist::request(QLocalSocket *socket, const QJsonObject &o) {
         else if(op=="button" && o.value("code").isDouble() && o.value("pressed").isBool()) {
             const auto code=o.value("code").toDouble();
             if(code>=272 && code<=274 && code==std::floor(code)) ok=button(uint32_t(code),o.value("pressed").toBool());
-        } else if(op=="scroll" && valid() && m_surface && pointers()==m_resources && at(m_position)==m_target
+        } else if(op=="scroll" && valid() && m_surface && pointers()==m_resources && pointerReady()
             && o.value("delta").isDouble() && (o.value("axis")=="vertical" || o.value("axis")=="horizontal")) {
             double delta=o.value("delta").toDouble();
             if(std::isfinite(delta) && std::abs(delta)<1000000) {
@@ -675,7 +731,7 @@ QJsonObject Artist::requestHost(QLocalSocket *socket,const QJsonObject &o) {
             input()->pointer()->processMotionAbsolute(p,hostTime(),&m_hostDevice);
             input()->pointer()->processFrame(&m_hostDevice);
             ok=hostValid() && QLineF(input()->pointer()->pos(),p).length()<1;
-        }
+        } else error=!m_hostTarget->clientGeometry().contains(p)?"point_outside_target_content":"target_occluded_at_point";
     } else if((op=="button" || op=="scroll") && at(input()->pointer()->pos())==m_hostTarget
               && waylandServer()->seat()->focusedPointerSurface()
               && waylandServer()->seat()->focusedPointerSurface()->client()==m_hostClient) {

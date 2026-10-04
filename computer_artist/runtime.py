@@ -213,6 +213,10 @@ class Context:
         if not self.owned:
             self.client.acquire(self.window_id)
             self.owned = True
+            if self.lane == 'host' and self.capabilities.get('environment'):
+                # The plugin reports a private desktop: no human uses its seat, so
+                # raise the target before other environment windows occlude input.
+                self.client.focus(self.window_id)
         elif not self.client.lease:
             self._interrupt('App ownership was lost', 'ownership_revoked')
 

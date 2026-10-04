@@ -1,0 +1,16 @@
+# Computer Artist environment recipe: Qt and terminal fixtures in rootless Podman.
+# ca env start NAME --recipe tests/integration/containers/fixture-env.toml
+containerfile = "fixture.Containerfile"
+project = "../../.."
+cpus = 2
+memory = "2g"
+
+[[apps]]
+command = ["python3", "tests/integration/seat_fixture.py", "agent"]
+wait_window = "Agent canvas"
+name = "canvas"
+
+[[apps]]
+command = ["foot", "--title", "fixture terminal"]
+wait_window = "fixture terminal"
+name = "terminal"

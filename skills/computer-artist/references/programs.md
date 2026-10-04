@@ -67,8 +67,9 @@ in a fresh run. App-created dialogs can change human focus. `ca runs stop ID`
 requests cancellation; inspect the final acknowledgment before retrying. Partial
 checkpoints can miss later actions and never establish completion.
 
-If acquisition is blocked by human pointer/focus on the target, explicitly park
-both in another visible application using `ca --host focus --window OTHER` and
-`ca --host move --window OTHER --x X --y Y`. Prefer the chat window and an observed
-safe content point. Then return to agent input; this recovery does not authorize
-performing the task through the human pointer. Do not ask the user to park manually.
+Keep `--environment TASK_NAME` on every private-environment command, including
+host-lane operations. Never drop it to recover from an acquisition failure.
+For explicitly requested actual-desktop work, parking human pointer/focus with
+`ca --host focus` or `ca --host move` requires authorization in the current task;
+this reference does not grant it. Use an observed safe point only when authorized,
+then return to agent input. Never use host recovery to bypass a refused action.

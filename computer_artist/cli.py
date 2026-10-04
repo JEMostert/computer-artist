@@ -3,6 +3,7 @@
 import argparse
 import json
 import math
+import os
 import signal
 import sys
 from pathlib import Path
@@ -45,6 +46,10 @@ def chord(value):
 def parser():
     shared = argparse.ArgumentParser(add_help=False, argument_default=argparse.SUPPRESS)
     shared.add_argument(
+        '--environment',
+        help='Use a running private desktop from ca env; never falls back to your desktop',
+    )
+    shared.add_argument(
         '--socket', help='Control socket (default: CA_SOCKET, then the host session)'
     )
     shared.add_argument(
@@ -71,7 +76,7 @@ def parser():
         parents=[shared],
         description='Computer Artist: independent agent input on your desktop',
     )
-    result.add_argument('--version', action='version', version='Computer Artist 0.2.0')
+    result.add_argument('--version', action='version', version='Computer Artist 0.3.0')
     # Shared options are declared before child parsers copy them.
     shared.add_argument('--window-dir', help='Window layouts and fragments root')
     shared.add_argument('--output-dir', help='Run output root')
@@ -83,6 +88,9 @@ def parser():
     from .setup import add_command
 
     add_command(commands)
+    from .environment_commands import add_command as add_environments
+
+    add_environments(commands)
     doctor = commands.add_parser(
         'doctor',
         parents=[shared],
@@ -332,11 +340,33 @@ def execute(client, args):
     }
 
 
+def route_environment(args, explicit_lane):
+    """Point every connection and record at a running private desktop, or refuse."""
+    from .config import default_window_dir
+    from .environments import route
+
+    if args.socket:
+        raise ValueError('--environment cannot be combined with --socket')
+    info = route(args.environment)
+    # Fragments are reusable work shared by all desktops; names and maps hold
+    # window IDs that only exist inside this one.
+    os.environ['CA_FRAGMENT_ROOT'] = str(Path(args.window_dir or default_window_dir()).resolve())
+    args.socket = info['socket']
+    args.window_dir = args.window_dir or info['window_dir']
+    args.output_dir = args.output_dir or info['output_dir']
+    # Nobody else uses a private desktop's seat, so its real pointer and focus
+    # are the default lane. The user's desktop is never selected by this path.
+    if not explicit_lane:
+        args.lane = 'host'
+    args.environment_info = {'name': info['name'], 'kind': info.get('kind'), 'lane': args.lane}
+
+
 def main(argv=None):
     argument_parser = parser()
     args, extra = argument_parser.parse_known_args(argv)
     if extra and not (args.command == 'fragments' and args.fragment_action == 'run'):
         argument_parser.error('unrecognized arguments: ' + ' '.join(extra))
+    explicit_lane = 'lane' in vars(args)
     for name, default in (
         ('socket', None),
         ('deadline', 120),
@@ -355,6 +385,13 @@ def main(argv=None):
 
     signal.signal(signal.SIGTERM, terminate)
     try:
+        if args.command == 'env':
+            from .environment_commands import dispatch
+
+            print(json.dumps(dispatch(args), indent=2))
+            return 0
+        if getattr(args, 'environment', None):
+            route_environment(args, explicit_lane)
         if args.command == 'setup':
             from .setup import install
 

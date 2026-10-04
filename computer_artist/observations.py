@@ -30,6 +30,11 @@ def image_box(rect, window, image):
     return (int(x * sx), int(y * sy), math.ceil((x + w) * sx), math.ceil((y + h) * sy))
 
 
+def observable(window):
+    """Capture is read-only, so XWayland windows qualify; their input stays unsupported."""
+    return bool(window.get('visible') and window.get('observable', window.get('native')))
+
+
 class Observations:
     limit = 15
 
@@ -98,8 +103,8 @@ class Observations:
         window = next((w for w in self.client.windows() if w['id'] == identity), None)
         if window is None:
             raise Interrupted('Target window closed')
-        if not window.get('native') or not window.get('visible'):
-            raise Interrupted('Target is not a visible native Wayland window')
+        if not observable(window):
+            raise Interrupted('Target is not a visible window the compositor can capture')
         previous, old = self._snapshot(identity, since) if since else (None, None)
         with self.store.locked():
             folder = self.directory(identity)
@@ -109,12 +114,7 @@ class Observations:
             try:
                 capture = self.client.request('capture', window=identity, path=str(path))
                 after = next((w for w in self.client.windows() if w['id'] == identity), None)
-                if (
-                    after is None
-                    or not after.get('native')
-                    or not after.get('visible')
-                    or geometry(after) != geometry(window)
-                ):
+                if after is None or not observable(after) or geometry(after) != geometry(window):
                     raise Interrupted(
                         'Window disappeared, became unsupported or changed geometry during capture; observe again'
                     )

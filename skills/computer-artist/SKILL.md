@@ -1,6 +1,6 @@
 ---
 name: computer-artist
-description: Use the ca CLI to interact with supported windowed applications on KDE Wayland, including drawing, conditional programs and verified saves.
+description: Use the ca CLI to test and interact with GUI applications, preferring private agent environments; control the actual KDE Wayland desktop only when explicitly requested.
 ---
 
 # Computer Artist
@@ -9,18 +9,56 @@ Use `ca` from PATH or this skill's checkout. The CLI is the interface; Python
 `run(ctx)` programs are submitted through it, not a separate SDK. Desktop work
 requires the loaded KWin plugin. Skill setup does not deploy or update that plugin.
 
+## Select the environment first
+
+For development and testing, default to a private environment: its own KWin
+desktop, seat, clipboard, D-Bus session (with desktop portals) and optionally a
+rootless Podman container for the app. Use distinct names for concurrent agents
+and separate worktrees for concurrent edits. Mounted folders stay shared; a
+private desktop is not a security sandbox. Stop what you started; never stop
+another agent's environment. If an environment fails, report the blocker; never
+fall back to the user's desktop or main browser.
+
+```bash
+ca env start TASK --image IMAGE --project .          # or --containerfile FILE
+ca env start TASK --recipe ca-env.toml               # image, mounts, limits, startup apps
+ca env exec TASK --name app --wait-window TITLE -- program args
+ca env exec TASK --wait -- npm test                  # one-off command, returns status/output
+ca env browser TASK --family chromium --executable chromium --name web
+ca --environment TASK windows                         # every ca command takes --environment
+ca env doctor TASK; ca env logs TASK a1; ca env status TASK
+ca env stop TASK                                      # evidence and definition are kept
+```
+
+Without `--image`/`--containerfile`, apps run from the host in the private desktop
+(`ca env exec --on-host` does this inside container environments). Container apps
+see mounts at their host paths; their HOME is `status.home`, readable on the host,
+so write test evidence there or into the project. `start` is idempotent and reports
+the next command; flags update the stored definition (`ca env show TASK`).
+`ca env exec` reports `ok: false`, the exit status and log tail when an app dies.
+Read [environments](references/environments.md) for recipes, browsers and limits.
+
+## Observe and interact
+
+All commands below and in references take `--environment TASK` when working
+privately. Inside an environment the default lane is that desktop's own seat (no
+human uses it); targets are raised automatically. Never drop the selector to
+recover from a refusal. XWayland windows can be observed but not driven.
+
 Inspect `ca capabilities`, `ca windows`, `ca doctor --window APP` and a fresh
 `ca observe --window APP` image. Name an exact live ID with `ca set ID --name APP`.
 After reopening, rebind explicitly; `--title TEXT` must match one window.
-Human pointer/focus must stay outside the target connection. If either is inside,
-use explicit `ca --host focus --window OTHER` and `ca --host move --window OTHER
---x X --y Y` to park them in another visible application (prefer the agent's chat).
-Observe that application's geometry and choose a safe content point. The user
-has requested this recovery; do not ask them to move the pointer manually. Then
-retry the task through the agent lane. Do not use host input to perform a refused
-agent action. Takeover during work still stops input; inspect before retrying.
-XWayland and popup grabs are unsupported;
-dialogs can still activate themselves and change human focus.
+Check live capabilities and verify menus/dialogs in the actual app. Agent-lane
+menus opened during a lease are observable and selectable in the tested Qt fixture;
+do not infer general compatibility. Report native Wayland and XWayland separately.
+
+Actual-desktop control remains available when the user explicitly requests it.
+Only in that mode omit `--environment`. Human pointer/focus must stay outside the
+agent target connection. Host focus/pointer recovery requires authorization in the
+current task; this skill itself does not grant it. Never silently move the human's
+pointer or steal focus. Do not use host input to perform a refused agent action.
+Human takeover stops input; inspect before retrying. App dialogs can change human
+focus; do not promise prevention.
 
 Inspect `window/layout/APP/`; map the controls/work area needed now. Stable controls
 use `ca target APP NAME --observation OBS --rect X Y W H` and guarded

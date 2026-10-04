@@ -1,0 +1,28 @@
+{
+  "date": "2026-10-04",
+  "scope": "Private agent environments (ca env) with rootless Podman, popup compatibility and plugin error codes",
+  "host": {"kwin": "6.7.5", "podman": "6.1.3", "python": "3.14"},
+  "python_tests": "222 passed (unittest discovery), ruff check/format clean",
+  "separate_kwin_integration": {
+    "suites": ["pointer/capture", "programs", "host lanes", "host text", "independent keys", "recovery", "Qt menu popup"],
+    "result": "all passed with the rebuilt plugin; host plugin not deployed"
+  },
+  "environments_exercised": {
+    "container_start_seconds": "0.7-1.5 including cached build and two startup apps",
+    "stop_seconds": 0.4,
+    "concurrent": "4 container environments; ~230 MiB per desktop service, ~40 MB per Alpine container; four concurrent SVG draws verified",
+    "native_wayland_in_container": ["PySide6 Qt canvas: draw/click verified", "foot terminal: paste and keys verified"],
+    "host_app_in_environment": ["Qt canvas", "Vivaldi with private and copied profile (opens; wallet-encrypted logins not decryptable)"],
+    "xwayland_in_container": "xterm displays and is observable; input unsupported",
+    "private_services": "xdg-desktop-portal answered RemoteDesktop from inside a container over the private bus",
+    "fixed_during_testing": [
+      "exec swallowed its own options",
+      "container apps lacked a host-readable folder (HOME is now same-path)",
+      "occluded targets in a private desktop are raised before input",
+      "Chromium-family browsers aborted without KDE_SESSION_VERSION",
+      "doctor judged the agent lane inside environments",
+      "XWayland windows could not be observed"
+    ]
+  },
+  "not_verified": ["audio/microphone (none provided)", "NVIDIA GPU in containers (no CDI spec on this host)", "GTK and browser input in containers", "portal RemoteDesktop end-to-end paste"]
+}

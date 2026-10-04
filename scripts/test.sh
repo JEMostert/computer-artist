@@ -13,6 +13,7 @@ if [[ "${1:-}" == "--integration" ]]; then
     CA_OUTPUT_DIR="$integration_output" python tests/integration/run-stock-plugin.py --headless --check
     CA_OUTPUT_DIR="$integration_output" python tests/integration/run-stock-plugin.py --headless --check-independent
     CA_OUTPUT_DIR="$integration_output" python tests/integration/run-stock-plugin.py --headless --check-recovery
+    CA_OUTPUT_DIR="$integration_output" python tests/integration/run-stock-plugin.py --headless --check-compatibility
 elif [[ $# -gt 0 ]]; then
     echo 'Usage: scripts/test.sh [--integration]' >&2
     exit 2

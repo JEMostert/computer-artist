@@ -93,3 +93,42 @@ class DiagnosticsTest(unittest.TestCase):
             self.assertTrue(window['host_candidate'])
             self.assertIn('human_pointer_in_application', window['restriction_codes'])
             self.assertFalse((root / 'window').exists())
+
+    def test_private_environment_judges_the_host_lane_it_will_use(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            args = Namespace(
+                window_dir=root / 'window',
+                output_dir=root / 'output',
+                socket=str(root / 'control'),
+                deadline=2,
+                window='app',
+                build=False,
+                lane='host',
+                environment_info={'name': 'web', 'kind': 'container', 'lane': 'host'},
+            )
+            client = MagicMock()
+            client.__enter__.return_value = client
+            client.request.side_effect = [
+                {'protocol': 3, 'operations': ['capture'], 'environment': 'web'},
+                {
+                    'windows': [
+                        {
+                            'id': 'app',
+                            'title': 'App',
+                            'native': True,
+                            'visible': True,
+                            'human_active': True,
+                            'acquirable': False,
+                            'agent_restrictions': ['human_keyboard_in_application'],
+                            'host_acquirable': True,
+                            'host_restrictions': [],
+                        }
+                    ]
+                },
+                {'clipboard': True},
+            ]
+            with patch('computer_artist.diagnostics.Client', return_value=client):
+                report = diagnose(args)
+            self.assertTrue(report['ok'])
+            self.assertEqual((report['lane'], report['environment']['name']), ('host', 'web'))

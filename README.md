@@ -9,6 +9,21 @@ Returning to it revokes agent control. `--host` explicitly selects the real desk
 pointer, focus and clipboard. The agent lane never falls back to host input.
 XWayland, independent clipboard/IME and popup grabs are unsupported.
 
+For development and testing, give each agent a private environment instead: its own
+KWin desktop, seat, clipboard and session bus, with apps from the host or a rootless
+Podman container. Nothing in it touches your pointer, focus or browser:
+
+```bash
+ca env start web --image docker.io/library/node:22 --project .   # or --recipe ca-env.toml
+ca env exec web --name app --wait-window "My App" -- npm run start
+ca --environment web observe --window app
+ca --environment web click --window app --x 120 --y 80
+ca env stop web
+```
+
+See [private environments](skills/computer-artist/references/environments.md) for
+recipes, browsers, profile copies and limits.
+
 Install the CLI and build/load the matching plugin using [installation](docs/INSTALL.md):
 
 ```bash

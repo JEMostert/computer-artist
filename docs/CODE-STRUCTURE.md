@@ -13,6 +13,7 @@ path. There is no web interface or legacy `main(client)` runner.
 | Capture, diffs, guards, watch | `observations`, `watch` |
 | File checks and JSON inspection | `artifacts`, `records` |
 | Names, fragments, retention, files | `workspace`, `fragments`, `storage`, `files` |
+| Private environments: definitions/lifecycle, apps/browsers, service, CLI | `environments`, `environment_apps`, `environment_service`, `environment_commands` |
 | Geometry, keys, configuration/setup | `gestures`, `input`, `config`, `diagnostics`, `setup`, `errors` |
 
 `Context` owns coordinates, preflight, takeover/geometry guards and invocation
@@ -28,3 +29,5 @@ The package stays flat and acyclic. Core modules do not import CLI/process entry
 points. Storage/contracts do not depend on desktop input. Native ownership and the
 animated cursor stay in `plugin/main.cpp`; capture, clipboard and independent
 keyboard state have dedicated modules. Builds/tests do not update the host.
+`environment_service` runs inside each environment's systemd unit; the CLI talks
+to it over the private runtime's manager socket and never to the user's desktop.
