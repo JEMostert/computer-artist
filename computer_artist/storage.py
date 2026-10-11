@@ -80,23 +80,30 @@ def _marker(folder):
     return info
 
 
+def _leased(folder):
+    # Read-only callers must not create leases; a missing lock means nothing holds one.
+    try:
+        fd = os.open(folder / '.active.lock', os.O_RDWR | os.O_NOFOLLOW)
+    except FileNotFoundError:
+        return False
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        return True
+    finally:
+        os.close(fd)
+    return False
+
+
 def _entries(root):
     for folder in root.iterdir():
         if folder.is_symlink() or not folder.is_dir():
             continue
         try:
             info = _marker(folder)
-            fd = os.open(folder / '.active.lock', os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
+            active = _leased(folder)
         except (ValueError, OSError):
             continue
-        active = False
-        try:
-            try:
-                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            except BlockingIOError:
-                active = True
-        finally:
-            os.close(fd)
         yield {
             'id': folder.name,
             'created': info['created'],
@@ -137,7 +144,10 @@ def cleanup(root, *, dry_run=False, count=None, max_bytes=None, protect=()):
             # Keep the exclusive lease until deletion finishes. Workers acquire
             # their lease under the same root lock, so none can start between
             # this check and removal.
-            fd = os.open(root / entry['id'] / '.active.lock', os.O_RDWR | os.O_NOFOLLOW)
+            try:
+                fd = os.open(root / entry['id'] / '.active.lock', os.O_RDWR | os.O_NOFOLLOW)
+            except FileNotFoundError:
+                continue  # Removed since the snapshot; nothing left to lease.
             try:
                 try:
                     fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -181,6 +191,9 @@ def managed_run(root, identity=None):
             atomic_json(folder / MARKER, {'format': 1, 'created': time.time(), 'completed': False})
         except BaseException:
             os.close(fd)
+            # Unmarked folders are never adopted by _entries, so don't leave one behind.
+            if not os.path.lexists(folder / MARKER):
+                shutil.rmtree(folder, ignore_errors=True)
             raise
     try:
         cleanup(root, protect=(folder.name,))

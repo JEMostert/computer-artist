@@ -2,6 +2,7 @@ import io
 import json
 import os
 import socket
+import subprocess
 import tempfile
 import time
 import unittest
@@ -147,6 +148,130 @@ class EnvironmentDefinitionTest(unittest.TestCase):
             environments.remove('gone', True)
         self.assertIsNone(environments.stored('gone'))
 
+    def test_dict_mounts_get_the_same_validation_as_strings(self):
+        (self.root / 'src').mkdir()
+        bad = [
+            {'source': 'src', 'target': '/data:ro'},
+            {'source': 'src', 'target': '/data,x'},
+            {'source': 'src', 'target': 'relative'},
+            {'source': 'src', 'target': 5},
+            {'source': 'src', 'mode': 'rwx'},
+            {'source': ''},
+            'src:/data,x',
+        ]
+        for spec in bad:
+            with self.subTest(spec=spec), self.assertRaises(ValueError):
+                environments.parse_mount(spec, self.root)
+        (self.root / 'a:b').mkdir()
+        with self.assertRaisesRegex(ValueError, 'must not contain'):
+            environments.parse_mount({'source': 'a:b', 'target': '/data'}, self.root)
+        mount = environments.parse_mount({'source': 'src', 'target': '/data'}, self.root)
+        self.assertEqual(mount['target'], '/data')
+
+    def test_status_distinguishes_a_slow_manager_from_a_stopped_one(self):
+        cases = [
+            (TimeoutError(), None, 'manager not responding'),
+            (socket.timeout(), None, 'manager not responding'),
+            (ConnectionRefusedError(), False, None),
+            (FileNotFoundError(), False, None),
+            (RuntimeError('rejected'), False, 'rejected'),
+        ]
+        for failure, running, error in cases:
+            with (
+                self.subTest(failure=failure),
+                patch.object(environments, 'exchange', side_effect=failure),
+            ):
+                info = environments.status('web')
+            self.assertIs(info['running'], running)
+            self.assertEqual(info.get('error'), error)
+
+    def test_remove_refuses_unless_the_manager_is_known_stopped(self):
+        environments.define('live', flags())
+        state, _ = environments.locations('live')
+        with patch.object(environments, 'exchange', side_effect=TimeoutError()):
+            with self.assertRaisesRegex(ValueError, 'not responding'):
+                environments.remove('live', True)
+        active = MagicMock(stdout='active\n')
+        with patch.object(environments, 'run', return_value=active) as run:
+            with self.assertRaisesRegex(ValueError, 'still active'):
+                environments.remove('live', True)
+        self.assertIn('is-active', run.call_args.args[0])
+        with (
+            patch.object(environments, 'exchange', return_value={'running': True}),
+            self.assertRaisesRegex(ValueError, 'running'),
+        ):
+            environments.remove('live', True)
+        self.assertTrue(state.exists())
+        with patch.object(environments, 'run', return_value=MagicMock(stdout='inactive\n')):
+            environments.remove('live', True)
+        self.assertFalse(state.exists())
+
+    def test_start_refuses_when_the_manager_is_not_responding(self):
+        environments.define('slow', flags())
+        with (
+            patch.object(environments, 'exchange', side_effect=TimeoutError()),
+            self.assertRaisesRegex(ValueError, 'not responding'),
+        ):
+            environments.start(Namespace(name='slow', **vars(flags())))
+
+    def test_cleanup_failure_is_a_note_on_the_original_error(self):
+        original = RuntimeError('start failed')
+        with patch.object(environments, 'stop', side_effect=RuntimeError('Stop incomplete')):
+            environments.stop_after_failure('web', original)
+        self.assertIn('Stop incomplete', original.__notes__[0])
+        with patch.object(environments, 'stop') as stop:
+            environments.stop_after_failure('web', original)
+        stop.assert_called_once_with('web')
+        self.assertEqual(len(original.__notes__), 1)
+
+    def test_oversized_requests_are_refused_before_connecting(self):
+        request = {'op': 'exec', 'argv': ['x' * environments.MAX_REQUEST]}
+        with (
+            patch.object(environments.socket, 'socket') as opened,
+            self.assertRaisesRegex(ValueError, 'Request too large'),
+        ):
+            environments.exchange(self.root, request)
+        opened.assert_not_called()
+
+    def test_stop_post_quotes_every_word_and_needs_podman(self):
+        runtime = self.root / 'my "run" time'
+        with (
+            patch.dict(os.environ, XDG_RUNTIME_DIR=str(runtime)),
+            patch.object(environments.shutil, 'which', return_value='/opt/my tools/podman'),
+        ):
+            line = environments.exec_stop_post('web')
+        self.assertTrue(line.startswith('--property=ExecStopPost=-"/usr/bin/env" '))
+        self.assertIn('"/opt/my tools/podman" "rm" "--force"', line)
+        self.assertIn(f'"XDG_RUNTIME_DIR={self.root}/my \\"run\\" time"', line)
+        self.assertTrue(line.endswith('"ca-env-web"'))
+        self.assertEqual(environments.systemd_quote('a\\b%c$d'), '"a\\\\b%%c$$d"')
+        with (
+            patch.object(environments.shutil, 'which', return_value=None),
+            self.assertRaisesRegex(RuntimeError, 'podman not found'),
+        ):
+            environments.exec_stop_post('web')
+
+    def test_image_preparation_errors_are_actionable(self):
+        definition = {'image': 'alpine', 'containerfile': None}
+        log = self.root / 'build.log'
+        with (
+            patch.object(environments, 'run', side_effect=FileNotFoundError('podman')),
+            self.assertRaisesRegex(RuntimeError, 'podman not found'),
+        ):
+            environments.ensure_image('web', definition, log)
+        cases = [
+            (FileNotFoundError('podman'), 'podman not found'),
+            (subprocess.TimeoutExpired('podman', 1800), 'timed out'),
+        ]
+        for failure, message in cases:
+            with (
+                self.subTest(failure=failure),
+                patch.object(environments, 'run', return_value=MagicMock(returncode=1)),
+                patch.object(environments.subprocess, 'run', side_effect=failure),
+                self.assertRaisesRegex(RuntimeError, message),
+            ):
+                environments.ensure_image('web', definition, log)
+
 
 class EnvironmentCommandTest(unittest.TestCase):
     def test_exec_keeps_application_options_after_the_separator(self):
@@ -283,6 +408,32 @@ class ManagerTest(unittest.TestCase):
             self.assertIn('ready', Path(record['log']).read_text())
             with self.assertRaises(ValueError):
                 manager.handle({'op': 'exec', 'argv': ['bad\0arg']})
+
+    def test_missing_host_working_directory_is_an_error(self):
+        from computer_artist.environment_service import Manager
+
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            (root / 'state/logs/apps').mkdir(parents=True)
+            (root / 'runtime/shared').mkdir(parents=True)
+            config = {
+                'name': 'web',
+                'runtime': str(root / 'runtime'),
+                'state': str(root / 'state'),
+                'width': 800,
+                'height': 600,
+                'xwayland': False,
+                'container': None,
+            }
+            with (
+                patch.dict(os.environ, {'XAUTHORITY': ''}),
+                patch('computer_artist.environment_service.subprocess.run'),
+            ):
+                manager = Manager(config)
+            missing = str(root / 'nope')
+            with self.assertRaisesRegex(ValueError, 'Working directory does not exist'):
+                manager.handle({'op': 'exec', 'argv': ['true'], 'cwd': missing})
+            self.assertEqual(manager.counter, 0)
 
 
 if __name__ == '__main__':

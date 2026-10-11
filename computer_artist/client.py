@@ -410,7 +410,7 @@ class Client:
     def scroll(self, delta, *, axis='vertical', v120=0):
         return self.request('scroll', axis=axis, delta=delta, v120=v120)
 
-    def path(self, points, *, interval=0.016):
+    def path(self, points, *, interval=0.016, button=272):
         """Draw sampled points. Errors cancel the gesture; coordinates never retry silently."""
         if not math.isfinite(interval) or interval < 0:
             raise ValueError('Path interval must be finite and nonnegative')
@@ -421,7 +421,7 @@ class Client:
             raise ValueError('Path cannot be empty') from None
         self.move(*first)
         try:
-            self.button(pressed=True)
+            self.button(button, pressed=True)
             due = time.monotonic()
             for point in iterator:
                 due += interval
@@ -438,7 +438,7 @@ class Client:
                         self.request('ping')  # Reconcile ownership on exhaustion.
                     time.sleep(min(0.05, max(0, due - time.monotonic())))
                 self.move(*point)
-            self.button(pressed=False)
+            self.button(button, pressed=False)
         except BaseException:
             self.cancel()
             raise

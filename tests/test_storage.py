@@ -193,16 +193,46 @@ class StorageTest(unittest.TestCase):
         self.assertFalse(self.root.exists())
 
     def test_failed_run_initialization_releases_lease(self):
+        open_before = len(os.listdir('/proc/self/fd'))
         with patch.object(storage, 'atomic_json', side_effect=OSError('disk full')):
             with self.assertRaises(OSError):
                 with managed_run(self.root, 'failed'):
                     self.fail('Run started without a marker')
-        fd = os.open(self.root / 'failed' / '.active.lock', os.O_RDWR)
-        try:
-            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        finally:
-            os.close(fd)
+        self.assertEqual(len(os.listdir('/proc/self/fd')), open_before)
+        self.assertFalse((self.root / 'failed').exists())
         self.assertEqual(inspect(self.root)['runs'], [])
+
+    def test_cleanup_failure_before_work_still_completes_run_and_releases_lease(self):
+        open_before = len(os.listdir('/proc/self/fd'))
+        with patch.object(storage, 'cleanup', side_effect=OSError('disk busy')):
+            with self.assertRaises(OSError):
+                with managed_run(self.root, 'rotating'):
+                    self.fail('Run body executed after cleanup failed')
+        self.assertEqual(len(os.listdir('/proc/self/fd')), open_before)
+        info = json.loads((self.root / 'rotating' / MARKER).read_text())
+        self.assertTrue(info['completed'])
+        self.assertEqual(inspect(self.root)['runs'][0]['status'], 'completed')
+
+    def test_read_only_inspection_never_creates_lock_files(self):
+        folder = self.run_folder('unlocked', 1)
+        (folder / '.active.lock').unlink()
+        entry = inspect(self.root)['runs'][0]
+        self.assertFalse(entry['active'])
+        self.assertFalse((folder / '.active.lock').exists())
+
+    def test_cleanup_skips_entry_whose_lock_vanished_after_snapshot(self):
+        old = self.run_folder('old', 1)
+        self.run_folder('new', 2)
+        entries = storage._entries
+
+        def snapshot_then_remove_lock(root):
+            snapshot = list(entries(root))
+            (old / '.active.lock').unlink()
+            yield from snapshot
+
+        with patch.object(storage, '_entries', snapshot_then_remove_lock):
+            self.assertEqual(cleanup(self.root, count=1)['removed'], [])
+        self.assertTrue(old.exists())
 
     def test_storage_cli_is_offline_and_preserves_modules(self):
         self.run_folder('old', 1)

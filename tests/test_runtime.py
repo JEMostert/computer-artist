@@ -187,7 +187,7 @@ class RuntimeTest(unittest.TestCase):
         def broken(observation):
             raise ValueError('observer failed')
 
-        def button(pressed=True):
+        def button(code=272, pressed=True):
             if not pressed:
                 raise RuntimeError('release failed')
             self.backend.actions.append(('button', pressed))

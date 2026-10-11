@@ -77,12 +77,22 @@ class Workspace:
                 raise ValueError(
                     f'Both {source} and {destination} exist; move or archive one before naming'
                 )
-            if source != destination and source.exists():
+            moved = source != destination and source.exists()
+            if moved:
                 source.rename(destination)
             if old and old != name:
                 names.pop(old)
             names[name] = identity
-            atomic_json(self.root / 'names.json', names)
+            try:
+                atomic_json(self.root / 'names.json', names)
+            except BaseException as error:
+                # The registry still points at the old label, so the layout must follow it back.
+                if moved:
+                    try:
+                        destination.rename(source)
+                    except OSError as rollback:
+                        error.add_note(f'Could not restore layout {source}: {rollback}')
+                raise
         selected = next(w for w in windows if w['id'] == identity)
         return {
             'name': name,

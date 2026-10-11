@@ -9,6 +9,7 @@ from unittest.mock import patch
 from computer_artist.contracts import bind, contract
 from computer_artist.files import atomic_json
 from computer_artist.fragments import FragmentStore
+from computer_artist.workspace import Workspace
 
 
 class FragmentStoreTest(unittest.TestCase):
@@ -138,6 +139,44 @@ class FragmentStoreTest(unittest.TestCase):
         with self.assertRaises(FileNotFoundError):
             self.memory.load('missing')
         self.assertFalse(self.memory.root.exists())
+
+    def test_failed_revision_write_removes_only_its_new_version(self):
+        original = self.memory.write('step', 'def run(ctx): return 1')
+        folder = self.memory.folder('step')
+        with patch('computer_artist.fragments.atomic_text', side_effect=OSError('disk failure')):
+            with self.assertRaises(OSError):
+                self.memory.write('step', 'def run(ctx): return 2', update=True)
+        self.assertEqual(
+            sorted(path.name for path in (folder / 'versions').iterdir()), [original['version']]
+        )
+        self.assertEqual(list(folder.glob('.current-*')), [])
+        self.assertIn('return 1', self.memory.load('step')[1])
+        updated = self.memory.write('step', 'def run(ctx): return 2', update=True)
+        self.assertIn('return 2', self.memory.load('step')[1])
+        self.assertEqual(len(self.memory.history('step')), 2)
+        self.assertNotEqual(original['version'], updated['version'])
+
+
+class WorkspaceAssignTest(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.root = Path(self.tmp.name) / 'window'
+        self.workspace = Workspace(self.root, output=Path(self.tmp.name) / 'out')
+        self.windows = [{'id': 'w1', 'title': 'Canvas'}]
+
+    def test_failed_names_write_restores_layout_under_old_identity(self):
+        layout = self.root / 'layout'
+        (layout / 'w1').mkdir(parents=True)
+        with patch('computer_artist.workspace.atomic_json', side_effect=OSError('disk failure')):
+            with self.assertRaises(OSError):
+                self.workspace.assign('w1', 'paint', self.windows)
+        self.assertTrue((layout / 'w1').is_dir())
+        self.assertFalse((layout / 'paint').exists())
+        self.assertFalse((self.root / 'names.json').exists())
+        self.workspace.assign('w1', 'paint', self.windows)
+        self.assertTrue((layout / 'paint').is_dir())
+        self.assertFalse((layout / 'w1').exists())
 
 
 if __name__ == '__main__':

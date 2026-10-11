@@ -3,6 +3,7 @@
 import hashlib
 import json
 import os
+import shutil
 import time
 import uuid
 from pathlib import Path
@@ -145,16 +146,22 @@ class FragmentStore:
                 compatibility='unverified',
             )
             revision = folder / 'versions' / version
-            revision.mkdir(parents=True)
-            atomic_text(revision / 'module.py', source)
-            atomic_json(revision / 'manifest.json', manifest)
-            sync_directory(revision.parent)
             temporary = folder / ('.current-' + version)
-            temporary.symlink_to('versions/' + version)
-            for filename in ('module.py', 'manifest.json'):
-                if not (folder / filename).is_symlink():
-                    (folder / filename).symlink_to('current/' + filename)
-            os.replace(temporary, folder / 'current')
+            revision.mkdir(parents=True)
+            try:
+                atomic_text(revision / 'module.py', source)
+                atomic_json(revision / 'manifest.json', manifest)
+                sync_directory(revision.parent)
+                temporary.symlink_to('versions/' + version)
+                for filename in ('module.py', 'manifest.json'):
+                    if not (folder / filename).is_symlink():
+                        (folder / filename).symlink_to('current/' + filename)
+                # Last step: once current points at the new revision it must be kept.
+                os.replace(temporary, folder / 'current')
+            except BaseException:
+                shutil.rmtree(revision, ignore_errors=True)
+                temporary.unlink(missing_ok=True)
+                raise
             sync_directory(folder)
             sync_directory(folder.parent)
             sync_directory(self.root)

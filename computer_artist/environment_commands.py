@@ -18,6 +18,7 @@ from .environments import (
     state_root,
     status,
     stop,
+    stop_after_failure,
     stored,
 )
 
@@ -179,8 +180,8 @@ def dispatch(args):
         try:
             definition = stored(name)
             launched = [] if args.no_apps else launch_apps(name, definition)
-        except BaseException:
-            stop(name)
+        except BaseException as error:
+            stop_after_failure(name, error)
             raise
         return {**result, 'launched': launched, 'next': f'ca --environment {name} windows'}
     if action == 'stop':

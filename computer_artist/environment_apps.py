@@ -1,6 +1,7 @@
 """Applications, browsers and logs inside a running private environment."""
 
 import os
+import secrets
 import shutil
 import socket
 import time
@@ -178,6 +179,13 @@ def profile_in_use(source, family):
         return True
 
 
+def keeps_link(link, source):
+    # Absolute links and links leaving the source would tie the "independent" copy to host paths.
+    if os.path.isabs(os.readlink(link)):
+        return False
+    return link.resolve().is_relative_to(source)
+
+
 def copy_profile(source, destination, family):
     source = Path(source).expanduser().resolve()
     if not source.is_dir():
@@ -187,20 +195,35 @@ def copy_profile(source, destination, family):
             f'Source browser profile {source} is in use; close that browser before copying '
             '(live profiles are never copied or shared)'
         )
-    copied = {'files': 0, 'bytes': 0}
+    copied = {'files': 0, 'bytes': 0, 'skipped_symlinks': 0}
 
     def skip(folder, names):
         ignored = {n for n in names if n in PROFILE_SKIP}
         for n in names:
-            if n not in ignored:
-                path = Path(folder) / n
-                if path.is_file() and not path.is_symlink():
-                    copied['files'] += 1
-                    copied['bytes'] += path.stat().st_size
+            if n in ignored:
+                continue
+            path = Path(folder) / n
+            if path.is_symlink():
+                if not keeps_link(path, source):
+                    ignored.add(n)
+                    copied['skipped_symlinks'] += 1
+            elif path.is_file():
+                copied['files'] += 1
+                copied['bytes'] += path.stat().st_size
         return ignored
 
-    shutil.copytree(source, destination, symlinks=True, ignore=skip)
-    destination.chmod(0o700)
+    # Copy beside the destination first so a failed copy never leaves a partial profile behind.
+    staging = destination.with_name(f'{destination.name}.new-{secrets.token_hex(4)}')
+    try:
+        shutil.copytree(source, staging, symlinks=True, ignore=skip)
+        staging.chmod(0o700)
+    except BaseException:
+        shutil.rmtree(staging, ignore_errors=True)
+        raise
+    # The caller refuses an existing profile unless replacing it, so only now is the old one dropped.
+    if destination.exists():
+        shutil.rmtree(destination)
+    staging.rename(destination)
     return {'source': str(source), **copied}
 
 
@@ -223,17 +246,16 @@ def browser(args):
     profile = state / 'browsers' / key(label)
     copied = None
     if args.copy_profile:
-        if profile.exists():
-            if not args.replace_profile:
-                raise ValueError(
-                    f'Profile {profile} already exists; reuse it, choose --profile NAME or pass --replace-profile'
-                )
-            shutil.rmtree(profile)
+        if profile.exists() and not args.replace_profile:
+            raise ValueError(
+                f'Profile {profile} already exists; reuse it, choose --profile NAME or pass --replace-profile'
+            )
         source = (
             default_profile(args.family, args.executable)
             if args.copy_profile == 'default'
             else args.copy_profile
         )
+        # Replacing happens inside copy_profile, after the source has been validated.
         copied = copy_profile(source, profile, args.family)
     profile.mkdir(exist_ok=True, mode=0o700)
     if args.family == 'firefox':

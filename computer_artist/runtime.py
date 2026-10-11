@@ -2,6 +2,7 @@
 
 import json
 import math
+import os
 import time
 
 from .client import ActionError, Client, require_keyboard
@@ -193,11 +194,17 @@ class Context:
     def target(self, name, *, observation, rect):
         return self.observations.target(self.window_id, name, observation, rect)
 
-    def _point(self, *, target=None, relative=None, x=None, y=None):
+    def _point(self, *, target=None, relative=None, element=None, x=None, y=None):
         window = self.refresh()
-        if sum((target is not None, relative is not None, x is not None or y is not None)) != 1:
-            raise ValueError('Provide target, relative=(x,y), or x= and y=')
-        if target is not None:
+        sources = (target, relative, element, x if x is not None else y)
+        if sum(source is not None for source in sources) != 1:
+            raise ValueError('Provide target, relative=(x,y), element, or x= and y=')
+        if element is not None:
+            center = element.get('center') if isinstance(element, dict) else None
+            if not isinstance(center, (list, tuple)) or len(center) != 2:
+                raise ValueError('element must be an accessible element with a center')
+            x, y = center
+        elif target is not None:
             (x, y), self.last_observation = self.observations.resolve(self.window_id, target)
             window = self.refresh()
         elif relative is not None:
@@ -214,6 +221,52 @@ class Context:
         ):
             raise ValueError('Point is outside window content')
         return window['x'] + x, window['y'] + y
+
+    def accessible(self, *, role=None, name=None, max_nodes=2000):
+        """Read-only AT-SPI elements of this window in window-content coordinates.
+
+        The tree is the application's own claim; pointer input at an element's
+        center still goes through the usual guards. Verify outcomes as usual.
+        """
+        from .accessibility import elements
+
+        window = self.refresh()
+        self.check_budget()
+        result = elements(
+            window['pid'],
+            window.get('title', ''),
+            role=role,
+            name=name,
+            max_nodes=max_nodes,
+            deadline=self.client.expires,
+            session_address=os.environ.get('CA_ACCESSIBILITY_BUS'),
+        )
+        if result['application'] is None:
+            raise ValueError(
+                'Application exposes no accessibility tree; check ca a11y --status, enable it '
+                'and restart the application'
+            )
+        if result['frame'] is None:
+            raise ValueError(
+                f'No accessible frame matches the window title; frames: {result["frames"][:10]}'
+            )
+        return result['elements']
+
+    def find(self, *, role=None, name=None, showing=True):
+        """Exactly one accessible element, by role and/or name substring."""
+        if role is None and name is None:
+            raise ValueError('find requires role and/or name')
+        matches = [
+            element
+            for element in self.accessible(role=role, name=name)
+            if element['center'] is not None and (not showing or 'showing' in element['states'])
+        ]
+        if len(matches) != 1:
+            candidates = [(e['role'], e['name'], e['center']) for e in matches[:10]]
+            raise ValueError(
+                f'find matched {len(matches)} elements; refine role/name. Matches: {candidates}'
+            )
+        return matches[0]
 
     def _own(self):
         self.refresh()
@@ -233,13 +286,46 @@ class Context:
         self.client.move(*position)
         return {'status': 'dispatched'}
 
-    def click(self, *, button='left', **point):
+    def click(self, *, button='left', count=1, interval=0.08, **point):
+        """Click once, or count=2/3 for double/triple clicks at one position."""
         if button not in BUTTONS:
             raise ValueError('Unknown mouse button')
+        if type(count) is not int or not 1 <= count <= 3:
+            raise ValueError('count must be 1, 2 or 3')
+        if type(interval) not in (int, float) or not 0 <= interval <= 0.3:
+            raise ValueError('Multi-click interval must be between 0 and 0.3 seconds')
         position = self._point(**point)
         self._own()
-        self.client.click(*position, BUTTONS[button])
-        return {'status': 'dispatched'}
+        for index in range(count):
+            if index:
+                # Keep repeated clicks inside toolkit double-click time; a refresh
+                # here would add a compositor round trip between them.
+                self.check_budget()
+                time.sleep(interval)
+            self.client.click(*position, BUTTONS[button])
+        return {'status': 'dispatched', 'clicks': count}
+
+    def double_click(self, **point):
+        return self.click(count=2, **point)
+
+    def drag(self, start, end, *, button='left', relative=False, spacing=4, interval=0.016):
+        """Press at start, move in steps of at most spacing pixels, release at end."""
+        if button not in BUTTONS:
+            raise ValueError('Unknown mouse button')
+        if type(spacing) not in (int, float) or not math.isfinite(spacing) or spacing <= 0:
+            raise ValueError('spacing must be positive and finite')
+        (x0, y0), (x1, y1) = start, end
+        if relative:
+            window = self.refresh()
+            x0, x1 = x0 * window['width'], x1 * window['width']
+            y0, y1 = y0 * window['height'], y1 * window['height']
+        if not all(map(math.isfinite, (x0, y0, x1, y1))):
+            raise ValueError('Drag coordinates must be finite')
+        steps = max(1, math.ceil(math.hypot(x1 - x0, y1 - y0) / spacing))
+        points = [
+            (x0 + (x1 - x0) * i / steps, y0 + (y1 - y0) * i / steps) for i in range(steps + 1)
+        ]
+        return self.path(points, interval=interval, button=button)
 
     def scroll(self, delta, *, axis='vertical', **point):
         if axis not in ('vertical', 'horizontal') or not math.isfinite(delta):
@@ -247,7 +333,18 @@ class Context:
         self.move(**point)
         return self.client.scroll(delta, axis=axis)
 
-    def path(self, points, *, relative=False, interval=0.016, until=None, observe_every=10):
+    def path(
+        self,
+        points,
+        *,
+        relative=False,
+        interval=0.016,
+        until=None,
+        observe_every=10,
+        button='left',
+    ):
+        if button not in BUTTONS:
+            raise ValueError('Unknown mouse button')
         if until is not None and (
             not callable(until) or type(observe_every) is not int or observe_every < 1
         ):
@@ -273,11 +370,11 @@ class Context:
             raise ValueError('Path cannot be empty')
         self._own()
         if until is None:
-            self.client.path(positions, interval=interval)
+            self.client.path(positions, interval=interval, button=BUTTONS[button])
             return {'status': 'dispatched', 'points': len(positions)}
         self.client.move(*positions[0])
         try:
-            self.client.button(pressed=True)
+            self.client.button(BUTTONS[button], pressed=True)
             for index, position in enumerate(positions):
                 self.refresh()
                 self.client.move(*position)
@@ -297,7 +394,7 @@ class Context:
                     'points': len(positions),
                     'condition_observed': False,
                 }
-            self.client.button(pressed=False)
+            self.client.button(BUTTONS[button], pressed=False)
             return result
         except BaseException:
             self.client.cancel()

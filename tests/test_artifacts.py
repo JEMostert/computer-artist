@@ -3,6 +3,7 @@
 import hashlib
 import json
 import os
+import sys
 import tempfile
 import threading
 import time
@@ -176,6 +177,19 @@ class ArtifactsTest(unittest.TestCase):
         with patch('computer_artist.artifacts.MAX_PIXELS', 50):
             with self.assertRaisesRegex(ValueError, 'pixel budget'):
                 inspect_file(self.path, kind='image')
+
+    def test_missing_pillow_is_a_configuration_error_not_a_failed_export(self):
+        Image.new('RGB', (4, 4)).save(self.path, format='PNG')
+        with patch.dict(sys.modules, {'PIL': None, 'PIL.Image': None}):
+            with self.assertRaisesRegex(RuntimeError, 'Pillow is required'):
+                self.wait(kind='image')
+
+    def test_decode_bomb_is_a_failed_check_with_pixel_limit_evidence(self):
+        Image.new('RGB', (10, 10)).save(self.path, format='PNG')
+        with patch('PIL.Image.MAX_IMAGE_PIXELS', 10):
+            result = self.wait(kind='image')
+        self.assertFalse(result['passed'])
+        self.assertEqual(result['evidence']['reason'], 'image exceeds decoded pixel limit')
 
     def test_validation_rejects_incompatible_or_wrong_path_expectations(self):
         self.path.write_text('saved', encoding='utf-8')

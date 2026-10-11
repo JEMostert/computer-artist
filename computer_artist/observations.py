@@ -63,7 +63,8 @@ class Observations:
                     if record['window']['id'] == window_id:
                         return record
             raise FileNotFoundError(identity)
-        except FileNotFoundError:
+        except (OSError, ValueError, KeyError, TypeError):
+            # Missing, pruned or damaged records all mean the same to a caller.
             raise ValueError(
                 'Observation expired or belongs to another window; observe again'
             ) from None
@@ -190,7 +191,21 @@ class Observations:
 
     def targets(self, window):
         folder = self.store.layout(window) / 'targets'
-        return [json.loads(p.read_text()) for p in sorted(folder.glob('*.json'))]
+        return [self._target_file(p) for p in sorted(folder.glob('*.json'))]
+
+    @staticmethod
+    def _target_file(path):
+        try:
+            target = json.loads(path.read_text())
+            if not isinstance(target, dict) or not isinstance(target.get('geometry'), list):
+                raise ValueError(path)
+            return target
+        except FileNotFoundError:
+            raise ValueError(f'Target @{path.stem} is not defined for this window') from None
+        except (OSError, ValueError) as error:
+            raise ValueError(
+                f'Target @{path.stem} is damaged ({error}); redefine it with ca target'
+            ) from None
 
     def target(self, window, name, observation, rect):
         record, image = self._snapshot(window, observation)
@@ -231,7 +246,7 @@ class Observations:
         with self.store.locked():
             self._validate_live_observation(window, record)
             path = self.store.layout(window) / 'targets' / (name + '.json')
-            target = json.loads(path.read_text())
+            target = self._target_file(path)
             rect = rectangle(target['rect'], record['window']['width'], record['window']['height'])
             if tuple(target['geometry']) != geometry(record['window']):
                 raise Interrupted(
@@ -248,7 +263,7 @@ class Observations:
 
     def resolve(self, window, name):
         name = key(name.lstrip('@'))
-        target = json.loads((self.store.layout(window) / 'targets' / (name + '.json')).read_text())
+        target = self._target_file(self.store.layout(window) / 'targets' / (name + '.json'))
         if target.get('window_id') != self.store.resolve_window(window):
             raise Interrupted(
                 f'Target @{name} belongs to another window or has no recorded window identity; '

@@ -16,7 +16,7 @@ import sys
 import time
 from pathlib import Path
 
-from .environments import APP_ENV, check_env, host_environment
+from .environments import APP_ENV, MAX_REQUEST, check_env, host_environment
 
 
 def serve(config_path):
@@ -121,13 +121,15 @@ class Manager:
             raise ValueError('Expected a nonempty command argument list')
         extra = check_env(request.get('env') or {})
         on_host = bool(request.get('on_host')) or not self.config.get('container')
+        cwd = request.get('cwd')
+        if on_host and cwd and not Path(cwd).is_dir():
+            raise ValueError(f'Working directory does not exist: {cwd}')
         self.counter += 1
         identity = f'a{self.counter}'
         log_path = self.state / 'logs/apps' / f'{self.stamp}-{identity}.log'
-        cwd = request.get('cwd')
         if on_host:
             argv, env = command, {**self.env, **extra}
-            cwd = cwd if cwd and Path(cwd).is_dir() else str(Path.home())
+            cwd = cwd or str(Path.home())
         else:
             argv = ['podman', 'exec', '--interactive=false']
             for k, v in extra.items():
@@ -181,7 +183,7 @@ class Manager:
                         connection.settimeout(3)
                         try:
                             with connection.makefile('rb') as stream:
-                                reply = self.handle(json.loads(stream.readline(65537)))
+                                reply = self.handle(json.loads(stream.readline(MAX_REQUEST + 1)))
                         except Exception as error:
                             reply = {'ok': False, 'error': str(error)}
                         try:

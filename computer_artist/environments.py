@@ -40,6 +40,7 @@ DEFAULTS = {
     'network': 'private',
     'apps': [],
 }
+MAX_REQUEST = 65536
 CONTAINER_KEYS = ('mounts', 'workdir', 'cpus', 'memory', 'gpu')
 # Toolkits otherwise pick X11 or a missing portal; keep apps on the private display.
 APP_ENV = {
@@ -135,12 +136,17 @@ def parse_mount(spec, base):
         raise ValueError(f'Invalid mount: {spec!r}')
     if not isinstance(source, str) or not source or mode not in ('ro', 'rw'):
         raise ValueError(f'Invalid mount: {spec!r}')
+    if target is not None and not isinstance(target, str):
+        raise ValueError(f'Invalid mount: {spec!r}')
     source = (Path(base) / Path(source).expanduser()).resolve()
     if not source.exists():
         raise ValueError(f'Mount source does not exist: {source}')
     target = str(source) if not target else target
     if not Path(target).is_absolute() or '..' in Path(target).parts:
         raise ValueError(f'Mount target must be an absolute path: {target!r}')
+    # Both forms end up in podman's --volume SRC:TGT:MODE, where these split fields.
+    if any(c in path for path in (str(source), target) for c in ':,'):
+        raise ValueError(f'Mount paths must not contain ":" or ",": {spec!r}')
     return {'source': str(source), 'target': target, 'mode': mode}
 
 
@@ -353,6 +359,10 @@ def kind(definition):
 
 
 def exchange(runtime, request, timeout=5):
+    # The manager reads at most MAX_REQUEST + 1 bytes of a request line.
+    size = len(json.dumps(request).encode())
+    if size > MAX_REQUEST:
+        raise ValueError(f'Request too large for the environment manager ({size} bytes)')
     with socket.socket(socket.AF_UNIX) as connection:
         connection.settimeout(timeout)
         connection.connect(str(runtime / 'manager'))
@@ -366,22 +376,31 @@ def exchange(runtime, request, timeout=5):
 
 def status(name):
     state, runtime = locations(name)
+    error = None
     try:
         return exchange(runtime, {'op': 'status'})
+    except TimeoutError:
+        # A slow manager is alive: running is unknown, so callers must not act on it.
+        running, error = None, 'manager not responding'
+    except RuntimeError as failure:
+        running, error = False, str(failure)
     except (OSError, ValueError):
-        definition = stored(name)
-        return {
-            'ok': True,
-            'name': name,
-            'running': False,
-            'state': str(state),
-            'kind': kind(definition) if definition else None,
-            'defined': definition is not None,
-        }
+        running = False
+    definition = stored(name)
+    return {
+        'ok': True,
+        'name': name,
+        'running': running,
+        'state': str(state),
+        'kind': kind(definition) if definition else None,
+        'defined': definition is not None,
+    } | ({'error': error} if error else {})
 
 
 def route(name):
     info = status(name)
+    if info['running'] is None:
+        raise ValueError(f'Environment {name!r} manager is not responding; retry shortly')
     if not info['running']:
         raise ValueError(f'Environment {name!r} is not running; use ca env start {name}')
     # Never route a named environment to a surviving or substituted host plugin.
@@ -419,15 +438,26 @@ def ensure_image(name, definition, log, pull=False):
         command.append(definition['context'])
     else:
         tag = definition['image']
-        if not pull and run(['podman', 'image', 'exists', tag]).returncode == 0:
-            return tag
+        try:
+            if not pull and run(['podman', 'image', 'exists', tag], timeout=60).returncode == 0:
+                return tag
+        except FileNotFoundError:
+            raise RuntimeError('podman not found; install Podman for container environments')
+        except subprocess.TimeoutExpired:
+            raise RuntimeError(f'podman did not answer while checking image {tag}') from None
         command = ['podman', 'pull', tag]
     with log.open('ab') as stream:
         stream.write(f'\n$ {shlex.join(command)}\n'.encode())
         stream.flush()
-        result = subprocess.run(
-            command, stdout=stream, stderr=subprocess.STDOUT, env=host_environment(), timeout=1800
-        )
+        try:
+            result = subprocess.run(
+                command, stdout=stream, stderr=subprocess.STDOUT, env=host_environment(),
+                timeout=1800,
+            )  # fmt: skip
+        except FileNotFoundError:
+            raise RuntimeError('podman not found; install Podman for container environments')
+        except subprocess.TimeoutExpired:
+            raise RuntimeError(f'Image preparation timed out after 1800 s; see {log}') from None
     if result.returncode:
         tail = log.read_text(errors='replace').splitlines()[-15:]
         raise RuntimeError(f'Image preparation failed ({log}):\n' + '\n'.join(tail))
@@ -508,6 +538,35 @@ def bus_config(path):
 """
 
 
+def systemd_quote(argument):
+    """Quote one command-line word for a unit file (systemd.service "Command lines")."""
+    escaped = argument.replace('\\', '\\\\').replace('"', '\\"')
+    # Specifiers and environment expansion would otherwise rewrite paths.
+    return '"' + escaped.replace('%', '%%').replace('$', '$$') + '"'
+
+
+def exec_stop_post(name):
+    podman = shutil.which('podman')
+    if not podman:
+        raise RuntimeError('podman not found')
+    words = [
+        '/usr/bin/env',
+        f'XDG_RUNTIME_DIR={host_runtime()}',
+        podman,
+        *('rm --force --ignore --time 3'.split()),
+        container_name(name),
+    ]
+    return '--property=ExecStopPost=-' + ' '.join(systemd_quote(w) for w in words)
+
+
+def stop_after_failure(name, error):
+    """Stop a half-started environment without letting a cleanup failure mask `error`."""
+    try:
+        stop(name)
+    except Exception as cleanup:
+        error.add_note(f'Cleanup stop of environment {name!r} also failed: {cleanup}')
+
+
 def start(args):
     import fcntl
 
@@ -517,7 +576,10 @@ def start(args):
     with (state / 'manager.lock').open('w') as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
         changes = bool(getattr(args, 'recipe', None) or flag_values(args))
-        if status(name)['running']:
+        current = status(name)
+        if current['running'] is None:
+            raise ValueError(f'Environment {name!r} manager is not responding; retry shortly')
+        if current['running']:
             if changes:
                 raise ValueError(f'Environment {name!r} is running; stop it before changing it')
             return {**status(name), 'already_running': True}
@@ -619,11 +681,7 @@ def start(args):
         ]  # fmt: skip
         if container:
             # Removes the container even if the manager or compositor dies.
-            command.append(
-                '--property=ExecStopPost=-/usr/bin/env XDG_RUNTIME_DIR='
-                + str(host_runtime())
-                + f' {shutil.which("podman")} rm --force --ignore --time 3 {container_name(name)}'
-            )
+            command.append(exec_stop_post(name))
         command += [
             '--', '/usr/bin/env', '-i', *[f'{k}={v}' for k, v in env.items()],
             'dbus-run-session', '--config-file=' + str(runtime / 'dbus.conf'), '--',
@@ -636,8 +694,8 @@ def start(args):
             info = wait_ready(name, state)
             if container:
                 start_container(name, definition, image, state, runtime, info.get('display'))
-        except BaseException:
-            stop(name)
+        except BaseException as error:
+            stop_after_failure(name, error)
             raise
         return {**status(name), 'startup_seconds': round(time.monotonic() - began, 2)}
 
@@ -710,24 +768,35 @@ def stop(name, timeout=20):
         'ok': True,
         'name': name,
         'running': False,
-        'stopped': was_running,
+        'stopped': was_running is not False,
         'evidence': str(state / 'output'),
         'logs': str(state / 'logs'),
     }
 
 
 def remove(name, confirmed):
+    import fcntl
+
     state, _ = locations(name)
-    if status(name)['running']:
-        raise ValueError(f'Environment {name!r} is running; stop it first')
     if not state.exists():
         raise ValueError(f'Environment {name!r} does not exist')
-    if not confirmed:
-        raise ValueError(
-            f'Removing deletes {state} including browser profiles, window maps and evidence; '
-            'pass --yes to confirm'
-        )
-    shutil.rmtree(state)
+    # The lock start() takes keeps a concurrent start from racing the deletion.
+    with (state / 'manager.lock').open('w') as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        running = status(name)['running']
+        if running is None:
+            raise ValueError(f'Environment {name!r} manager is not responding; retry shortly')
+        if running:
+            raise ValueError(f'Environment {name!r} is running; stop it first')
+        active = run(['systemctl', '--user', 'is-active', unit(name)]).stdout.strip()
+        if active in ('active', 'activating', 'deactivating'):
+            raise ValueError(f'Environment {name!r} service is still {active}; stop it first')
+        if not confirmed:
+            raise ValueError(
+                f'Removing deletes {state} including browser profiles, window maps and evidence; '
+                'pass --yes to confirm'
+            )
+        shutil.rmtree(state)
     if shutil.which('podman'):
         run(['podman', 'image', 'rm', '--ignore', image_tag(name)])
     return {'ok': True, 'name': name, 'removed': str(state)}

@@ -54,7 +54,7 @@ class WindowBackend:
     def path(self, points, interval):
         self.actions.extend(points)
 
-    def button(self, pressed=True):
+    def button(self, code=272, pressed=True):
         self.actions.append(('button', pressed))
 
     def cancel(self):

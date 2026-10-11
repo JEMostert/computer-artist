@@ -94,19 +94,25 @@ def _decode(data, kind):
     if kind == 'json':
         value = _strict_json(data)
         return {'json_type': type(value).__name__}, value
-    from PIL import Image
-
-    with Image.open(io.BytesIO(data), formats=IMAGE_FORMATS) as image:
-        if image.width * image.height > MAX_PIXELS:
-            raise ValueError(f'Image exceeds {MAX_PIXELS} pixels')
-        frames = getattr(image, 'n_frames', 1)
-        if frames * image.width * image.height > MAX_PIXELS:
-            raise ValueError('Image frame decoding exceeds the pixel budget')
-        info = {'image_format': image.format, 'image_size': list(image.size), 'frames': frames}
-        for index in range(frames):
-            image.seek(index)
-            image.load()
-        return info, UNSET
+    try:
+        from PIL import Image
+    except ImportError as error:
+        raise RuntimeError('Pillow is required for image checks') from error
+    try:
+        with Image.open(io.BytesIO(data), formats=IMAGE_FORMATS) as image:
+            if image.width * image.height > MAX_PIXELS:
+                raise ValueError(f'Image exceeds {MAX_PIXELS} pixels')
+            frames = getattr(image, 'n_frames', 1)
+            if frames * image.width * image.height > MAX_PIXELS:
+                raise ValueError('Image frame decoding exceeds the pixel budget')
+            info = {'image_format': image.format, 'image_size': list(image.size), 'frames': frames}
+            for index in range(frames):
+                image.seek(index)
+                image.load()
+            return info, UNSET
+    except Image.DecompressionBombError as error:
+        # Pillow's own decode bomb guard; report it like the pixel budget above.
+        raise ValueError('image exceeds decoded pixel limit') from error
 
 
 def inspect_file(path, *, kind='file', max_bytes=MAX_BYTES):

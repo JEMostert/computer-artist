@@ -211,6 +211,9 @@ def parser():
             )
         if name == 'click':
             command.add_argument('--button', choices=BUTTONS, default='left')
+            command.add_argument(
+                '--count', type=int, choices=(1, 2, 3), default=1, help='2 = double, 3 = triple'
+            )
         elif name in ('type', 'write', 'paste'):
             command.add_argument(
                 'text', help='Unicode text; use -- before text starting with a dash'
@@ -245,6 +248,39 @@ def parser():
                 help='Signed scroll delta; positive is down/right',
             )
             command.add_argument('--axis', choices=('vertical', 'horizontal'), default='vertical')
+    a11y = commands.add_parser(
+        'a11y', parents=[shared], help="Read a window's accessibility tree (read-only AT-SPI)"
+    )
+    a11y.add_argument('--window', help='Window ID or saved name')
+    a11y.add_argument('--role', help='Exact role name, e.g. "push button"')
+    a11y.add_argument('--name', help='Case-insensitive substring of the accessible name')
+    a11y.add_argument('--max-nodes', type=int, default=2000)
+    a11y_mode = a11y.add_mutually_exclusive_group()
+    a11y_mode.add_argument(
+        '--status', action='store_true', help='Report whether accessibility is reachable/enabled'
+    )
+    a11y_mode.add_argument(
+        '--enable',
+        action='store_true',
+        help='Set the session-wide org.a11y.Status IsEnabled flag; restart apps afterwards',
+    )
+    drag = commands.add_parser(
+        'drag', parents=[shared], help='Press, move in small steps and release in one window'
+    )
+    drag.add_argument('--window', required=True, help='Window ID or saved name')
+    drag.add_argument(
+        '--from', dest='start', nargs=2, type=finite_number, required=True, metavar=('X', 'Y')
+    )
+    drag.add_argument(
+        '--to', dest='end', nargs=2, type=finite_number, required=True, metavar=('X', 'Y')
+    )
+    drag.add_argument('--button', choices=BUTTONS, default='left')
+    drag.add_argument(
+        '--interval',
+        type=nonnegative_number,
+        default=0.016,
+        help='Seconds between sampled points (default: 0.016)',
+    )
     capture = commands.add_parser(
         'capture', parents=[shared], help='Capture a window with a backend that supports capture'
     )
@@ -264,6 +300,12 @@ def execute(client, args):
         return reply
     if args.command == 'session':
         return client.request('session_' + args.action)
+    if args.command == 'a11y':
+        from .runtime import Context
+
+        ctx = Context(client, args.window, Workspace(args.window_dir, args.output_dir))
+        elements = ctx.accessible(role=args.role, name=args.name, max_nodes=args.max_nodes)
+        return {'ok': True, 'window': ctx.window_id, 'count': len(elements), 'elements': elements}
     if args.command == 'keymap':
         return {'ok': True, **client.keymap()}
     if args.command in ('windows', 'capabilities', 'stop', 'takeover'):
@@ -280,7 +322,7 @@ def execute(client, args):
                 'conditional_programs': True,
                 'hard_deadlines': True,
                 'version_history': True,
-                'accessibility': False,
+                'accessibility': True,
                 'automatic_control_detection': False,
             }
             reply['harness'].update(
@@ -291,6 +333,8 @@ def execute(client, args):
                 target_revalidation=True,
                 targeted_run_stop=True,
                 structured_handoff=True,
+                layout_text_entry='keymap' in reply.get('operations', []),
+                multi_click_and_drag=True,
             )
         return reply
     if args.command == 'set':
@@ -339,11 +383,13 @@ def execute(client, args):
             x, y = x - window['x'], y - window['y']
         point = {'x': x, 'y': y}
         if args.command == 'click':
-            ctx.click(button=args.button, **point)
+            details = ctx.click(button=args.button, count=args.count, **point)
         elif args.command == 'move':
             ctx.move(**point)
         else:
             ctx.scroll(args.delta, axis=args.axis, **point)
+    elif args.command == 'drag':
+        details = ctx.drag(args.start, args.end, button=args.button, interval=args.interval)
     elif args.command == 'focus':
         ctx.focus()
     elif args.command == 'paste' or (args.command == 'type' and ctx.lane == 'host'):
@@ -383,6 +429,9 @@ def route_environment(args, explicit_lane):
     if not explicit_lane:
         args.lane = 'host'
     args.environment_info = {'name': info['name'], 'kind': info.get('kind'), 'lane': args.lane}
+    if info.get('bus'):
+        # Accessibility reads the private desktop's session bus, never the user's.
+        os.environ['CA_ACCESSIBILITY_BUS'] = f'unix:path={info["bus"]}'
 
 
 def main(argv=None):
@@ -427,6 +476,17 @@ def main(argv=None):
             reply = diagnose(args)
             print(json.dumps(reply, indent=2))
             return 0 if reply['ok'] else 1
+        if args.command == 'a11y' and (args.status or args.enable or not args.window):
+            from . import accessibility
+
+            if not (args.status or args.enable):
+                raise ValueError('Provide --window, --status or --enable')
+            address = os.environ.get('CA_ACCESSIBILITY_BUS')
+            reply = (accessibility.enable if args.enable else accessibility.status)(
+                session_address=address
+            )
+            print(json.dumps({'ok': True, **reply}, indent=2))
+            return 0
         from .commands import local_command, run_program
 
         reply = local_command(args, extra)
