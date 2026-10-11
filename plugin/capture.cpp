@@ -74,7 +74,8 @@ QImage captureClient(Window *window)
         }
     }
     if (previous && previous != context) {
-        if (!previous->makeCurrent()) return {};
+        // Never leave the capture context current in place of KWin's own.
+        if (!previous->makeCurrent()) context->doneCurrent();
     } else if (!previous) {
         context->doneCurrent();
     }

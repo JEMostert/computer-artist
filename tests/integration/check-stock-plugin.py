@@ -65,6 +65,9 @@ with Client(s['control']) as observer:
     assert 'human_keyboard_in_application' in human_window['agent_restrictions']
     assert 'human_pointer_in_application' in human_window['agent_restrictions']
     assert canvas['acquirable'] and canvas['host_acquirable']
+    assert canvas['scale'] == 1 and canvas['output'] and not canvas['fullscreen']
+    assert canvas['app_id'] == 'computer-artist-agent' or canvas['resource_class'], canvas
+    report['window_scale_output_and_identity'] = True
     report['truthful_pointer_and_keyboard_readiness'] = True
     before = (out / 'human-text.txt').read_text() if (out / 'human-text.txt').exists() else ''
     observer.request('capture', window=identity, path=str(out / 'plugin-before.png'))
@@ -140,7 +143,20 @@ with Client(s['control']) as observer:
         observer.request('takeover')
         wait(lambda: releases() > count)
         assert not next(w for w in observer.windows() if w['id'] == identity)['agent']
+        stopped = observer.request('session_status')['lanes']['agent']['stop_reason']
+        assert stopped == 'explicit_stop', stopped
+        assert owner.stop_reason() == 'explicit_stop'
     report['external_takeover'] = True
+    report['agent_stop_reason_reported'] = True
+    with Client(s['control']) as owner:
+        owner.acquire(identity)
+        owner.move(x, y)
+        wheels = sum(e['event'] == 'wheel' for e in events())
+        owner.scroll(15)
+        wait(lambda: sum(e['event'] == 'wheel' for e in events()) > wheels)
+        wheel = [e for e in events() if e['event'] == 'wheel'][-1]
+        assert wheel['angle'] == -120, wheel
+    report['complete_wheel_scroll_frame'] = True
     with Client(s['control']) as owner:
         owner.acquire(identity)
         owner.move(x, y)
@@ -149,6 +165,8 @@ with Client(s['control']) as observer:
         human('move', x + 80, y)
         wait(lambda: releases() > count)
         assert not next(w for w in observer.windows() if w['id'] == identity)['agent']
+        stopped = observer.request('session_status')['lanes']['agent']['stop_reason']
+        assert stopped == 'human_pointer_entered', stopped
     report['human_pointer_entry_takeover'] = True
     human('move', 200, 250)
     raw = socket.socket(socket.AF_UNIX)

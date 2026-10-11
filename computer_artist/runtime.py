@@ -129,6 +129,11 @@ class Context:
             'last_observation': self.last_observation,
             'recovery': 'Inspect fresh evidence and explicitly select a window in a new execution',
         }
+        if code in ('input_connection_lost', 'ownership_revoked'):
+            stop_reason = self.client.stop_reason() if hasattr(self.client, 'stop_reason') else None
+            if stop_reason:
+                details['stop_reason'] = stop_reason
+                reason = f'{reason} ({stop_reason})'
         self.interrupted = True
         self.interruption = kind(reason, code=code, details=details)
         raise self.interruption

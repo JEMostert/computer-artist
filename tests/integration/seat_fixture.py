@@ -77,6 +77,9 @@ class Canvas(QWidget):
     def keyPressEvent(self, event):
         record('key', text=event.text(), key=event.key(), modifiers=event.modifiers().value)
 
+    def wheelEvent(self, event):
+        record('wheel', angle=event.angleDelta().y(), pixel=event.pixelDelta().y())
+
 
 class HumanEditor(QPlainTextEdit):
     def keyPressEvent(self, event):

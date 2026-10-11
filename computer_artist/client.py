@@ -376,6 +376,25 @@ class Client:
         """Compatibility alias: text is entered through clipboard paste."""
         return self.paste(text)
 
+    def stop_reason(self):
+        """Ask a fresh connection why this lane last stopped; None when unknown.
+
+        The compositor aborts a revoked connection without a reply, so the
+        reason is only available from session status afterwards.
+        """
+        try:
+            with socket.socket(socket.AF_UNIX) as probe:
+                probe.settimeout(0.5)
+                probe.connect(self.socket_path)
+                probe.sendall(
+                    (json.dumps({'op': 'session_status', 'lane': self.lane}) + '\n').encode()
+                )
+                line = probe.makefile('rb').readline(65537)
+            reason = json.loads(line)['lanes'][self.lane].get('stop_reason')
+        except (OSError, ValueError, KeyError, TypeError, AttributeError):
+            return None
+        return reason if isinstance(reason, str) and reason else None
+
     def keymap(self):
         """Characters the live layout produces, as physical modifier/key codes."""
         reply = self.request('keymap')

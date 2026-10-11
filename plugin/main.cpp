@@ -11,6 +11,8 @@
 #include <pointer_input.h>
 #include <keyboard_input.h>
 #include <xkb.h>
+#include <config-kwin.h>
+#include <core/output.h>
 #include "clipboard.h"
 #include "keyboard.h"
 #include "capture.h"
@@ -25,6 +27,7 @@
 #include <scene/workspacescene.h>
 #include <wayland-server-core.h>
 #include <wayland-server-protocol.h>
+#include <QCoreApplication>
 #include <QLocalServer>
 #include <QLocalSocket>
 #include <QJsonDocument>
@@ -118,7 +121,8 @@ private:
     bool button(uint32_t, bool);
     void cancel();
     void cancelPointer();
-    void release(bool revoke = false);
+    void release(bool revoke = false, const QString &reason = QStringLiteral("released"));
+    QString invalidReason() const;
     void drawCursor();
     void observe(Window *);
     bool valid() const;
@@ -131,6 +135,7 @@ private:
     QList<uint32_t> m_resources;
     QSet<uint32_t> m_buttons;
     QString m_lease;
+    QString m_stopReason;
     QString m_session;
     quint64 m_generation = 0;
     QMetaObject::Connection m_clientClosed;
@@ -154,20 +159,20 @@ Artist::Artist() {
     connect(&m_hostWatchdog, &QTimer::timeout, this, [this] { m_hostStopReason="watchdog"; releaseHost(true); });
     m_watchdog.setSingleShot(true);
     m_watchdog.setInterval(5000);
-    connect(&m_watchdog, &QTimer::timeout, this, [this] { release(true); });
+    connect(&m_watchdog, &QTimer::timeout, this, [this] { release(true, QStringLiteral("watchdog")); });
     connect(&m_animation, &QTimer::timeout, this, [this] {
-        if (m_client && !valid()) release(true);
+        if (m_client && !valid()) release(true, invalidReason());
         if (m_hostOwner && !hostValid()) { m_hostStopReason="target_unavailable"; releaseHost(true); }
         if (m_positionKnown) drawCursor();
     });
     // This signal runs before PointerInputRedirection::update() sends human enter.
     connect(input(), &InputRedirection::globalPointerChanged, this, [this](const QPointF &p) {
         auto w = at(p);
-        if (w && owns(w->surface())) release(true);
+        if (w && owns(w->surface())) release(true, QStringLiteral("human_pointer_entered"));
     });
     connect(waylandServer()->seat(), &SeatInterface::focusedKeyboardSurfaceAboutToChange,
             this, [this](SurfaceInterface *s) {
-        if (owns(s)) release(true);
+        if (owns(s)) release(true, QStringLiteral("human_keyboard_focus"));
         if (m_hostOwner && m_hostKeyboardUsed && (!m_hostTarget || s!=m_hostTarget->surface())) {
             m_hostStopReason="keyboard_focus_changed"; releaseHost(true);
         }
@@ -175,7 +180,7 @@ Artist::Artist() {
     // Catch stationary-pointer focus changes from stacking/geometry, too. A human
     // enter may already have been sent here; release must preserve that enter.
     connect(waylandServer()->seat()->pointer(), &PointerInterface::focusedSurfaceChanged,
-            this, [this] { if (owns(waylandServer()->seat()->focusedPointerSurface())) release(true); });
+            this, [this] { if (owns(waylandServer()->seat()->focusedPointerSurface())) release(true, QStringLiteral("human_pointer_entered")); });
     // A client-specific agent enter does not establish a host-seat grab. Keep
     // popups created during our lease out of KWin's global popup input filter.
     // This connection runs at creation, before the client's grab request.
@@ -199,7 +204,7 @@ Artist::Artist() {
     for (auto w : workspace()->stackingOrder()) observe(w);
     connect(workspace(), &Workspace::windowAdded, this, [this](Window *w) {
         observe(w);
-        if (w->surface() && owns(w->surface()) && !popupFor(w, m_target)) release(true);
+        if (w->surface() && owns(w->surface()) && !popupFor(w, m_target)) release(true, QStringLiteral("new_application_window"));
         if (m_hostClient && w->surface() && w->surface()->client()==m_hostClient) {
             m_hostStopReason="new_application_window"; releaseHost(true);
         }
@@ -207,7 +212,7 @@ Artist::Artist() {
 }
 Artist::~Artist() {
     m_animation.stop();
-    release(true);
+    release(true, QStringLiteral("plugin_unloaded"));
     releaseHost(true);
     input()->uninstallInputEventSpy(this);
     input()->removeInputDevice(&m_hostDevice);
@@ -219,7 +224,7 @@ bool Artist::start() {
     QString dir = qEnvironmentVariable("CA_PLUGIN_RUNTIME");
     if (dir.isEmpty()) dir = qEnvironmentVariable("XDG_RUNTIME_DIR") + "/computer-artist";
     if (!QDir().mkpath(dir)) return false;
-    QFile::setPermissions(dir, QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner);
+    if (!QFile::setPermissions(dir, QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner)) return false;
     const auto socketPath = dir + "/control";
     // Only remove a stale socket after checking whether another server owns it.
     if (QFileInfo::exists(socketPath)) {
@@ -235,15 +240,17 @@ bool Artist::start() {
             socket->setParent(this);
             socket->setReadBufferSize(65537);
             connect(socket, &QLocalSocket::disconnected, this, [this,socket] {
-                if (m_owner == socket) release();
+                if (m_owner == socket) release(false, QStringLiteral("disconnect"));
                 if (m_hostOwner == socket) { m_hostStopReason="disconnect"; releaseHost(); }
                 socket->deleteLater();
             });
             connect(socket, &QLocalSocket::readyRead, this, [this,socket] {
                 while (socket->canReadLine() && !socket->property("revoked").toBool()) {
                     if(socket->property("clipboard_pending").toBool()) { socket->abort(); return; }
-                    auto line = socket->readLine(65537);
-                    if (line.size() > 65536) { socket->abort(); return; }
+                    // readLine returns at most maxSize-1 bytes; a longer line must
+                    // abort rather than be answered as several invalid requests.
+                    auto line = socket->readLine(65538);
+                    if (line.size() > 65536 || !line.endsWith('\n')) { socket->abort(); return; }
                     auto doc = QJsonDocument::fromJson(line);
                     auto reply = doc.isObject() ? request(socket, doc.object()) : QJsonObject{{"ok",false},{"error","invalid_json"}};
                     if(!reply.value("pending").toBool()) socket->write(QJsonDocument(reply).toJson(QJsonDocument::Compact) + '\n');
@@ -322,6 +329,17 @@ bool Artist::valid() const {
     for (auto w : workspace()->stackingOrder()) if (owns(w->surface()) && (w->hasPopupGrab() || (w->isSpecialWindow() && !(w==m_target && w->inherits("KWin::XdgPopupWindow")) && !popupFor(w, m_target)))) return false;
     return true;
 }
+QString Artist::invalidReason() const {
+    if (!m_client) return QStringLiteral("released");
+    if (!visible(m_target)) return QStringLiteral("target_unavailable");
+    if (waylandServer()->isScreenLocked()) return QStringLiteral("screen_locked");
+    auto seat = waylandServer()->seat();
+    if (owns(seat->focusedPointerSurface())) return QStringLiteral("human_pointer_entered");
+    if (owns(seat->focusedKeyboardSurface())) return QStringLiteral("human_keyboard_focus");
+    if (seat->isDrag() || seat->isTouchSequence()) return QStringLiteral("seat_gesture_active");
+    if (m_agentKeyboard.initialized() && !m_agentKeyboard.ready()) return QStringLiteral("keyboard_resources_changed");
+    return QStringLiteral("application_popup_or_special_window");
+}
 void Artist::observe(Window *w) {
     // Release before KWin's windowActivated handler snapshots held keys for
     // the next keyboard enter event.
@@ -331,7 +349,7 @@ void Artist::observe(Window *w) {
         }
     });
     auto changed = [this,w] {
-        if (m_client && owns(w->surface()) && !popupFor(w, m_target)) { ++m_generation; release(true); }
+        if (m_client && owns(w->surface()) && !popupFor(w, m_target)) { ++m_generation; release(true, QStringLiteral("target_changed")); }
         if (m_hostTarget == w) { ++m_hostGeneration; m_hostStopReason="target_changed"; releaseHost(true); }
     };
     connect(w, &Window::closed, this, changed);
@@ -383,9 +401,10 @@ bool Artist::acquire(Window *w, QLocalSocket *socket) {
     if (!valid()) { m_client.clear(); m_target.clear(); return false; }
     m_resources = pointers();
     if (m_resources.isEmpty()) { m_client.clear(); m_target.clear(); return false; }
-    m_clientClosed = connect(m_client, &ClientConnection::aboutToBeDestroyed, this, [this] { release(true); });
+    m_clientClosed = connect(m_client, &ClientConnection::aboutToBeDestroyed, this, [this] { release(true, QStringLiteral("application_closed")); });
     m_owner = socket;
     m_lease = QUuid::createUuid().toString(QUuid::WithoutBraces);
+    m_stopReason.clear();
     ++m_generation;
     m_watchdog.start();
     ensureSession();
@@ -447,7 +466,10 @@ void Artist::cancelPointer() {
     frame();
     m_surface.clear();
 }
-void Artist::release(bool revoke) {
+void Artist::release(bool revoke, const QString &reason) {
+    // Record why before aborting: a revoked CLI only sees its connection drop and
+    // asks session_status on a fresh connection for the reason.
+    if (m_client) m_stopReason = reason;
     auto owner = m_owner;
     m_owner.clear();
     m_watchdog.stop();
@@ -479,6 +501,9 @@ QJsonArray Artist::windows() const {
             {"agent_restrictions",QJsonArray::fromStringList(agentReasons)},
             {"host_acquirable",hostReasons.isEmpty()},
             {"host_restrictions",QJsonArray::fromStringList(hostReasons)},
+            {"app_id",w->desktopFileName()},{"resource_class",w->resourceClass()},
+            {"scale",w->targetScale()},{"output",w->output()?w->output()->name():QString()},
+            {"maximized",w->maximizeMode()==MaximizeFull},{"fullscreen",w->isFullScreen()},
             {"x",rect.x()},{"y",rect.y()},{"width",rect.width()},{"height",rect.height()}});
     }
     return result;
@@ -493,7 +518,8 @@ QJsonObject Artist::request(QLocalSocket *socket, const QJsonObject &o) {
     bool ok=false;
     if (!observation && op!="takeover" && op!="session_close" && op!="session_status" && lane=="agent" && m_owner && m_owner!=socket) reply.insert("error","controller_busy");
     else if (op=="capabilities") {
-        reply = {{"environment",qEnvironmentVariable("CA_ENVIRONMENT")},{"protocol",3},{"backend","stock_kwin_plugin"},{"ownership","wayland_connection_pointer_keyboard"},
+        reply = {{"environment",qEnvironmentVariable("CA_ENVIRONMENT")},{"protocol",3},{"backend","stock_kwin_plugin"},
+            {"build",QJsonObject{{"source_sha256",QStringLiteral(CA_PLUGIN_SOURCE_SHA256)},{"kwin_headers",QString(KWIN_VERSION_STRING)},{"kwin_running",QCoreApplication::applicationVersion()}}},{"ownership","wayland_connection_pointer_keyboard"},
             {"automatic_sessions",true},{"lane",lane},{"host_pointer",true},{"host_focus",true},{"host_keyboard",true},{"host_xwayland",false},{"native_handoff",true},{"xwayland_handoff",false},{"keyboard",true},{"input_methods",false},
             {"clipboard",false},{"data_drag_and_drop",false},{"popups",false},{"popup_observation",true},{"ungrabbed_popup_pointer",true},{"capture_transients",true},{"human_pointer_entry_takeover",true},
             {"operations",QJsonArray{"session_close","session_status","windows","capabilities","acquire","release","move","button","scroll","keyboard_begin","key","keymap","cancel","takeover","ping","capture"}}};
@@ -517,7 +543,7 @@ QJsonObject Artist::request(QLocalSocket *socket, const QJsonObject &o) {
     else if (op=="session_status") ok=true;
     else if (op=="session_close") {
         // Session lifetime is explicit and independent of short-lived CLI sockets.
-        release(m_owner != socket);
+        release(m_owner != socket, QStringLiteral("session_closed"));
         m_hostStopReason="session_closed";
         releaseHost(m_hostOwner != socket);
         m_session.clear();
@@ -538,14 +564,14 @@ QJsonObject Artist::request(QLocalSocket *socket, const QJsonObject &o) {
             reply.insert("restrictions",QJsonArray::fromStringList(acquisitionReasons(target,false)));
         }
     }
-    else if (op=="takeover") { release(true); ok=true; }
+    else if (op=="takeover") { release(true, QStringLiteral("explicit_stop")); ok=true; }
     else if (op=="release") { if (!m_client || (socket==m_owner && o.value("lease").toString()==m_lease)) { release(); ok=true; } }
     else if (op=="cancel") { if(socket==m_owner) { cancel(); ok=true; } }
     else if (op=="capture") {
         auto w=find(o.value("window").toString());
         const auto path=o.value("path").toString();
         if (!waylandServer()->isScreenLocked() && w && (!w->isSpecialWindow() || w->inherits("KWin::XdgPopupWindow")) && w->surface() && visible(w)
-            && QFileInfo(path).isAbsolute() && !QFileInfo::exists(path)) {
+            && QFileInfo(path).isAbsolute() && !QFileInfo::exists(path) && !QFileInfo(path).isSymLink()) {
             auto image = captureClient(w);
             if (!image.isNull()) {
                 // Publish a complete PNG without replacing any destination that
@@ -581,7 +607,17 @@ QJsonObject Artist::request(QLocalSocket *socket, const QJsonObject &o) {
             double delta=o.value("delta").toDouble();
             if(std::isfinite(delta) && std::abs(delta)<1000000) {
                 const auto axis=o.value("axis")=="vertical" ? WL_POINTER_AXIS_VERTICAL_SCROLL : WL_POINTER_AXIS_HORIZONTAL_SCROLL;
-                send([&](wl_resource *r) { wl_pointer_send_axis(r,uint32_t(m_clock.elapsed()),axis,wl_fixed_from_double(delta)); }); frame(); ok=true;
+                // A complete wheel frame: source, high-resolution or discrete
+                // steps, then the continuous value. One notch is 15 / 120.
+                const auto requested=o.value("v120").toDouble(0);
+                const int v120=int(std::clamp(std::round(requested!=0 && std::isfinite(requested) ? requested : delta*8), -1.0e6, 1.0e6));
+                send([&](wl_resource *r) {
+                    const auto version=wl_resource_get_version(r);
+                    if (version>=WL_POINTER_AXIS_SOURCE_SINCE_VERSION) wl_pointer_send_axis_source(r,WL_POINTER_AXIS_SOURCE_WHEEL);
+                    if (version>=WL_POINTER_AXIS_VALUE120_SINCE_VERSION) { if (v120) wl_pointer_send_axis_value120(r,axis,v120); }
+                    else if (version>=WL_POINTER_AXIS_DISCRETE_SINCE_VERSION && v120/120) wl_pointer_send_axis_discrete(r,axis,v120/120);
+                    wl_pointer_send_axis(r,uint32_t(m_clock.elapsed()),axis,wl_fixed_from_double(delta));
+                }); frame(); ok=true;
             }
         }
     }
@@ -592,7 +628,7 @@ QJsonObject Artist::request(QLocalSocket *socket, const QJsonObject &o) {
     reply.insert("session",m_session);
     reply.insert("cursor_visible",m_cursor && m_cursor->isVisible());
     reply.insert("lanes",QJsonObject{
-        {"agent",QJsonObject{{"busy",bool(m_owner)},{"window",m_target?m_target->internalId().toString(QUuid::WithoutBraces):QString()}, {"buttons",int(m_buttons.size())},{"keys",m_agentKeyboard.heldCount()},{"keyboard",true},{"keyboard_ready",agentKeyboardReady()}}},
+        {"agent",QJsonObject{{"busy",bool(m_owner)},{"window",m_target?m_target->internalId().toString(QUuid::WithoutBraces):QString()}, {"buttons",int(m_buttons.size())},{"keys",m_agentKeyboard.heldCount()},{"keyboard",true},{"keyboard_ready",agentKeyboardReady()},{"stop_reason",m_stopReason}}},
         {"host",QJsonObject{{"busy",bool(m_hostOwner)},{"window",m_hostTarget?m_hostTarget->internalId().toString(QUuid::WithoutBraces):QString()}, {"buttons",int(m_hostButtons.size())},{"keys",int(m_hostKeys.size())},{"stop_reason",m_hostStopReason}}}});
     reply.insert("ok",ok); reply.insert("lease",lane=="host"?m_hostLease:m_lease);
     reply.insert("generation",qint64(lane=="host"?m_hostGeneration:m_generation)); reply.insert("keyboard_ready",lane=="host" ? keyboardReady() : agentKeyboardReady());
