@@ -8,6 +8,8 @@ import time
 import unittest
 from pathlib import Path
 
+from computer_artist.diagnostics import plugin_source_hash
+
 ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -74,7 +76,14 @@ class CLITest(unittest.TestCase):
                         ]
                         if not test.old_plugin:
                             reply.update(
-                                protocol=3, lane=request.get('lane', 'agent'), host_pointer=True
+                                protocol=3,
+                                lane=request.get('lane', 'agent'),
+                                host_pointer=True,
+                                build={
+                                    'source_sha256': plugin_source_hash(ROOT),
+                                    'kwin_headers': '6.7.5',
+                                    'kwin_running': '6.7.5',
+                                },
                             )
                     if op == 'focus' and test.reject_focus:
                         reply.update(ok=False, error='rejected')

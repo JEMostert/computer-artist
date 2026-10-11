@@ -374,6 +374,12 @@ class BrowserProfileTest(unittest.TestCase):
 
 
 class ManagerTest(unittest.TestCase):
+    def setUp(self):
+        # Never start the host's real AT-SPI registry from these tests.
+        patcher = patch('computer_artist.environment_service.REGISTRY_PATHS', ())
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
     def test_host_applications_report_exit_status_and_logs(self):
         from computer_artist.environment_service import Manager
 
@@ -434,6 +440,86 @@ class ManagerTest(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, 'Working directory does not exist'):
                 manager.handle({'op': 'exec', 'argv': ['true'], 'cwd': missing})
             self.assertEqual(manager.counter, 0)
+
+
+class AccessibilityTest(unittest.TestCase):
+    def setUp(self):
+        folder = tempfile.TemporaryDirectory()
+        self.addCleanup(folder.cleanup)
+        self.root = Path(folder.name)
+        (self.root / 'state/logs/apps').mkdir(parents=True)
+        (self.root / 'runtime/shared').mkdir(parents=True)
+        self.config = {
+            'name': 'web',
+            'runtime': str(self.root / 'runtime'),
+            'state': str(self.root / 'state'),
+            'width': 800,
+            'height': 600,
+            'xwayland': False,
+            'container': None,
+        }
+        self.binary = self.root / 'at-spi2-registryd'
+        self.binary.write_text('')
+
+    def start(self, paths, popen=None):
+        from computer_artist.environment_service import Manager
+
+        popen = popen or MagicMock()
+        with (
+            patch.dict(os.environ, {'XAUTHORITY': ''}),
+            patch('computer_artist.environment_service.REGISTRY_PATHS', paths),
+            patch('computer_artist.environment_service.subprocess.run'),
+            patch('computer_artist.environment_service.subprocess.Popen', popen),
+        ):
+            return Manager(self.config), popen
+
+    def test_applications_enable_qt_accessibility(self):
+        self.assertEqual(environments.APP_ENV['QT_LINUX_ACCESSIBILITY_ALWAYS_ON'], '1')
+
+    def test_registry_starts_with_the_application_environment(self):
+        manager, popen = self.start((str(self.binary),))
+        popen.assert_called_once()
+        self.assertEqual(popen.call_args.args[0], [str(self.binary)])
+        self.assertIs(popen.call_args.kwargs['env'], manager.env)
+        self.assertEqual(manager.env['QT_LINUX_ACCESSIBILITY_ALWAYS_ON'], '1')
+        self.assertIs(manager.registry, popen.return_value)
+        self.assertTrue(manager.info['accessibility'])
+        self.assertTrue((self.root / 'state/logs/at-spi-registryd.log').exists())
+
+    def test_first_existing_registry_path_wins(self):
+        second = self.root / 'libexec-at-spi2-registryd'
+        second.write_text('')
+        manager, popen = self.start((str(self.binary), str(second)))
+        self.assertEqual(popen.call_args.args[0], [str(self.binary)])
+        manager, popen = self.start((str(self.root / 'missing'), str(second)))
+        self.assertEqual(popen.call_args.args[0], [str(second)])
+
+    def test_missing_registry_is_recorded_and_nothing_is_started(self):
+        manager, popen = self.start((str(self.root / 'missing'),))
+        popen.assert_not_called()
+        self.assertFalse(manager.info['accessibility'])
+        self.assertIsNone(manager.registry)
+        manager.close()
+
+    def test_registry_start_failure_is_tolerated_and_logged(self):
+        popen = MagicMock(side_effect=OSError('Exec format error'))
+        manager, _ = self.start((str(self.binary),), popen=popen)
+        self.assertFalse(manager.info['accessibility'])
+        self.assertIsNone(manager.registry)
+        log = (self.root / 'state/logs/at-spi-registryd.log').read_text()
+        self.assertIn('Could not start', log)
+        self.assertIn('Exec format error', log)
+
+    def test_close_terminates_the_registry_and_kills_it_if_it_ignores_terminate(self):
+        manager, popen = self.start((str(self.binary),))
+        process = popen.return_value
+        manager.close()
+        process.terminate.assert_called_once()
+        process.wait.assert_called_once_with(2)
+        process.kill.assert_not_called()
+        process.wait.side_effect = subprocess.TimeoutExpired('at-spi2-registryd', 2)
+        manager.close()
+        process.kill.assert_called_once()
 
 
 if __name__ == '__main__':

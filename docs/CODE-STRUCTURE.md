@@ -11,6 +11,7 @@ path. There is no web interface or legacy `main(client)` runner.
 | Actions and program evaluation | `runtime`, `programs`, `contracts`, `lanes` |
 | Transport, leases, heartbeat | `client` |
 | Capture, diffs, guards, watch | `observations`, `watch` |
+| Read-only AT-SPI accessibility trees | `accessibility` |
 | File checks and JSON inspection | `artifacts`, `records` |
 | Names, fragments, retention, files | `workspace`, `fragments`, `storage`, `files` |
 | Private environments: definitions/lifecycle, apps/browsers, service, CLI | `environments`, `environment_apps`, `environment_service`, `environment_commands` |

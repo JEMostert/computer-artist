@@ -7,8 +7,9 @@ that goal. Separate KWin instances are development test harnesses.
 | Capability | Implemented scope |
 | --- | --- |
 | Private environments | Per-agent KWin desktop, seat, clipboard and session bus; rootless Podman apps, recipes, startup apps, private browser profiles |
-| Independent input | Animated pointer and physical keys with separate modifier state; native Wayland |
-| Human takeover | Pointer/focus return revokes the lease; cleanup on target loss, disconnect, lock and watchdog |
+| Independent input | Animated pointer and physical keys with separate modifier state; layout-resolved text entry; multi-clicks, drags, complete wheel frames; native Wayland |
+| Accessibility | Read-only AT-SPI trees: roles, names, states, text and window-content bounds; locate and click controls by role/name |
+| Human takeover | Pointer/focus return revokes the lease with a reported stop reason; cleanup on target loss, disconnect, lock and watchdog |
 | Explicit host input | Real pointer/focus, physical keys and shared UTF-8 clipboard; requires `--host` |
 | Conditional programs | CLI-fed Python, branches, loops, waits, shared budgets and hard process deadlines |
 | Observation | Composited client captures, pixel/geometry diffs and bounded continuous JSONL watch |
@@ -16,7 +17,7 @@ that goal. Separate KWin instances are development test harnesses.
 | Handoff | Release and yield with evidence; inspect candidates and continue in a fresh run |
 | Verified outcomes | Invocation-owned checks and stable, optionally fresh file/text/JSON/image/hash checks |
 | Reusable work | Typed fragments, contracts, immutable versions, nested calls and explicit restore |
-| Diagnosis | Read-only doctor, refusal details, JSON inspection, checkpoints and targeted stop |
+| Diagnosis | Read-only doctor (including stale/mismatched plugin builds), refusal details, JSON inspection, checkpoints and targeted stop |
 
 Native pointer workflows were demonstrated in KolourPaint, Qt fixtures and scrcpy.
 Independent keyboard save/concurrent typing was reported for KWrite in separate
@@ -34,8 +35,10 @@ App dialogs can activate themselves and change human focus; prevention is absent
 XWayland, independent clipboard/IME, popup grabs and app data drag-and-drop are
 unsupported. There is no fallback and input separation is not a security sandbox.
 
-Next: broaden native app/toolkit/scaling tests; investigate keyboard and popup
-compatibility separately; add validated semantic app/accessibility APIs and
+Layout-resolved text and accessibility-located clicks were verified with Qt6 and
+KWrite fixtures in separate KWin on 11 October 2026; GTK, browsers and other
+toolkits' accessibility trees are untested. Next: broaden native app/toolkit/scaling
+tests; investigate keyboard and popup compatibility separately; add
 visual/temporal observers where they measurably help. Automatic control discovery,
 model observers and remote transport are not implemented. Preserve conditional
 programs, continuous observation, precise gestures, handoff, verified outcomes

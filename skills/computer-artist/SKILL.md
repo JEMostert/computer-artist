@@ -60,7 +60,10 @@ pointer or steal focus. Do not use host input to perform a refused agent action.
 Human takeover stops input; inspect before retrying. App dialogs can change human
 focus; do not promise prevention.
 
-Inspect `window/layout/APP/`; map the controls/work area needed now. Stable controls
+When `ca a11y --window APP` lists the controls you need, locate them by role and
+name with `ctx.find` instead of mapping pixels; it is read-only and still needs
+outcome checks. Otherwise inspect `window/layout/APP/`; map the controls/work area
+needed now. Stable controls
 use `ca target APP NAME --observation OBS --rect X Y W H` and guarded
 `ctx.click(target='@NAME')`. Recheck old maps; do not bypass failed guards.
 Changing canvases use verified geometry, not artwork pixel hashes. Coordinates
@@ -72,7 +75,8 @@ and correct unexpected results before continuing. Task-specific geometry belongs
 in the task; reusable fragments read maps. See [programs](references/programs.md).
 
 Independent physical keys require advertised keyboard support and ready target
-resources. Use `ctx.press`, `key_down`, `key_up`; verify effects before release.
+resources. Use `ctx.press`, `key_down`, `key_up` and `ctx.write`/`ca write` for
+layout-resolved text; verify effects before release.
 Unicode paste uses explicit host focus/clipboard within the task's authorization.
 Snapshot the destination before saving and use `ctx.verify_file` afterwards.
 Dispatch, a screenshot or a child's passing checks do not verify the outer task.

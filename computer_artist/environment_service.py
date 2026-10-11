@@ -18,6 +18,9 @@ from pathlib import Path
 
 from .environments import APP_ENV, MAX_REQUEST, check_env, host_environment
 
+# Distributions install the registry in either place.
+REGISTRY_PATHS = ('/usr/lib/at-spi2-registryd', '/usr/libexec/at-spi2-registryd')
+
 
 def serve(config_path):
     config = json.loads(Path(config_path).read_text())
@@ -88,6 +91,23 @@ class Manager:
             'shared_files': True,
             'started_at': config.get('started_at'),
         }
+        self.registry = self.start_registry()
+        self.info['accessibility'] = self.registry is not None
+
+    def start_registry(self):
+        """Start the AT-SPI registry; a missing or broken one only disables accessibility."""
+        binary = next((p for p in REGISTRY_PATHS if Path(p).is_file()), None)
+        if binary is None:
+            return None
+        with (self.state / 'logs/at-spi-registryd.log').open('ab') as log:
+            try:
+                return subprocess.Popen(
+                    [binary], env=self.env, stdin=subprocess.DEVNULL, stdout=log,
+                    stderr=subprocess.STDOUT,
+                )  # fmt: skip
+            except OSError as error:
+                log.write(f'Could not start {binary}: {error}\n'.encode())
+                return None
 
     def record(self, app):
         child = app['process']
@@ -165,6 +185,12 @@ class Manager:
                     os.killpg(app['process'].pid, signal.SIGTERM)
                 except OSError:
                     pass
+        if self.registry is not None:
+            self.registry.terminate()
+            try:
+                self.registry.wait(2)
+            except subprocess.TimeoutExpired:
+                self.registry.kill()
 
     def serve(self):
         with socket.socket(socket.AF_UNIX) as server:

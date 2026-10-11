@@ -36,9 +36,21 @@ control discovery. Rebound guards require a fresh observation and explicit
 new regions. Never bypass a refused guard with copied coordinates.
 
 Independent keys use `ctx.press('Ctrl+S')` or paired `key_down`/`key_up` when the
-loaded plugin supports them. KWrite has a demonstrated workflow; verify other apps.
-Explicit host contexts use real focus. `ctx.paste(text, shortcut='Shift+Insert')`
-and `ctx.clipboard_get/set` are host-only; text caps at 8192 UTF-8 bytes.
+loaded plugin supports them. `ctx.write(text)` (CLI `ca write`) types text as physical
+keys resolved from the live layout with the agent's own Shift/AltGr; characters the
+layout cannot reach (dead keys, compose, IME) are refused before any key, so use host
+paste for those. `ctx.type` writes on the agent lane and pastes on the host lane.
+KWrite has a demonstrated workflow; verify other apps. Explicit host contexts use real
+focus. `ctx.paste(text, shortcut='Shift+Insert')` and `ctx.clipboard_get/set` are
+host-only; text caps at 8192 UTF-8 bytes.
+
+When the app exposes accessibility (`ca a11y --window APP`; private environments
+enable it for Qt apps), prefer named controls over pixel maps:
+`ctx.click(element=ctx.find(role='push button', name='Save'))`. Elements carry
+window-content `center`, `states` (`checked`, `focused`, `showing`) and `text`, which
+also make good `ctx.verify` evidence. The tree is the app's claim: still verify the
+outcome. `ctx.click(count=2)`, `ctx.double_click` and `ctx.drag(start, end)` cover
+double clicks and drags.
 
 ```python
 before = ctx.snapshot_file(path)

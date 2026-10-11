@@ -228,6 +228,15 @@ try:
             ],
             check=True,
         )
+    elif '--check-accessibility' in sys.argv:
+        subprocess.run(
+            [
+                sys.executable,
+                str(root / 'tests/integration/check-accessibility.py'),
+                str(output / 'session.json'),
+            ],
+            check=True,
+        )
     elif '--check-recovery' in sys.argv:
         subprocess.run(
             [
@@ -237,7 +246,10 @@ try:
             ],
             check=True,
         )
-    elif '--check-independent' not in sys.argv and '--check-compatibility' not in sys.argv:
+    elif not any(
+        flag in sys.argv
+        for flag in ('--check-independent', '--check-compatibility', '--check-accessibility')
+    ):
         compositor.wait()
 except KeyboardInterrupt:
     pass

@@ -1,7 +1,8 @@
 # Installation
 
-Requires Python 3.12+, Pillow, KDE Wayland and matching installed KWin development
-headers. Installing Python does not deploy the plugin.
+Requires Python 3.12+, Pillow, jeepney, KDE Wayland and matching installed KWin
+development headers. Accessibility reading needs `at-spi2-core`. Installing Python
+does not deploy the plugin.
 
 ```bash
 python -m venv .venv
@@ -14,7 +15,9 @@ ca doctor --build
 Arch/CachyOS build packages: `kwin`, `qt6-base`, `qt6-tools`, `extra-cmake-modules`,
 `cmake`, `ninja`, `gcc`, `pkgconf`, `wayland`, `wayland-protocols`,
 `plasma-wayland-protocols`. Other distributions may package KWin headers separately.
-Integration also uses PySide6, KWrite, qdbus6, dbus-run-session and setpriv.
+Integration also uses PySide6 (system package), KWrite, qdbus6, dbus-run-session,
+setpriv and at-spi2-core; `scripts/test.sh --integration` creates
+`build/integration-venv` with system site packages for it.
 
 First host installation, when explicitly requested:
 
@@ -24,8 +27,9 @@ qdbus6 org.kde.KWin /Plugins org.kde.KWin.Plugins.LoadPlugin computerartist
 ca capabilities
 ```
 
-Never overwrite a loaded library. Stop input and unload its actual plugin ID
-before replacement. KWin can retain mappings after unload; applying new code in
+`ca doctor` compares the loaded plugin's source hash and KWin versions with this
+checkout and reports a stale or mismatched build. Never overwrite a loaded library.
+Stop input and unload its actual plugin ID before replacement. KWin can retain mappings after unload; applying new code in
 the same desktop process may require a versioned filename/plugin ID. Rebuild after
 KWin upgrades. Metadata defaults to disabled; `computerartistEnabled=true` in
 kwinrc's `[Plugins]` group enables loading on later logins.

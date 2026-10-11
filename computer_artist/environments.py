@@ -49,6 +49,8 @@ APP_ENV = {
     'GDK_BACKEND': 'wayland',
     'MOZ_ENABLE_WAYLAND': '1',
     'ELECTRON_OZONE_PLATFORM_HINT': 'wayland',
+    # Lets the agent read app accessibility trees; only affects apps in the private desktop.
+    'QT_LINUX_ACCESSIBILITY_ALWAYS_ON': '1',
 }
 SERVICES = {
     'portal': 'org.freedesktop.portal.Desktop',

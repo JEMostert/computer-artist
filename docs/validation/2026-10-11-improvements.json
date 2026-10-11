@@ -1,0 +1,25 @@
+{
+  "date": "2026-10-11",
+  "scope": "Layout-resolved agent text, accessibility-located input, agent stop reasons, window identity/scale, complete wheel frames, plugin build identity, environment and storage fixes",
+  "host": {"kwin": "6.7.5", "python": "3.14", "at_spi2_core": "2.62"},
+  "python_tests": "310 passed (unittest discovery), ruff check/format clean",
+  "separate_kwin_integration": {
+    "runner": "scripts/test.sh --integration (packaged KWin, virtual backend, private D-Bus)",
+    "suites": ["pointer/capture", "programs", "host lanes", "host text", "independent keys and text", "recovery", "compatibility", "accessibility"],
+    "result": "all passed with the rebuilt plugin; host plugin not deployed",
+    "new_checks": [
+      "layout_resolved_write_keeps_human_focus (KWrite received 'Hi, World! 42?' with agent Shift while the human kept focus)",
+      "agent_stop_reason_reported (explicit_stop, human_pointer_entered)",
+      "complete_wheel_scroll_frame (Qt angleDelta -120 for one notch)",
+      "window_scale_output_and_identity",
+      "click_at_accessible_center_activates_button, accessible_state_reflects_agent_click, human_focus_kept (Qt6 PySide6 form)"
+    ]
+  },
+  "private_environment": {
+    "kind": "host apps, checkout plugin build",
+    "accessibility": "registry started; ca --environment a11y listed Qt6 push button, text (with value) and check box",
+    "write": "host lane ctx.write verified through the accessible text value; non-layout characters refused before input",
+    "remove": "ca env remove on the stopped environment succeeded"
+  },
+  "not_covered": ["GTK, browsers and container apps' accessibility trees", "non-US layouts and AltGr levels", "the user's desktop (stale 20 September plugin loaded)", "XWayland, IME, popup grabs"]
+}

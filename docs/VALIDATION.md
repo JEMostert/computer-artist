@@ -16,6 +16,13 @@ exercised with rootless Podman: Qt and terminal apps in containers, four concurr
 environments, a private portal and host Vivaldi. See the
 [environment record](validation/2026-10-04-environments.json) for limits.
 
+On 11 October 2026, 310 Python tests and all separate-KWin suites passed, adding
+layout-resolved agent text in KWrite, accessibility-located clicks in a Qt6 form,
+agent stop reasons, wheel frames and window identity. A private environment read a
+Qt6 accessibility tree and verified typed text through it. See the
+[improvement record](validation/2026-10-11-improvements.json); non-US layouts, GTK
+and browser trees remain untested.
+
 Historical evidence from 29 September 2026:
 
 - [Pointer/capture](validation/2026-09-29-gem/plugin-regression.json)

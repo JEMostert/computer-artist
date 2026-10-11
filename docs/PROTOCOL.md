@@ -1,26 +1,31 @@
 # Socket protocol
 
 User-only `$XDG_RUNTIME_DIR/computer-artist/control`; newline-delimited JSON,
-64 KiB limit. `lane` is `agent` (default) or `host`. Replies report dispatch only.
+64 KiB per line including the newline; a longer line closes the connection. `lane` is `agent` (default) or `host`. Replies report dispatch only.
 Host negotiation requires `protocol >= 3`, `lane: host`, `host_pointer: true`.
 
 | Operation | Fields/behavior |
 | --- | --- |
-| `capabilities`, `windows` | Lane operations/restrictions, geometry, ownership |
+| `capabilities`, `windows` | Lane operations/restrictions, plugin `build` identity; window geometry, ownership, `app_id`, `resource_class`, `scale`, `output`, `maximized`, `fullscreen` |
+| `keymap` | `characters`: printable character → physical modifier/key codes on the current `layout`/`layout_name`, from a clean state with at most Shift and right Alt |
 | `session_status`, `session_close` | Inspect or release both lanes and hide cursor |
 | `acquire`, `release` | Exact `window` to acquire; owning `lease` to release |
 | `move` | Absolute logical desktop `x`, `y` within unobscured target content |
-| `button`, `scroll` | Evdev `code` 272–274/boolean `pressed`; `axis`/signed `delta` |
+| `button`, `scroll` | Evdev `code` 272–274/boolean `pressed`; `axis`/signed `delta`, optional `v120` (default `delta × 8`); agent scroll sends a complete wheel frame |
 | `focus` | Exact leased host `window`; real desktop focus |
 | `keyboard_begin`, `key` | Agent initialization; physical Linux `code` 1–247/boolean `pressed` |
 | `clipboard_get`, `clipboard_set` | Host UTF-8 only; `text`, at most 8192 bytes |
 | `cancel`, `takeover` | Release held input; revoke lane from another connection |
-| `ping` | Status; only owner renews five-second watchdog |
+| `ping` | Status; any request from the owner renews its five-second watchdog |
 | `capture` | Exact `window`, absolute new `path`; composited client/subsurface PNG |
 
 Input carries `lease` and `generation`; stale ownership/geometry is rejected.
-Replies include `ok`, lease/generation, session and lane `keyboard_ready`; failures
-include `error`. Clipboard replies are asynchronous; send one request at a time.
+Replies include `ok`, lease/generation, session, lane `keyboard_ready` and per-lane
+`stop_reason` (why the lane last stopped, such as `human_pointer_entered`,
+`human_keyboard_focus`, `watchdog`, `explicit_stop`, `target_changed`); failures
+include `error`. A revoked connection is closed without a reply; read the reason from
+`session_status` on a new connection. Clipboard replies are asynchronous; a second
+request before the reply closes the connection.
 Clipboard operations neither open sessions nor renew leases. Agent cancel keeps
 its lease; host cancel releases it.
 

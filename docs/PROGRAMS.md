@@ -46,11 +46,15 @@ in `trash/`; restore validates without deleting newer work. Call with
 | Program operation | Use |
 | --- | --- |
 | `window`, `observe(since=None, region=None)` | Fresh guarded geometry, capture and optional diffs |
-| `click`, `move`, `scroll(delta, axis='vertical', ...)` | `x=, y=`, `relative=(x,y)` in `[0,1)`, or `target='@NAME'` |
-| `path(points, relative=False, interval=.016, until=None, observe_every=10)` | Held-button stroke, optional observed stopping predicate |
+| `click(button='left', count=1)`, `double_click`, `move`, `scroll(delta, axis='vertical', ...)` | `x=, y=`, `relative=(x,y)` in `[0,1)`, `target='@NAME'` or `element=` from `find` |
+| `path(points, relative=False, interval=.016, until=None, observe_every=10, button='left')` | Held-button stroke, optional observed stopping predicate |
+| `drag(start, end, button='left', relative=False, spacing=4)` | Straight held-button drag sampled every `spacing` pixels |
+| `accessible(role=None, name=None)`, `find(role=None, name=None)` | Read-only AT-SPI elements with window-content `center`, `states`, `text`; `find` requires exactly one showing match |
 | `svg_path(data, origin=(0,0), scale=1, spacing=2, interval=.016, verify_change=False)` | Preflight every SVG stroke; pixel change is not shape verification |
 | `press(chord, duration=0)`, `key_down(key)`, `key_up(key)` | Independent physical keys when supported; host uses real focus |
-| `paste(text, shortcut='Shift+Insert')`, `type(text)` | Host clipboard paste, at most 8192 UTF-8 bytes |
+| `write(text, interval=0)` | Physical keys resolved from the live layout, at most 4096 characters; unreachable characters are refused before input |
+| `type(text)` | Agent lane: `write`. Host lane: clipboard paste |
+| `paste(text, shortcut='Shift+Insert')` | Host clipboard paste, at most 8192 UTF-8 bytes |
 | `focus`, `clipboard_get`, `clipboard_set(text)` | Explicit host actions |
 | `sleep(seconds)`, `wait_for(conditions, timeout=5, interval=.15)` | Named callable conditions or `changed_since`, `title_contains`, `stable_for` dictionaries |
 | `verify(name, passed, evidence=None)` | Boolean outcome with finite JSON evidence; failure interrupts |

@@ -1,5 +1,6 @@
 """Read-only installation, backend and workspace diagnostics."""
 
+import hashlib
 import importlib.metadata
 import os
 import shutil
@@ -16,6 +17,23 @@ def writable_destination(path):
     while not path.exists() and path != path.parent:
         path = path.parent
     return path.is_dir() and os.access(path, os.W_OK | os.X_OK)
+
+
+def plugin_source_hash(root):
+    """Hash plugin sources exactly as the build stamps source_sha256; None without plugin/."""
+    directory = Path(root) / 'plugin'
+    if not directory.is_dir():
+        return None
+    names = sorted(
+        path.name
+        for path in directory.iterdir()
+        if path.is_file()
+        and (path.suffix in ('.cpp', '.h') or path.name in ('metadata.json', 'CMakeLists.txt'))
+    )
+    manifest = ''.join(
+        f'{name}:{hashlib.sha256((directory / name).read_bytes()).hexdigest()}\n' for name in names
+    )
+    return hashlib.sha256(manifest.encode()).hexdigest()
 
 
 def diagnose(args):
@@ -130,6 +148,46 @@ def diagnose(args):
             },
             'Build and load the matching plugin using plugin/README.md; never overwrite a loaded library.',
         )
+        if backend:
+            plugin_build = backend.get('build')
+            if plugin_build is None:
+                check(
+                    'plugin_build',
+                    False,
+                    'Loaded plugin predates build identity',
+                    'Rebuild with ./scripts/build-plugin.sh and install/load it as docs/INSTALL.md describes.',
+                )
+            else:
+                loaded = plugin_build.get('source_sha256')
+                source_root = checkout_root()
+                checkout = plugin_source_hash(source_root) if source_root else None
+                if checkout is None:
+                    # Installed packages carry no plugin sources to compare against.
+                    check(
+                        'plugin_build',
+                        True,
+                        {
+                            'loaded': loaded,
+                            'checkout': None,
+                            'note': 'No checkout plugin/ directory; source hash comparison skipped',
+                        },
+                    )
+                else:
+                    check(
+                        'plugin_build',
+                        loaded == checkout,
+                        {'loaded': loaded, 'checkout': checkout},
+                        'The loaded plugin was built from different sources than this checkout. Rebuild with ./scripts/build-plugin.sh, install and reload it following docs/INSTALL.md; never overwrite a loaded library.',
+                    )
+                if plugin_build.get('kwin_headers') != plugin_build.get('kwin_running'):
+                    warnings.append(
+                        {
+                            'code': 'plugin_kwin_mismatch',
+                            'built_for': plugin_build.get('kwin_headers'),
+                            'running': plugin_build.get('kwin_running'),
+                            'remedy': 'Rebuild the plugin against the running KWin and reload it.',
+                        }
+                    )
         for window in raw_windows:
             labels = {
                 'target_not_visible': 'Not visible on the current desktop',

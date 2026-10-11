@@ -6,7 +6,8 @@ Build with `./scripts/build-plugin.sh` against the installed KWin headers and
 
 `main.cpp` owns lanes, leases, takeover, lifetime and the animated cursor.
 `capture.cpp` renders client/subsurface/GPU content. `keyboard.cpp` delivers agent
-keys with separate XKB state to existing resources. `clipboard.cpp` uses
+keys with separate XKB state to existing resources and reports which keys produce
+each character on the live layout. `clipboard.cpp` uses
 ext-data-control for bounded host UTF-8 transfers. See [protocol](../docs/PROTOCOL.md).
 
 This is client-specific delivery, not an extra advertised seat. Human pointer/focus
@@ -17,5 +18,7 @@ and popup grabs are unsupported.
 
 `./scripts/test.sh --integration` uses a separate packaged KWin virtual instance.
 Fake input refuses displays outside that harness. Reports cover pointer/capture,
-programs, both lanes, host text, independent keys and recovery. Keep compositor
+programs, both lanes, host text, independent keys and text, recovery and
+accessibility-located input. Capabilities carry a source hash that `ca doctor`
+compares with the checkout. Keep compositor
 experiments separate from the running host.

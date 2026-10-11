@@ -36,6 +36,8 @@ ca windows
 ca set WINDOW_ID --name paint
 ca observe --window paint
 ca click --window paint --x 200 --y 150
+ca write --window editor 'Hello, world!'         # independent keys, live layout
+ca a11y --window editor --role 'push button'     # read-only accessibility tree
 ca watch --window paint --duration 10 --changes-only
 ca session close
 ```

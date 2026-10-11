@@ -57,6 +57,16 @@ must exist in the image; Chromium in a container may need `-- --no-sandbox`.
 decrypt in a private session: Chromium-family browsers may ask to continue with
 data loss, which only affects the copy; sign in once and the profile persists.
 
+## Accessibility
+
+Environments start the AT-SPI registry and set `QT_LINUX_ACCESSIBILITY_ALWAYS_ON=1`
+for their apps (`status.accessibility`). `ca --environment TASK a11y --window APP`
+then lists roles, names, states, text and window-content centers from the private
+bus; programs use `ctx.find`/`ctx.click(element=...)`. Verified for a Qt6 app on
+11 October 2026; GTK, browsers and container apps are untested. Remove reports
+`running: null` when the manager does not answer and refuses to delete until the
+environment is known to be stopped.
+
 ## Limits
 
 Each desktop service measured about 230 MiB and a small container about 40 MB;
