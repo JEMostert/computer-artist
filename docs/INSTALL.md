@@ -34,6 +34,28 @@ the same desktop process may require a versioned filename/plugin ID. Rebuild aft
 KWin upgrades. Metadata defaults to disabled; `computerartistEnabled=true` in
 kwinrc's `[Plugins]` group enables loading on later logins.
 
+## Updating
+
+From a checkout, `ca update` does the steps above safely:
+
+1. `git pull --ff-only` (refuses uncommitted changes; `--no-pull` skips it), then
+   reinstalls dependencies when `pyproject.toml` changed (only inside a virtual
+   environment; a system interpreter gets a pip hint instead) and continues with
+   the pulled code.
+2. Rebuilds the plugin when the loaded build or the login copy differs from the
+   checkout's source hash.
+3. Installs `computerartist-HASH.so` with `sudo install` (a new inode), unloads the
+   running plugin and loads the versioned copy; if KWin refuses, the old plugin is
+   loaded again. It refuses while a session holds an input lane unless `--force`.
+   `--no-reload` leaves the running plugin alone.
+4. Replaces `computerartist.so` for later logins, deletes unloaded old versioned
+   copies and runs `ca doctor`.
+
+`ca update --check` fetches and reports the planned actions without changing
+anything. Set `CA_KWIN_PLUGIN_DIR` if KWin plugins live outside `/usr/lib*/qt6`.
+A crash in a newly loaded plugin takes KWin down with it; run `scripts/test.sh
+--integration` first when plugin sources changed.
+
 Socket: `$XDG_RUNTIME_DIR/computer-artist/control`, overridden by `--socket` or
 `CA_SOCKET`. `ca doctor` checks both lanes without input or sessions.
 `ca setup --codex` links the skill into `~/.agents/skills`; `--skills-dir PATH`

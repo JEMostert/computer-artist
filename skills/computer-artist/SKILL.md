@@ -48,6 +48,8 @@ recover from a refusal. XWayland windows can be observed but not driven.
 Inspect `ca capabilities`, `ca windows`, `ca doctor --window APP` and a fresh
 `ca observe --window APP` image. Name an exact live ID with `ca set ID --name APP`.
 After reopening, rebind explicitly; `--title TEXT` must match one window.
+If doctor reports `plugin_build`, the loaded plugin is stale: `ca update --check` shows
+the fix; running `ca update` reloads KWin's plugin with sudo, so ask the user first.
 Check live capabilities and verify menus/dialogs in the actual app. Agent-lane
 menus opened during a lease are observable and selectable in the tested Qt fixture;
 do not infer general compatibility. Report native Wayland and XWayland separately.

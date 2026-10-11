@@ -77,7 +77,8 @@ ca storage keep RUN_ID
 active and preserved runs are protected. Save final documents outside rotating
 output. Programs have your user permissions; input separation is not a sandbox.
 
-`ca setup --codex` links the bundled agent skill. It does not update the plugin.
+`ca setup --codex` links the bundled agent skill. `ca update` pulls the checkout,
+rebuilds the plugin and swaps it into the running KWin; `ca update --check` only reports.
 Read [capabilities](docs/CAPABILITIES.md), [validation](docs/VALIDATION.md),
 [code structure](docs/CODE-STRUCTURE.md), [protocol](docs/PROTOCOL.md) or
 [contributing](CONTRIBUTING.md). [GPL-2.0-or-later](LICENSE).

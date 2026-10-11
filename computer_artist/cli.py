@@ -91,6 +91,9 @@ def parser():
     from .environment_commands import add_command as add_environments
 
     add_environments(commands)
+    from .update import add_command as add_update
+
+    add_update(commands)
     doctor = commands.add_parser(
         'doctor',
         parents=[shared],
@@ -445,6 +448,12 @@ def main(argv=None):
 
             print(json.dumps(install(args), indent=2))
             return 0
+        if args.command == 'update':
+            from .update import update
+
+            reply = update(args)
+            print(json.dumps(reply, indent=2))
+            return 0 if reply['ok'] else 1
         if args.command == 'doctor':
             from .diagnostics import diagnose
 
