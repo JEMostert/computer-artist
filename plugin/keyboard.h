@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 #pragma once
+#include <QJsonObject>
 #include <QList>
 #include <QPointer>
 #include <functional>
@@ -23,6 +24,9 @@ public:
     void end(uint32_t time);
     int heldCount() const { return m_keys.size(); }
     static QList<uint32_t> resources(ClientConnection *client);
+    // Printable characters reachable on the current layout, each as the
+    // physical modifier keys then the key that produce it from a clean state.
+    static QJsonObject characters();
 private:
     void send(const std::function<void(wl_resource *)> &callback) const;
     void modifiers() const;

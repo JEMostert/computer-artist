@@ -376,6 +376,18 @@ class Client:
         """Compatibility alias: text is entered through clipboard paste."""
         return self.paste(text)
 
+    def keymap(self):
+        """Characters the live layout produces, as physical modifier/key codes."""
+        reply = self.request('keymap')
+        characters = reply.get('characters')
+        if not isinstance(characters, dict):
+            raise ConnectionError('Compositor sent an invalid keymap reply')
+        return {
+            'characters': characters,
+            'layout': reply.get('layout'),
+            'layout_name': reply.get('layout_name'),
+        }
+
     def scroll(self, delta, *, axis='vertical', v120=0):
         return self.request('scroll', axis=axis, delta=delta, v120=v120)
 

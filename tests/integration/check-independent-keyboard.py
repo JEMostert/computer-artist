@@ -159,6 +159,28 @@ try:
         wait(lambda: document.read_text() == 'A' + 'b' * 13 + 'ce\n')
         report['rejected_key_reconciles_held_modifier'] = True
         agent.release()
+        # Layout-resolved text: capitals and symbols need the agent's own Shift
+        # while the human keeps focus in their own application.
+        from computer_artist.runtime import Context
+        from computer_artist.workspace import Workspace
+
+        with Client(state['control']) as writer:
+            keymap = writer.keymap()
+            assert keymap['characters']['A'] == [42, 30], keymap['characters'].get('A')
+            ctx = Context(writer, target['id'], Workspace(out / 'write-window', out, out))
+            ctx.click(x=200, y=240)
+            reply = ctx.write('Hi, World! 42?')
+            assert reply['characters'] == 14, reply
+            try:
+                ctx.write('\u2603')
+            except ValueError:
+                pass
+            else:
+                raise AssertionError('Unreachable character accepted')
+            writer.chord(29, 31)
+            wait(lambda: document.read_text() == 'A' + 'b' * 13 + 'ce\nHi, World! 42?\n')
+        assert next(w for w in observer.windows() if w['id'] == human_window['id'])['human_active']
+        report['layout_resolved_write_keeps_human_focus'] = True
         # Raw connections deliberately have no heartbeat to test server watchdog.
         for reason in ('disconnect', 'watchdog'):
             raw = socket.socket(socket.AF_UNIX)

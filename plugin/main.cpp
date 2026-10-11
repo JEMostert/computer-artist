@@ -487,7 +487,7 @@ QJsonObject Artist::request(QLocalSocket *socket, const QJsonObject &o) {
     const auto op = o.value("op").toString();
     const auto lane = o.value("lane").toString("agent");
     if (lane!="agent" && lane!="host") return {{"ok",false},{"error","invalid_lane"}};
-    const bool observation = op=="windows" || op=="capabilities" || op=="ping" || op=="capture";
+    const bool observation = op=="windows" || op=="capabilities" || op=="ping" || op=="capture" || op=="keymap";
     if (lane=="host" && !observation && op!="session_status" && op!="session_close") return requestHost(socket,o);
     QJsonObject reply;
     bool ok=false;
@@ -496,19 +496,24 @@ QJsonObject Artist::request(QLocalSocket *socket, const QJsonObject &o) {
         reply = {{"environment",qEnvironmentVariable("CA_ENVIRONMENT")},{"protocol",3},{"backend","stock_kwin_plugin"},{"ownership","wayland_connection_pointer_keyboard"},
             {"automatic_sessions",true},{"lane",lane},{"host_pointer",true},{"host_focus",true},{"host_keyboard",true},{"host_xwayland",false},{"native_handoff",true},{"xwayland_handoff",false},{"keyboard",true},{"input_methods",false},
             {"clipboard",false},{"data_drag_and_drop",false},{"popups",false},{"popup_observation",true},{"ungrabbed_popup_pointer",true},{"capture_transients",true},{"human_pointer_entry_takeover",true},
-            {"operations",QJsonArray{"session_close","session_status","windows","capabilities","acquire","release","move","button","scroll","keyboard_begin","key","cancel","takeover","ping","capture"}}};
+            {"operations",QJsonArray{"session_close","session_status","windows","capabilities","acquire","release","move","button","scroll","keyboard_begin","key","keymap","cancel","takeover","ping","capture"}}};
         if (lane=="host") {
             reply.insert("ownership","host_wayland_connection");
             reply.insert("keyboard",true);
             const bool clipboard=m_clipboard && m_clipboard->ready();
             reply.insert("clipboard",clipboard);
             reply.insert("clipboard_max_bytes",Clipboard::MaxBytes);
-            auto operations=QJsonArray{"session_close","session_status","windows","capabilities","acquire","release","move","button","scroll","focus","key","cancel","takeover","ping","capture"};
+            auto operations=QJsonArray{"session_close","session_status","windows","capabilities","acquire","release","move","button","scroll","focus","key","keymap","cancel","takeover","ping","capture"};
             if(clipboard) { operations.append("clipboard_get"); operations.append("clipboard_set"); }
             reply.insert("operations",operations);
         }
         ok=true;
     } else if (op=="windows") { reply.insert("windows",windows()); ok=true; }
+    else if (op=="keymap") {
+        const auto map=ArtistKeyboard::characters();
+        for (auto it=map.begin(); it!=map.end(); ++it) reply.insert(it.key(),it.value());
+        ok=map.contains("characters");
+    }
     else if (op=="session_status") ok=true;
     else if (op=="session_close") {
         // Session lifetime is explicit and independent of short-lived CLI sockets.

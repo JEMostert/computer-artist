@@ -158,6 +158,7 @@ def parser():
     )
     for name, help_text in [
         ('windows', 'List windows and their IDs'),
+        ('keymap', 'Characters the live keyboard layout types with physical keys'),
         ('capabilities', 'Report compositor support'),
         ('stop', 'Revoke the current agent lease and return its app'),
         ('takeover', 'Alias for stop'),
@@ -180,9 +181,16 @@ def parser():
     )
     clipboard.add_argument('action', choices=('get', 'set'))
     clipboard.add_argument('text', nargs='?', help='Text to set; omit to read stdin')
-    for name in ('click', 'move', 'type', 'paste', 'key', 'scroll', 'focus'):
+    helps = {
+        'type': 'Type text: physical layout keys on the agent lane, clipboard paste with --host',
+        'write': 'Type text as physical keys resolved from the live keyboard layout',
+        'paste': 'Paste text through the host clipboard (requires --host)',
+    }
+    for name in ('click', 'move', 'type', 'write', 'paste', 'key', 'scroll', 'focus'):
         command = commands.add_parser(
-            name, parents=[shared], help=f'{name.capitalize()} in an explicitly selected window'
+            name,
+            parents=[shared],
+            help=helps.get(name, f'{name.capitalize()} in an explicitly selected window'),
         )
         command.add_argument('--window', required=True, help='Window ID or saved name')
         if name in ('click', 'move', 'scroll'):
@@ -203,15 +211,23 @@ def parser():
             )
         if name == 'click':
             command.add_argument('--button', choices=BUTTONS, default='left')
-        elif name in ('type', 'paste'):
+        elif name in ('type', 'write', 'paste'):
             command.add_argument(
-                'text', help='Unicode text to paste; use -- before text starting with a dash'
+                'text', help='Unicode text; use -- before text starting with a dash'
             )
+        if name in ('type', 'write'):
+            command.add_argument(
+                '--interval',
+                type=nonnegative_number,
+                default=0,
+                help='Seconds between typed characters (default: 0)',
+            )
+        if name in ('type', 'paste'):
             command.add_argument(
                 '--shortcut',
                 type=chord,
                 default=chord('Shift+Insert'),
-                help='Paste shortcut (default: Shift+Insert); use Ctrl+Shift+V for apps that require it',
+                help='Host paste shortcut (default: Shift+Insert); use Ctrl+Shift+V for apps that require it',
             )
         elif name == 'key':
             command.add_argument('chord', type=chord, help='Key or chord, e.g. End or Ctrl+Shift+S')
@@ -248,6 +264,8 @@ def execute(client, args):
         return reply
     if args.command == 'session':
         return client.request('session_' + args.action)
+    if args.command == 'keymap':
+        return {'ok': True, **client.keymap()}
     if args.command in ('windows', 'capabilities', 'stop', 'takeover'):
         reply = client.request('takeover' if args.command in ('stop', 'takeover') else args.command)
         if args.command == 'windows':
@@ -313,6 +331,7 @@ def execute(client, args):
     from .runtime import Context
 
     ctx = Context(client, args.window, Workspace(args.window_dir, args.output_dir))
+    details = {}
     if args.command in ('click', 'move', 'scroll'):
         x, y = args.x, args.y
         if args.absolute:
@@ -327,14 +346,19 @@ def execute(client, args):
             ctx.scroll(args.delta, axis=args.axis, **point)
     elif args.command == 'focus':
         ctx.focus()
-    elif args.command in ('type', 'paste'):
+    elif args.command == 'paste' or (args.command == 'type' and ctx.lane == 'host'):
+        if getattr(args, 'interval', 0):
+            raise ValueError('Host typing pastes the whole text; --interval is unsupported')
         ctx.paste(args.text, shortcut=args.shortcut)
+    elif args.command in ('type', 'write'):
+        details = ctx.write(args.text, interval=args.interval)
     elif args.command == 'key':
         ctx.press(args.chord, duration=args.duration)
     return {
         'ok': True,
         'command': args.command,
         'window': ctx.window_id,
+        **details,
         'status': 'dispatched',
         'released': True,
     }

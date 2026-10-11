@@ -10,6 +10,7 @@
 #include <wayland/surface.h>
 #include <wayland-server-core.h>
 #include <wayland-server-protocol.h>
+#include <QJsonArray>
 #include <algorithm>
 #include <cstring>
 
@@ -112,5 +113,39 @@ void ArtistKeyboard::end(uint32_t time) {
     if (m_state) xkb_state_unref(m_state);
     if (m_keymap) xkb_keymap_unref(m_keymap);
     m_state = nullptr; m_keymap = nullptr;
+}
+QJsonObject ArtistKeyboard::characters() {
+    auto keymap = input()->keyboard()->xkb()->keymap();
+    const auto layout = input()->keyboard()->xkb()->currentLayout();
+    QJsonObject result;
+    if (!keymap) return result;
+    // Simulate the agent lane's own clean state: no locks, current layout and at
+    // most Shift and right Alt (AltGr on layouts that bind it to level three).
+    // Fewer modifiers and lower keycodes win, so the main row beats the keypad.
+    const QList<QList<uint32_t>> combos{{}, {42}, {100}, {42, 100}};
+    QJsonObject map;
+    for (const auto &combo : combos) {
+        auto state = xkb_state_new(keymap);
+        if (!state) break;
+        xkb_state_update_mask(state, 0, 0, 0, 0, 0, layout);
+        for (auto code : combo) xkb_state_update_key(state, code + 8, XKB_KEY_DOWN);
+        for (xkb_keycode_t key = xkb_keymap_min_keycode(keymap); key <= xkb_keymap_max_keycode(keymap) && map.size() < 1024; ++key) {
+            if (key < 9 || key - 8 > 247 || std::find(combo.begin(), combo.end(), key - 8) != combo.end()) continue;
+            const auto utf32 = xkb_state_key_get_utf32(state, key);
+            if (utf32 < 0x20 || utf32 == 0x7f || (utf32 >= 0x80 && utf32 < 0xa0)) continue;
+            const char32_t character = utf32;
+            const auto text = QString::fromUcs4(&character, 1);
+            if (map.contains(text)) continue;
+            QJsonArray codes;
+            for (auto code : combo) codes.append(int(code));
+            codes.append(int(key - 8));
+            map.insert(text, codes);
+        }
+        xkb_state_unref(state);
+    }
+    result.insert("characters", map);
+    result.insert("layout", int(layout));
+    if (const auto name = xkb_keymap_layout_get_name(keymap, layout)) result.insert("layout_name", QString::fromUtf8(name));
+    return result;
 }
 }

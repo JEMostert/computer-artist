@@ -14,6 +14,8 @@ from .observations import rectangle as rectangle
 from .programs import evaluate, prepare
 from .workspace import Workspace
 
+WRITE_MAX_CHARACTERS = 4096
+
 
 class ModuleCalls:
     def __init__(self, context):
@@ -364,8 +366,65 @@ class Context:
         self.client.focus(self.window_id)
         return self.client.paste(text, shortcut=codes)
 
-    def type(self, text):
-        return self.paste(text)
+    def type(self, text, *, interval=0.0):
+        """Agent lane: physical keys from the live layout. Host lane: clipboard paste."""
+        if self.lane == 'host':
+            if interval:
+                raise ValueError('Host typing pastes the whole text; interval is unsupported')
+            return self.paste(text)
+        return self.write(text, interval=interval)
+
+    def write(self, text, *, interval=0.0):
+        """Type text as physical keys resolved against the live keyboard layout.
+
+        Every character is checked before the first key. Characters the layout
+        cannot produce without dead keys, compose or an input method are refused;
+        use explicit host paste for those. Dispatch is not an outcome; verify it.
+        """
+        if not isinstance(text, str) or not text or len(text) > WRITE_MAX_CHARACTERS:
+            raise ValueError(f'Text must be 1–{WRITE_MAX_CHARACTERS} characters')
+        if type(interval) not in (int, float) or not math.isfinite(interval) or interval < 0:
+            raise ValueError('interval must be finite and nonnegative')
+        self._keyboard_operations()
+        if 'keymap' not in self.capabilities.get('operations', []):
+            raise ValueError(
+                'Connected plugin cannot report its keyboard layout; rebuild and reload it '
+                '(ca doctor --build). No host fallback is permitted'
+            )
+        text = text.replace('\r\n', '\n').replace('\r', '\n')
+        keymap = self.client.keymap()
+        characters = {**keymap['characters'], '\n': [28], '\t': [15]}
+        missing = sorted({c for c in text if c not in characters})
+        if missing:
+            raise ValueError(
+                f'Layout {keymap.get("layout_name") or keymap.get("layout")} cannot type '
+                f'{missing[:20]} with physical keys; use explicit host paste instead'
+            )
+        chords = [characters[c] for c in text]
+        if any(
+            not isinstance(codes, list)
+            or not codes
+            or any(type(code) is not int or not 1 <= code <= 247 for code in codes)
+            for codes in chords
+        ):
+            raise ConnectionError('Compositor sent an invalid keymap entry')
+        if sum(2 * len(codes) for codes in chords) + 4 > self.client.budget:
+            raise ValueError('Text exceeds remaining action budget')
+        if time.monotonic() + interval * len(chords) >= self.client.expires:
+            raise TimeoutError('Typing duration exceeds remaining deadline')
+        self._own()
+        if self.lane == 'host':
+            self.client.focus(self.window_id)
+        for index, codes in enumerate(chords):
+            self.check_budget()
+            self.client.chord(*codes)
+            if interval and index < len(chords) - 1:
+                self.sleep(interval)
+        return {
+            'status': 'dispatched',
+            'characters': len(chords),
+            'layout': keymap.get('layout_name') or keymap.get('layout'),
+        }
 
     def press(self, chord, *, duration=0):
         from .input import parse_chord
