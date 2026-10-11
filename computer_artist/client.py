@@ -372,10 +372,6 @@ class Client:
         self.clipboard_set(text)
         self.chord(*shortcut)
 
-    def type_text(self, text):
-        """Compatibility alias: text is entered through clipboard paste."""
-        return self.paste(text)
-
     def stop_reason(self):
         """Ask a fresh connection why this lane last stopped; None when unknown.
 
@@ -442,15 +438,6 @@ class Client:
         except BaseException:
             self.cancel()
             raise
-
-    def wait_for(self, predicate, *, timeout=5, interval=0.05):
-        end = time.monotonic() + timeout
-        while time.monotonic() < end:
-            result = predicate(self.windows())
-            if result:
-                return result
-            time.sleep(interval)
-        raise TimeoutError('Expected application state was not observed')
 
     def save_trace(self, path):
         Path(path).write_text(json.dumps(list(self.trace), indent=2) + '\n')

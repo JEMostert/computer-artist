@@ -18,6 +18,22 @@ from .workspace import Workspace
 WRITE_MAX_CHARACTERS = 4096
 
 
+def _finite(value, message):
+    # Accept any real number (including NumPy scalars) but not booleans.
+    try:
+        finite = not isinstance(value, bool) and math.isfinite(value)
+    except TypeError:
+        finite = False
+    if not finite:
+        raise ValueError(message)
+
+
+def _nonnegative(value, message):
+    _finite(value, message)
+    if value < 0:
+        raise ValueError(message)
+
+
 class ModuleCalls:
     def __init__(self, context):
         self.context = context
@@ -212,13 +228,9 @@ class Context:
             if not (0 <= x < 1 and 0 <= y < 1):
                 raise ValueError('Relative coordinates must be in [0, 1)')
             x, y = x * window['width'], y * window['height']
-        if (
-            x is None
-            or y is None
-            or not math.isfinite(x)
-            or not math.isfinite(y)
-            or not (0 <= x < window['width'] and 0 <= y < window['height'])
-        ):
+        _finite(x, 'Point is outside window content')
+        _finite(y, 'Point is outside window content')
+        if not (0 <= x < window['width'] and 0 <= y < window['height']):
             raise ValueError('Point is outside window content')
         return window['x'] + x, window['y'] + y
 
@@ -319,8 +331,8 @@ class Context:
             window = self.refresh()
             x0, x1 = x0 * window['width'], x1 * window['width']
             y0, y1 = y0 * window['height'], y1 * window['height']
-        if not all(map(math.isfinite, (x0, y0, x1, y1))):
-            raise ValueError('Drag coordinates must be finite')
+        for value in (x0, y0, x1, y1):
+            _finite(value, 'Drag coordinates must be finite')
         steps = max(1, math.ceil(math.hypot(x1 - x0, y1 - y0) / spacing))
         points = [
             (x0 + (x1 - x0) * i / steps, y0 + (y1 - y0) * i / steps) for i in range(steps + 1)
@@ -328,8 +340,9 @@ class Context:
         return self.path(points, interval=interval, button=button)
 
     def scroll(self, delta, *, axis='vertical', **point):
-        if axis not in ('vertical', 'horizontal') or not math.isfinite(delta):
+        if axis not in ('vertical', 'horizontal'):
             raise ValueError('Invalid scroll')
+        _finite(delta, 'Invalid scroll')
         self.move(**point)
         return self.client.scroll(delta, axis=axis)
 
@@ -349,8 +362,7 @@ class Context:
             not callable(until) or type(observe_every) is not int or observe_every < 1
         ):
             raise ValueError('until must be callable and observe_every must be a positive integer')
-        if not math.isfinite(interval) or interval < 0:
-            raise ValueError('interval must be finite and nonnegative')
+        _nonnegative(interval, 'interval must be finite and nonnegative')
         # Validate all coordinates before pressing a button; bound caller allocation.
         positions = []
         window = self.refresh()
@@ -359,11 +371,9 @@ class Context:
                 raise ValueError('Path exceeds remaining action budget')
             if relative:
                 x, y = x * window['width'], y * window['height']
-            if (
-                not math.isfinite(x)
-                or not math.isfinite(y)
-                or not (0 <= x < window['width'] and 0 <= y < window['height'])
-            ):
+            _finite(x, 'Path point outside window content')
+            _finite(y, 'Path point outside window content')
+            if not (0 <= x < window['width'] and 0 <= y < window['height']):
                 raise ValueError('Path point outside window content')
             positions.append((window['x'] + x, window['y'] + y))
         if not positions:
@@ -412,19 +422,16 @@ class Context:
         """Draw a bounded SVG path after validating every stroke before input."""
         from .gestures import svg_path
 
-        if not math.isfinite(interval) or interval < 0:
-            raise ValueError('interval must be finite and nonnegative')
+        _nonnegative(interval, 'interval must be finite and nonnegative')
         if type(verify_change) is not bool:
             raise ValueError('verify_change must be a boolean')
         strokes = svg_path(data, origin=origin, scale=scale, spacing=spacing)
         window = self.refresh()
         for stroke in strokes:
             for x, y in stroke:
-                if (
-                    not math.isfinite(x)
-                    or not math.isfinite(y)
-                    or not (0 <= x < window['width'] and 0 <= y < window['height'])
-                ):
+                _finite(x, 'SVG path point outside window content')
+                _finite(y, 'SVG path point outside window content')
+                if not (0 <= x < window['width'] and 0 <= y < window['height']):
                     raise ValueError('SVG path point outside window content')
         # Each stroke includes refreshes, ownership checks, a move and two
         # button transitions; reserve startup overhead for the first lease.
@@ -485,8 +492,7 @@ class Context:
         """
         if not isinstance(text, str) or not text or len(text) > WRITE_MAX_CHARACTERS:
             raise ValueError(f'Text must be 1–{WRITE_MAX_CHARACTERS} characters')
-        if type(interval) not in (int, float) or not math.isfinite(interval) or interval < 0:
-            raise ValueError('interval must be finite and nonnegative')
+        _nonnegative(interval, 'interval must be finite and nonnegative')
         self._keyboard_operations()
         if 'keymap' not in self.capabilities.get('operations', []):
             raise ValueError(
@@ -532,8 +538,7 @@ class Context:
         from .input import parse_chord
 
         codes = parse_chord(chord)
-        if not math.isfinite(duration) or duration < 0:
-            raise ValueError('Key duration must be finite and nonnegative')
+        _nonnegative(duration, 'Key duration must be finite and nonnegative')
         self._keyboard_operations()
         self._own()
         if self.lane == 'host':
@@ -569,8 +574,7 @@ class Context:
         return self.client.key(codes[0], False)
 
     def sleep(self, seconds):
-        if not math.isfinite(seconds) or seconds < 0:
-            raise ValueError('Invalid wait duration')
+        _nonnegative(seconds, 'Invalid wait duration')
         end = time.monotonic() + seconds
         while time.monotonic() < end:
             self.refresh()
@@ -629,14 +633,7 @@ class Context:
                 elif isinstance(predicate, dict) and set(predicate) == {'title_contains'}:
                     matched = predicate['title_contains'] in observation['window'].get('title', '')
                 elif isinstance(predicate, dict) and set(predicate) == {'stable_for'}:
-                    duration = predicate['stable_for']
-                    if (
-                        not isinstance(duration, (int, float))
-                        or not math.isfinite(duration)
-                        or duration <= 0
-                    ):
-                        raise ValueError('stable_for must be positive and finite')
-                    matched = now - stable_since >= duration
+                    matched = now - stable_since >= predicate['stable_for']
                 else:
                     raise ValueError(f'Unknown condition {name}')
                 if matched:
@@ -689,9 +686,6 @@ class Context:
         if not passed:
             self._interrupt(f'Outcome check failed: {name}', 'outcome_check_failed')
         return check
-
-    def yield_to_agent(self, reason):
-        self.handoff(reason)
 
     def handoff(self, reason):
         """Release this context's lease and return control with fresh window evidence."""

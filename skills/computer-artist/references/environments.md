@@ -52,10 +52,7 @@ one without starting. Images need a `sleep` executable. `--pull` refreshes bases
 `ca env browser NAME --family chromium|firefox --executable EXE` keeps a persistent
 private profile per executable (`--profile NAME` for more). Container browsers
 must exist in the image; Chromium in a container may need `-- --no-sandbox`.
-`--copy-profile default|PATH` seeds a new profile from a closed browser profile
-(caches skipped) and refuses one in use. Wallet-encrypted logins and cookies do not
-decrypt in a private session: Chromium-family browsers may ask to continue with
-data loss, which only affects the copy; sign in once and the profile persists.
+Sign in once; the profile persists.
 
 ## Accessibility
 

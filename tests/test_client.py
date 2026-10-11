@@ -97,7 +97,7 @@ class ControllerTest(unittest.TestCase):
         with Client(self.path) as client:
             with client.owned('existing-window'):
                 with self.assertRaises(ValueError):
-                    client.type_text('valid prefix 😀')
+                    client.paste('valid prefix 😀')
         self.assertFalse(any(e['op'] == 'key' for e in self.events))
         self.assertFalse(any(e['op'] == 'clipboard_set' for e in self.events))
 

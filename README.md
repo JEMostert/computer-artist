@@ -22,7 +22,7 @@ ca env stop web
 ```
 
 See [private environments](skills/computer-artist/references/environments.md) for
-recipes, browsers, profile copies and limits.
+recipes, browsers, private profiles and limits.
 
 Install the CLI and build/load the matching plugin using [installation](docs/INSTALL.md):
 

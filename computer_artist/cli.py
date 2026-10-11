@@ -161,7 +161,6 @@ def parser():
         ('keymap', 'Characters the live keyboard layout types with physical keys'),
         ('capabilities', 'Report compositor support'),
         ('stop', 'Revoke the current agent lease and return its app'),
-        ('takeover', 'Alias for stop'),
     ]:
         commands.add_parser(name, parents=[shared], help=help_text)
     name_window = commands.add_parser(
@@ -308,34 +307,10 @@ def execute(client, args):
         return {'ok': True, 'window': ctx.window_id, 'count': len(elements), 'elements': elements}
     if args.command == 'keymap':
         return {'ok': True, **client.keymap()}
-    if args.command in ('windows', 'capabilities', 'stop', 'takeover'):
-        reply = client.request('takeover' if args.command in ('stop', 'takeover') else args.command)
+    if args.command in ('windows', 'capabilities', 'stop'):
+        reply = client.request('takeover' if args.command == 'stop' else args.command)
         if args.command == 'windows':
             reply['windows'] = client.window_store.display_windows(reply['windows'])
-        if args.command == 'capabilities':
-            reply['harness'] = {
-                'fragments': True,
-                'typed_parameters': ['int', 'float', 'str', 'bool'],
-                'observations': True,
-                'image_diffs': True,
-                'guarded_regions': True,
-                'conditional_programs': True,
-                'hard_deadlines': True,
-                'version_history': True,
-                'accessibility': True,
-                'automatic_control_detection': False,
-            }
-            reply['harness'].update(
-                continuous_watch=True,
-                svg_paths=True,
-                file_outcome_checks=True,
-                explicit_fragment_restore=True,
-                target_revalidation=True,
-                targeted_run_stop=True,
-                structured_handoff=True,
-                layout_text_entry='keymap' in reply.get('operations', []),
-                multi_click_and_drag=True,
-            )
         return reply
     if args.command == 'set':
         windows = client.windows()

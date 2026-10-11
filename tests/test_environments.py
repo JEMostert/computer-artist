@@ -11,7 +11,7 @@ from contextlib import redirect_stdout
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-from computer_artist import environment_apps, environments
+from computer_artist import environments
 from computer_artist.cli import main, parser
 
 
@@ -328,49 +328,6 @@ class EnvironmentCommandTest(unittest.TestCase):
             self.assertEqual(main(['--environment', 'web', 'windows']), 1)
         client.assert_not_called()
         self.assertIn('not running', error.getvalue())
-
-
-class BrowserProfileTest(unittest.TestCase):
-    def setUp(self):
-        self.tmp = tempfile.TemporaryDirectory()
-        self.addCleanup(self.tmp.cleanup)
-        self.root = Path(self.tmp.name)
-
-    def test_live_profiles_are_detected(self):
-        profile = self.root / 'chromium'
-        profile.mkdir()
-        lock = profile / 'SingletonLock'
-        self.assertFalse(environment_apps.profile_in_use(profile, 'chromium'))
-        lock.symlink_to(f'{socket.gethostname()}-{os.getpid()}')
-        self.assertTrue(environment_apps.profile_in_use(profile, 'chromium'))
-        lock.unlink()
-        lock.symlink_to(f'{socket.gethostname()}-999999999')
-        self.assertFalse(environment_apps.profile_in_use(profile, 'chromium'))
-        lock.unlink()
-        lock.symlink_to(f'another-host-{os.getpid()}')
-        self.assertTrue(environment_apps.profile_in_use(profile, 'chromium'))
-        firefox = self.root / 'firefox'
-        firefox.mkdir()
-        (firefox / 'lock').symlink_to(f'127.0.0.1:+{os.getpid()}')
-        self.assertTrue(environment_apps.profile_in_use(firefox, 'firefox'))
-
-    def test_copy_skips_caches_and_locks_and_refuses_live_profiles(self):
-        source = self.root / 'source'
-        (source / 'Default/Cache').mkdir(parents=True)
-        (source / 'Default/Cache/data').write_text('cache')
-        (source / 'Default/Cookies').write_text('cookies')
-        (source / 'Local State').write_text('{}')
-        (source / 'SingletonLock').symlink_to(f'{socket.gethostname()}-999999999')
-        result = environment_apps.copy_profile(source, self.root / 'copy', 'chromium')
-        self.assertEqual(result['files'], 2)
-        self.assertTrue((self.root / 'copy/Default/Cookies').is_file())
-        self.assertFalse((self.root / 'copy/Default/Cache').exists())
-        self.assertFalse((self.root / 'copy/SingletonLock').is_symlink())
-        (source / 'SingletonLock').unlink()
-        (source / 'SingletonLock').symlink_to(f'{socket.gethostname()}-{os.getpid()}')
-        with self.assertRaisesRegex(ValueError, 'in use'):
-            environment_apps.copy_profile(source, self.root / 'copy2', 'chromium')
-        self.assertFalse((self.root / 'copy2').exists())
 
 
 class ManagerTest(unittest.TestCase):

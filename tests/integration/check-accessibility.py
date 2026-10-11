@@ -11,6 +11,8 @@ from pathlib import Path
 
 root = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(root))
+from harness import human, script, wait
+
 from computer_artist.client import Client
 from computer_artist.runtime import Context
 from computer_artist.workspace import Workspace
@@ -54,41 +56,6 @@ app.exec()
 """
 
 
-def wait(test, timeout=5):
-    end = time.monotonic() + timeout
-    while time.monotonic() < end:
-        if test():
-            return
-        time.sleep(0.05)
-    raise AssertionError('condition timed out')
-
-
-def human(*args):
-    subprocess.run(
-        [
-            os.environ.get('CA_TEST_INPUT', str(root / 'build/stock-test-input')),
-            state['wayland'],
-            *map(str, args),
-        ],
-        check=True,
-    )
-
-
-def script(source):
-    path = out / 'accessibility-arrange.js'
-    path.write_text(source)
-    sid = subprocess.check_output(
-        ['qdbus6', 'org.kde.KWin', '/Scripting', 'org.kde.kwin.Scripting.loadScript', str(path)],
-        env=env,
-        text=True,
-    ).strip()
-    subprocess.run(
-        ['qdbus6', 'org.kde.KWin', '/Scripting/Script' + sid, 'org.kde.kwin.Script.run'],
-        env=env,
-        check=True,
-    )
-
-
 registryd = next(
     (
         p
@@ -119,14 +86,17 @@ try:
         wait(lambda: any(w['title'] == 'Accessible form' for w in observer.windows()))
         human_window = next(w for w in observer.windows() if w['title'] == 'Your typing space')
         script(
+            env,
+            out,
+            'accessibility-arrange.js',
             'for (const w of workspace.windowList()) {\n'
             ' if(w.caption==="Agent canvas") w.minimized=true;\n'
             ' if(w.caption==="Accessible form") w.frameGeometry={x:700,y:80,width:360,height:260};\n'
-            ' if(w.caption==="Your typing space") workspace.activeWindow=w;\n}'
+            ' if(w.caption==="Your typing space") workspace.activeWindow=w;\n}',
         )
         time.sleep(0.3)
-        human('move', human_window['x'] + 200, human_window['y'] + 300)
-        human('click')
+        human(state, 'move', human_window['x'] + 200, human_window['y'] + 300)
+        human(state, 'click')
         wait(
             lambda: next(w for w in observer.windows() if w['id'] == human_window['id'])[
                 'human_active'

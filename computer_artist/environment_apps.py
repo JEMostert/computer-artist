@@ -1,48 +1,10 @@
 """Applications, browsers and logs inside a running private environment."""
 
-import os
-import secrets
 import shutil
-import socket
 import time
 from pathlib import Path
 
 from .environments import DEFAULTS, exchange, kind, locations, route, status, stored, tail
-
-CHROMIUM_PROFILES = {
-    'chromium': '.config/chromium',
-    'google-chrome': '.config/google-chrome',
-    'google-chrome-stable': '.config/google-chrome',
-    'vivaldi': '.config/vivaldi',
-    'vivaldi-stable': '.config/vivaldi',
-    'brave': '.config/BraveSoftware/Brave-Browser',
-    'brave-browser': '.config/BraveSoftware/Brave-Browser',
-    'microsoft-edge': '.config/microsoft-edge',
-    'microsoft-edge-stable': '.config/microsoft-edge',
-}
-# Regenerable or instance-bound browser data; copying it wastes space or breaks locks.
-PROFILE_SKIP = {
-    'Cache',
-    'Code Cache',
-    'GPUCache',
-    'GrShaderCache',
-    'ShaderCache',
-    'DawnCache',
-    'DawnGraphiteCache',
-    'DawnWebGPUCache',
-    'CacheStorage',
-    'Crashpad',
-    'component_crx_cache',
-    'optimization_guide_model_store',
-    'SingletonLock',
-    'SingletonSocket',
-    'SingletonCookie',
-    'cache2',
-    'startupCache',
-    'thumbnails',
-    'lock',
-    '.parentlock',
-}
 
 
 def windows(socket_path):
@@ -136,99 +98,8 @@ def launch_apps(name, definition):
     return results
 
 
-def default_profile(family, executable):
-    home = Path.home()
-    if family == 'firefox':
-        ini = home / '.mozilla/firefox/profiles.ini'
-        if ini.is_file():
-            import configparser
-
-            parser = configparser.RawConfigParser()
-            parser.read(ini)
-            installs = [
-                parser[s].get('Default') for s in parser.sections() if s.startswith('Install')
-            ]
-            paths = installs or [
-                parser[s].get('Path') for s in parser.sections() if parser[s].get('Default') == '1'
-            ]
-            for path in paths:
-                if path:
-                    return (ini.parent / path) if not Path(path).is_absolute() else Path(path)
-        raise ValueError('No default Firefox profile found; pass --copy-profile PATH')
-    relative = CHROMIUM_PROFILES.get(Path(executable).name)
-    if not relative:
-        raise ValueError(f'Unknown default profile for {executable}; pass --copy-profile PATH')
-    return home / relative
-
-
-def profile_in_use(source, family):
-    lock = source / ('SingletonLock' if family == 'chromium' else 'lock')
-    if not lock.is_symlink():
-        return False
-    target = os.readlink(lock)
-    # Chromium: HOSTNAME-PID; Firefox: IP:+PID. A lock from another host is in use.
-    host, _, pid = target.rpartition('-' if family == 'chromium' else '+')
-    if family == 'chromium' and host != socket.gethostname():
-        return True
-    try:
-        os.kill(int(pid), 0)
-        return True
-    except (ValueError, ProcessLookupError):
-        return False
-    except PermissionError:
-        return True
-
-
-def keeps_link(link, source):
-    # Absolute links and links leaving the source would tie the "independent" copy to host paths.
-    if os.path.isabs(os.readlink(link)):
-        return False
-    return link.resolve().is_relative_to(source)
-
-
-def copy_profile(source, destination, family):
-    source = Path(source).expanduser().resolve()
-    if not source.is_dir():
-        raise ValueError(f'Browser profile does not exist: {source}')
-    if profile_in_use(source, family):
-        raise ValueError(
-            f'Source browser profile {source} is in use; close that browser before copying '
-            '(live profiles are never copied or shared)'
-        )
-    copied = {'files': 0, 'bytes': 0, 'skipped_symlinks': 0}
-
-    def skip(folder, names):
-        ignored = {n for n in names if n in PROFILE_SKIP}
-        for n in names:
-            if n in ignored:
-                continue
-            path = Path(folder) / n
-            if path.is_symlink():
-                if not keeps_link(path, source):
-                    ignored.add(n)
-                    copied['skipped_symlinks'] += 1
-            elif path.is_file():
-                copied['files'] += 1
-                copied['bytes'] += path.stat().st_size
-        return ignored
-
-    # Copy beside the destination first so a failed copy never leaves a partial profile behind.
-    staging = destination.with_name(f'{destination.name}.new-{secrets.token_hex(4)}')
-    try:
-        shutil.copytree(source, staging, symlinks=True, ignore=skip)
-        staging.chmod(0o700)
-    except BaseException:
-        shutil.rmtree(staging, ignore_errors=True)
-        raise
-    # The caller refuses an existing profile unless replacing it, so only now is the old one dropped.
-    if destination.exists():
-        shutil.rmtree(destination)
-    staging.rename(destination)
-    return {'source': str(source), **copied}
-
-
 def browser(args):
-    route(args.name)  # Refuse before copying anything when not running.
+    route(args.name)  # Refuse when the environment is not running.
     state, _ = locations(args.name)
     definition = stored(args.name) or DEFAULTS
     on_host = args.on_host or kind(definition) == 'host'
@@ -244,19 +115,6 @@ def browser(args):
     from .files import key
 
     profile = state / 'browsers' / key(label)
-    copied = None
-    if args.copy_profile:
-        if profile.exists() and not args.replace_profile:
-            raise ValueError(
-                f'Profile {profile} already exists; reuse it, choose --profile NAME or pass --replace-profile'
-            )
-        source = (
-            default_profile(args.family, args.executable)
-            if args.copy_profile == 'default'
-            else args.copy_profile
-        )
-        # Replacing happens inside copy_profile, after the source has been validated.
-        copied = copy_profile(source, profile, args.family)
     profile.mkdir(exist_ok=True, mode=0o700)
     if args.family == 'firefox':
         command = [executable, '--new-instance', '--no-remote', '--profile', str(profile)]
@@ -275,11 +133,6 @@ def browser(args):
         timeout=args.timeout,
     )
     result['profile'] = str(profile)
-    if copied:
-        result['copied_profile'] = {
-            **copied,
-            'note': 'Independent copy; wallet-encrypted logins may need signing in again',
-        }
     return result
 
 

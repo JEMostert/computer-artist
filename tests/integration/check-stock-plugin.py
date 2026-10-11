@@ -12,6 +12,8 @@ from pathlib import Path
 
 root = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(root))
+from harness import human, wait
+
 from computer_artist.client import ActionError, Client
 
 s = json.loads(Path(sys.argv[1]).read_text())
@@ -19,21 +21,6 @@ assert s['compositor'] == '/usr/bin/kwin_wayland'
 assert '/ca-stock-' in s['wayland'] and s['wayland'].endswith('/wayland-test')
 out = Path(s['output'])
 env = dict(os.environ, DBUS_SESSION_BUS_ADDRESS=s['bus'])
-
-
-def human(*args):
-    subprocess.run(
-        [str(root / 'build/stock-test-input'), s['wayland'], *map(str, args)], check=True
-    )
-
-
-def wait(test, timeout=3):
-    until = time.monotonic() + timeout
-    while time.monotonic() < until:
-        if test():
-            return
-        time.sleep(0.02)
-    raise AssertionError('condition did not become true')
 
 
 def events():
@@ -49,8 +36,8 @@ def request(sock, **kwargs):
     return json.loads(sock.recv(65536))
 
 
-human('move', 200, 250)
-human('click')
+human(s, 'move', 200, 250)
+human(s, 'click')
 time.sleep(0.2)
 report = {'compositor': '/usr/bin/kwin_wayland', 'patched_compositor': False}
 with Client(s['control']) as observer:
@@ -97,14 +84,14 @@ with Client(s['control']) as observer:
             assert 'lane_busy' in owned_window['agent_restrictions']
             assert 'other_lane_owns_application' in owned_window['host_restrictions']
             report['truthful_lane_ownership_readiness'] = True
-            worker = threading.Thread(target=lambda: [human('key', code) for code in (48, 46)])
+            worker = threading.Thread(target=lambda: [human(s, 'key', code) for code in (48, 46)])
             worker.start()
             owner.path(
                 [(x + i, y + 40 * __import__('math').sin(i / 30)) for i in range(200)],
                 interval=0.004,
             )
             worker.join()
-    wait(lambda: (out / 'human-text.txt').read_text() == before + 'bc')
+    wait(lambda: (out / 'human-text.txt').read_text() == before + 'bc', timeout=3, interval=0.02)
     assert next(w['id'] for w in observer.windows() if w['human_active']) == human_id
     assert not any(e['event'] == 'key' for e in events())
     assert observer.request('session_status')['cursor_visible']
@@ -119,7 +106,7 @@ with Client(s['control']) as observer:
     owner.button(pressed=True)
     count = releases()
     owner.close()
-    wait(lambda: releases() > count)
+    wait(lambda: releases() > count, timeout=3, interval=0.02)
     report['disconnect_releases_button'] = True
     with Client(s['control']) as owner:
         owner.acquire(identity)
@@ -133,7 +120,7 @@ with Client(s['control']) as observer:
             assert error.reply['error'] == 'stale_lease_or_geometry'
         else:
             raise AssertionError('stale action accepted')
-        wait(lambda: releases() > count)
+        wait(lambda: releases() > count, timeout=3, interval=0.02)
     report['stale_action_cancels_drag'] = True
     with Client(s['control']) as owner:
         owner.acquire(identity)
@@ -141,7 +128,7 @@ with Client(s['control']) as observer:
         owner.button(pressed=True)
         count = releases()
         observer.request('takeover')
-        wait(lambda: releases() > count)
+        wait(lambda: releases() > count, timeout=3, interval=0.02)
         assert not next(w for w in observer.windows() if w['id'] == identity)['agent']
         stopped = observer.request('session_status')['lanes']['agent']['stop_reason']
         assert stopped == 'explicit_stop', stopped
@@ -153,7 +140,9 @@ with Client(s['control']) as observer:
         owner.move(x, y)
         wheels = sum(e['event'] == 'wheel' for e in events())
         owner.scroll(15)
-        wait(lambda: sum(e['event'] == 'wheel' for e in events()) > wheels)
+        wait(
+            lambda: sum(e['event'] == 'wheel' for e in events()) > wheels, timeout=3, interval=0.02
+        )
         wheel = [e for e in events() if e['event'] == 'wheel'][-1]
         assert wheel['angle'] == -120, wheel
     report['complete_wheel_scroll_frame'] = True
@@ -162,13 +151,13 @@ with Client(s['control']) as observer:
         owner.move(x, y)
         owner.button(pressed=True)
         count = releases()
-        human('move', x + 80, y)
-        wait(lambda: releases() > count)
+        human(s, 'move', x + 80, y)
+        wait(lambda: releases() > count, timeout=3, interval=0.02)
         assert not next(w for w in observer.windows() if w['id'] == identity)['agent']
         stopped = observer.request('session_status')['lanes']['agent']['stop_reason']
         assert stopped == 'human_pointer_entered', stopped
     report['human_pointer_entry_takeover'] = True
-    human('move', 200, 250)
+    human(s, 'move', 200, 250)
     raw = socket.socket(socket.AF_UNIX)
     raw.settimeout(2)
     raw.connect(s['control'])
@@ -178,8 +167,12 @@ with Client(s['control']) as observer:
     assert request(raw, op='move', x=x, y=y, **fields)['ok']
     assert request(raw, op='button', code=272, pressed=True, **fields)['ok']
     count = releases()
-    wait(lambda: not next(w for w in observer.windows() if w['id'] == identity)['agent'], timeout=7)
-    wait(lambda: releases() > count)
+    wait(
+        lambda: not next(w for w in observer.windows() if w['id'] == identity)['agent'],
+        timeout=7,
+        interval=0.02,
+    )
+    wait(lambda: releases() > count, timeout=3, interval=0.02)
     raw.close()
     assert observer.request('session_status')['cursor_visible']
     report['watchdog_despite_observer_polling'] = True
@@ -199,7 +192,7 @@ with Client(s['control']) as observer:
             env=env,
             check=True,
         )
-        wait(lambda: releases() > count)
+        wait(lambda: releases() > count, timeout=3, interval=0.02)
     report['unload_releases_button'] = True
 result = subprocess.check_output(
     ['qdbus6', 'org.kde.KWin', '/Plugins', 'org.kde.KWin.Plugins.LoadPlugin', 'computerartist'],
@@ -217,14 +210,16 @@ with Client(s['control']) as client:
     with Client(s['control']) as closer:
         state = closer.request('session_close')
         assert not state['session'] and not state['cursor_visible']
-    wait(lambda: releases() > count)
+    wait(lambda: releases() > count, timeout=3, interval=0.02)
 report['explicit_session_close_releases_input_and_hides_cursor'] = True
 with Client(s['control']) as observer:
     (out / 'agent-open-sibling').touch()
     wait(
         lambda: any(
             w['title'] == 'Agent sibling document' and w['human_active'] for w in observer.windows()
-        )
+        ),
+        timeout=3,
+        interval=0.02,
     )
     original = next(w for w in observer.windows() if w['id'] == identity)
     assert not original['human_active'] and not original['acquirable']
@@ -236,10 +231,18 @@ with Client(s['control']) as observer:
     else:
         raise AssertionError('Acquired application with keyboard focus on sibling')
     (out / 'agent-close-sibling').touch()
-    wait(lambda: not any(w['title'] == 'Agent sibling document' for w in observer.windows()))
-    human('move', 200, 250)
-    human('click')
-    wait(lambda: next(w for w in observer.windows() if w['id'] == identity)['acquirable'])
+    wait(
+        lambda: not any(w['title'] == 'Agent sibling document' for w in observer.windows()),
+        timeout=3,
+        interval=0.02,
+    )
+    human(s, 'move', 200, 250)
+    human(s, 'click')
+    wait(
+        lambda: next(w for w in observer.windows() if w['id'] == identity)['acquirable'],
+        timeout=3,
+        interval=0.02,
+    )
 report['same_client_sibling_keyboard_focus_refused'] = True
 report.update(reload=True, passed=True)
 (out / 'plugin-regression.json').write_text(json.dumps(report, indent=2) + '\n')

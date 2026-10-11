@@ -12,6 +12,8 @@ from pathlib import Path
 
 root = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(root))
+from harness import human, script, wait
+
 from computer_artist.client import Client
 
 state = json.loads(Path(sys.argv[1]).read_text())
@@ -29,41 +31,6 @@ env.pop('QT_PLUGIN_PATH', None)
 report = {}
 
 
-def wait(test, timeout=5):
-    end = time.monotonic() + timeout
-    while time.monotonic() < end:
-        if test():
-            return
-        time.sleep(0.03)
-    raise AssertionError('condition timed out')
-
-
-def human(*args):
-    subprocess.run(
-        [
-            os.environ.get('CA_TEST_INPUT', str(root / 'build/stock-test-input')),
-            state['wayland'],
-            *map(str, args),
-        ],
-        check=True,
-    )
-
-
-def script(source):
-    path = out / 'keyboard-arrange.js'
-    path.write_text(source)
-    sid = subprocess.check_output(
-        ['qdbus6', 'org.kde.KWin', '/Scripting', 'org.kde.kwin.Scripting.loadScript', str(path)],
-        env=env,
-        text=True,
-    ).strip()
-    subprocess.run(
-        ['qdbus6', 'org.kde.KWin', '/Scripting/Script' + sid, 'org.kde.kwin.Script.run'],
-        env=env,
-        check=True,
-    )
-
-
 def press(client, *codes):
     client.chord(*codes)
 
@@ -75,24 +42,28 @@ kwrite = subprocess.Popen(['kwrite', str(document)], env=env, stdout=log, stderr
 try:
     with Client(state['control']) as observer, Client(state['control']) as agent:
         assert observer.request('capabilities')['keyboard'] is True
-        wait(lambda: any(w['pid'] == kwrite.pid for w in observer.windows()))
+        wait(lambda: any(w['pid'] == kwrite.pid for w in observer.windows()), interval=0.03)
         target = next(w for w in observer.windows() if w['pid'] == kwrite.pid)
         human_window = next(w for w in observer.windows() if w['title'] == 'Your typing space')
         script(
+            env,
+            out,
+            'keyboard-arrange.js',
             'for (const w of workspace.windowList()) {\n'
             ' if(w.caption==="Agent canvas") w.minimized=true;\n'
             ' if(w.pid==='
             + str(kwrite.pid)
             + ') w.frameGeometry={x:560,y:40,width:790,height:770};\n'
-            ' if(w.caption==="Your typing space") workspace.activeWindow=w;\n}'
+            ' if(w.caption==="Your typing space") workspace.activeWindow=w;\n}',
         )
         time.sleep(0.3)
-        human('move', human_window['x'] + 200, human_window['y'] + 300)
-        human('click')
+        human(state, 'move', human_window['x'] + 200, human_window['y'] + 300)
+        human(state, 'click')
         wait(
             lambda: next(w for w in observer.windows() if w['id'] == human_window['id'])[
                 'human_active'
-            ]
+            ],
+            interval=0.03,
         )
         target = next(w for w in observer.windows() if w['pid'] == kwrite.pid)
         agent.acquire(target['id'])
@@ -100,7 +71,7 @@ try:
         time.sleep(0.15)
         # Hold agent Shift while a separate device types lowercase into human app.
         agent.request('key', code=42, pressed=True)
-        human('key', 48)
+        human(state, 'key', 48)
         press(agent, 30)
         agent.request('key', code=42, pressed=False)
         # Human Shift must not uppercase the agent's next lowercase letter.
@@ -123,15 +94,15 @@ try:
                 human_shift.kill()
                 human_shift.wait()
             human_shift.stdout.close()
-        typing = threading.Thread(target=lambda: [human('shift-a-b') for _ in range(4)])
+        typing = threading.Thread(target=lambda: [human(state, 'shift-a-b') for _ in range(4)])
         typing.start()
         for _ in range(12):
             press(agent, 48)
             time.sleep(0.04)
         typing.join()
         press(agent, 29, 31)
-        wait(lambda: document.read_text() == 'A' + 'b' * 13 + '\n')
-        wait(lambda: (out / 'human-text.txt').read_text() == 'bA' + 'Ab' * 4)
+        wait(lambda: document.read_text() == 'A' + 'b' * 13 + '\n', interval=0.03)
+        wait(lambda: (out / 'human-text.txt').read_text() == 'bA' + 'Ab' * 4, interval=0.03)
         windows = observer.windows()
         assert next(w for w in windows if w['id'] == human_window['id'])['human_active']
         report['existing_native_kwrite_save_and_simultaneous_human_typing'] = True
@@ -141,7 +112,7 @@ try:
         agent.request('cancel')
         press(agent, 46)
         press(agent, 29, 31)
-        wait(lambda: document.read_text() == 'A' + 'b' * 13 + 'c\n')
+        wait(lambda: document.read_text() == 'A' + 'b' * 13 + 'c\n', interval=0.03)
         report['cancel_releases_held_modifier'] = True
         # A rejected chord reconciles held keys and keeps subsequent work usable.
         agent.request('key', code=42, pressed=True)
@@ -156,7 +127,7 @@ try:
         assert observer.request('session_status')['lanes']['agent']['keys'] == 0
         press(agent, 18)
         press(agent, 29, 31)
-        wait(lambda: document.read_text() == 'A' + 'b' * 13 + 'ce\n')
+        wait(lambda: document.read_text() == 'A' + 'b' * 13 + 'ce\n', interval=0.03)
         report['rejected_key_reconciles_held_modifier'] = True
         agent.release()
         # Layout-resolved text: capitals and symbols need the agent's own Shift
@@ -178,7 +149,10 @@ try:
             else:
                 raise AssertionError('Unreachable character accepted')
             writer.chord(29, 31)
-            wait(lambda: document.read_text() == 'A' + 'b' * 13 + 'ce\nHi, World! 42?\n')
+            wait(
+                lambda: document.read_text() == 'A' + 'b' * 13 + 'ce\nHi, World! 42?\n',
+                interval=0.03,
+            )
         assert next(w for w in observer.windows() if w['id'] == human_window['id'])['human_active']
         report['layout_resolved_write_keeps_human_focus'] = True
         # Raw connections deliberately have no heartbeat to test server watchdog.
@@ -204,7 +178,11 @@ try:
             if reason == 'disconnect':
                 reader.close()
                 raw.close()
-            wait(lambda: not observer.request('session_status')['lanes']['agent']['busy'], 7)
+            wait(
+                lambda: not observer.request('session_status')['lanes']['agent']['busy'],
+                7,
+                interval=0.03,
+            )
             reader.close()
             raw.close()
             with Client(state['control']) as resumed:
@@ -217,14 +195,14 @@ try:
                 press(resumed, 29, 31)
                 expected = ('f' if reason == 'disconnect' else 'g') + '\n'
                 # Confirm the save while the application still owns agent focus.
-                wait(lambda: document.read_text() == expected)
+                wait(lambda: document.read_text() == expected, interval=0.03)
             report[reason + '_releases_held_modifier'] = True
         agent.acquire(target['id'])
         # Takeover with agent Shift held: human focus must receive no stale Shift.
         agent.request('key', code=42, pressed=True)
-        human('move', target['x'] + 200, target['y'] + 240)
-        human('click')
-        human('key', 32)
+        human(state, 'move', target['x'] + 200, target['y'] + 240)
+        human(state, 'click')
+        human(state, 'key', 32)
         # Save through human focus using an independent device shortcut.
         # KWrite's live document is inspected through host only in separate harness.
         with Client(state['control'], lane='host') as host:
@@ -232,14 +210,17 @@ try:
             host.focus(target['id'])
             host.chord(29, 31)
             host.release()
-        wait(lambda: 'd' in document.read_text() and 'D' not in document.read_text())
+        wait(lambda: 'd' in document.read_text() and 'D' not in document.read_text(), interval=0.03)
         assert not observer.request('session_status')['lanes']['agent']['busy']
         report['human_takeover_releases_agent_modifier'] = True
         # Exercise the full reusable Context/worker/file-verification workflow.
         script(
-            'for(const w of workspace.windowList()) if(w.caption==="Your typing space") workspace.activeWindow=w;'
+            env,
+            out,
+            'keyboard-arrange.js',
+            'for(const w of workspace.windowList()) if(w.caption==="Your typing space") workspace.activeWindow=w;',
         )
-        human('move', human_window['x'] + 200, human_window['y'] + 300)
+        human(state, 'move', human_window['x'] + 200, human_window['y'] + 300)
         from computer_artist.supervisor import run_supervised
         from computer_artist.workspace import Workspace
 

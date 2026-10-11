@@ -6,11 +6,12 @@ import os
 import socket
 import subprocess
 import sys
-import time
 from pathlib import Path
 
 root = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(root))
+from harness import ca, human, wait
+
 from computer_artist.client import ActionError, Client
 
 s = json.loads(Path(sys.argv[1]).read_text())
@@ -26,31 +27,8 @@ env = dict(
 report = {}
 
 
-def human(*args):
-    subprocess.run(
-        [str(root / 'build/stock-test-input'), s['wayland'], *map(str, args)], check=True
-    )
-
-
-def wait(test, timeout=3):
-    end = time.monotonic() + timeout
-    while time.monotonic() < end:
-        if test():
-            return
-        time.sleep(0.02)
-    raise AssertionError('condition timed out')
-
-
-def ca(*args, source=None, success=True):
-    result = subprocess.run(
-        [str(root / 'ca'), *args], input=source, text=True, capture_output=True, env=env, timeout=20
-    )
-    assert (result.returncode == 0) == success, (result.stdout, result.stderr)
-    return json.loads(result.stdout or result.stderr)
-
-
-human('move', 200, 250)
-human('click')
+human(s, 'move', 200, 250)
+human(s, 'click')
 with Client(s['control']) as observer:
     windows = observer.windows()
     agent_window = next(w for w in windows if w['title'] == 'Agent canvas')
@@ -59,12 +37,12 @@ with Client(s['control']) as observer:
     ax, ay = agent_window['x'] + 200, agent_window['y'] + 300
     hx, hy = host_window['x'] + 180, host_window['y'] + 300
     assert not observer.request('session_status')['session']
-    ca('--host', 'capabilities')
-    ca('windows')
-    ca('fragments', 'list')
+    ca(env, '--host', 'capabilities')
+    ca(env, 'windows')
+    ca(env, 'fragments', 'list')
     assert not observer.request('session_status')['session']
     report['read_only_does_not_open_session'] = True
-    ca('--host', 'move', '--window', hid, '--x', '180', '--y', '300')
+    ca(env, '--host', 'move', '--window', hid, '--x', '180', '--y', '300')
     state = observer.request('session_status')
     assert state['session'] and state['host_position'] == [hx, hy]
     assert not state['cursor_visible']
@@ -123,12 +101,18 @@ with Client(s['control']) as observer:
             lambda: any(
                 json.loads(line)['event'] == 'move'
                 for line in (out / 'human-events.jsonl').read_text().splitlines()
-            )
+            ),
+            timeout=3,
+            interval=0.02,
         )
         report['simultaneous_two_lane_drags'] = True
         # A different source device must stop only the host automation.
-        human('move', hx + 30, hy + 20)
-        wait(lambda: not observer.request('session_status')['lanes']['host']['busy'])
+        human(s, 'move', hx + 30, hy + 20)
+        wait(
+            lambda: not observer.request('session_status')['lanes']['host']['busy'],
+            timeout=3,
+            interval=0.02,
+        )
         assert observer.request('session_status')['lanes']['agent']['busy']
         assert observer.request('session_status')['lanes']['host']['buttons'] == 0
         agent.move(ax + 70, ay + 15)
@@ -138,21 +122,33 @@ with Client(s['control']) as observer:
         host.acquire(hid)
         host.move(hx, hy)
         host.button(pressed=True)
-        human('click')
-        wait(lambda: not observer.request('session_status')['lanes']['host']['busy'])
+        human(s, 'click')
+        wait(
+            lambda: not observer.request('session_status')['lanes']['host']['busy'],
+            timeout=3,
+            interval=0.02,
+        )
     # If physical press/release got stuck, a fresh acquire would fail here.
     with Client(s['control'], lane='host') as host:
         host.acquire(hid)
         host.move(hx, hy)
         host.button(pressed=True)
-        human('key', 30)
-        wait(lambda: not observer.request('session_status')['lanes']['host']['busy'])
+        human(s, 'key', 30)
+        wait(
+            lambda: not observer.request('session_status')['lanes']['host']['busy'],
+            timeout=3,
+            interval=0.02,
+        )
     report['external_click_and_keyboard_preempt_host'] = True
     with Client(s['control'], lane='host') as host:
         host.acquire(hid)
         host.move(hx, hy)
         host.button(pressed=True)
-    wait(lambda: not observer.request('session_status')['lanes']['host']['busy'])
+    wait(
+        lambda: not observer.request('session_status')['lanes']['host']['busy'],
+        timeout=3,
+        interval=0.02,
+    )
     report['host_disconnect_releases_button'] = True
     with Client(s['control'], lane='host') as host:
         host.acquire(hid)
@@ -162,7 +158,9 @@ with Client(s['control']) as observer:
         lambda: any(
             json.loads(line)['event'] == 'wheel'
             for line in (out / 'human-events.jsonl').read_text().splitlines()
-        )
+        ),
+        timeout=3,
+        interval=0.02,
     )
     report['host_scroll_reaches_application'] = True
     # The watchdog must expire even while a different connection polls status.
@@ -179,7 +177,11 @@ with Client(s['control']) as observer:
     fields = {'lease': lease['lease'], 'generation': lease['generation']}
     assert request('move', x=hx, y=hy, **fields)['ok']
     assert request('button', code=272, pressed=True, **fields)['ok']
-    wait(lambda: not observer.request('session_status')['lanes']['host']['busy'], timeout=7)
+    wait(
+        lambda: not observer.request('session_status')['lanes']['host']['busy'],
+        timeout=7,
+        interval=0.02,
+    )
     reader.close()
     raw.close()
     report['host_watchdog_releases_button'] = True
@@ -199,9 +201,9 @@ with Client(s['control']) as observer:
         b=tasks.start(moves,text)
     return [a.result(),b.result()]
 """
-    result = ca('--host', 'execute', '--window', hid, source=source)
+    result = ca(env, '--host', 'execute', '--window', hid, source=source)
     assert result['ok'] and all(v['points'] == 60 for v in result['result'])
-    detail = ca('runs', 'show', result['run_id'])['result']
+    detail = ca(env, 'runs', 'show', result['run_id'])['result']
     assert {'host', 'agent'} <= {e['lane'] for e in detail['trace']}
     assert observer.request('session_status')['session'] == first_session
     report['parallel_runtime_and_lane_traces'] = True
@@ -218,12 +220,13 @@ with Client(s['control']) as observer:
         tasks.start(draw,paint)
         tasks.start(fail,text)
 """
-    failed = ca('--host', 'execute', '--window', hid, source=failure_source, success=False)
+    failed = ca(env, '--host', 'execute', '--window', hid, source=failure_source, success=False)
     assert not failed['ok']
     state = observer.request('session_status')
     assert not state['lanes']['host']['busy'] and not state['lanes']['agent']['busy']
     report['parallel_failure_cancels_sibling'] = True
     timed = ca(
+        env,
         '--host',
         'execute',
         '--window',
@@ -234,25 +237,42 @@ with Client(s['control']) as observer:
         success=False,
     )
     assert timed['status'] == 'interrupted'
-    wait(lambda: not observer.request('session_status')['lanes']['host']['busy'])
+    wait(
+        lambda: not observer.request('session_status')['lanes']['host']['busy'],
+        timeout=3,
+        interval=0.02,
+    )
     report['host_worker_hard_deadline'] = True
     refused = ca(
-        'execute', '--window', aid, source=f'def run(ctx): ctx.host.window({hid!r})', success=False
+        env,
+        'execute',
+        '--window',
+        aid,
+        source=f'def run(ctx): ctx.host.window({hid!r})',
+        success=False,
     )
     assert refused['error_type'] == 'PermissionError'
     report['no_implicit_host_escalation'] = True
     # The agent still cannot prevent modal auto-focus, but explicit host focus
     # can recover and make the native dialog available for agent pointer input.
     (out / 'agent-open-dialog').touch()
-    wait(lambda: any(w['title'] == 'Agent test dialog' for w in observer.windows()))
+    wait(
+        lambda: any(w['title'] == 'Agent test dialog' for w in observer.windows()),
+        timeout=3,
+        interval=0.02,
+    )
     dialog = next(w for w in observer.windows() if w['title'] == 'Agent test dialog')
-    ca('--host', 'focus', '--window', hid)
+    ca(env, '--host', 'focus', '--window', hid)
     assert next(w['id'] for w in observer.windows() if w['human_active']) == hid
     with Client(s['control']) as agent:
         agent.acquire(dialog['id'])
         # Standard fixture button is centered near the bottom of the dialog.
         agent.click(dialog['x'] + dialog['width'] / 2, dialog['y'] + dialog['height'] - 35)
-    wait(lambda: not any(w['id'] == dialog['id'] and w['visible'] for w in observer.windows()))
+    wait(
+        lambda: not any(w['id'] == dialog['id'] and w['visible'] for w in observer.windows()),
+        timeout=3,
+        interval=0.02,
+    )
     report['explicit_host_focus_recovers_agent_dialog'] = True
     with Client(s['control']) as agent, Client(s['control'], lane='host') as host:
         agent.acquire(aid)
@@ -290,7 +310,7 @@ with Client(s['control']) as observer:
             env=dict(os.environ, DBUS_SESSION_BUS_ADDRESS=s['bus']),
             check=True,
         )
-        wait(lambda: host_releases() > count)
+        wait(lambda: host_releases() > count, timeout=3, interval=0.02)
     assert (
         subprocess.check_output(
             [

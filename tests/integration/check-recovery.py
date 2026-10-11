@@ -3,12 +3,13 @@
 
 import json
 import os
-import subprocess
 import sys
 from pathlib import Path
 
 root = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(root))
+from harness import human, script
+
 from computer_artist.client import Client
 from computer_artist.supervisor import run_supervised
 
@@ -18,32 +19,15 @@ assert '/ca-stock-' in state['wayland'] and state['wayland'].endswith('/wayland-
 out = Path(state['output'])
 with Client(state['control']) as observer:
     target = next(w for w in observer.windows() if w['title'] == 'Agent canvas')
-    human = next(w for w in observer.windows() if w['title'] == 'Your typing space')
+    typing = next(w for w in observer.windows() if w['title'] == 'Your typing space')
 env = dict(os.environ, DBUS_SESSION_BUS_ADDRESS=state['bus'])
-script = out / 'recover-arrange.js'
-script.write_text(
-    'for(const w of workspace.windowList()) if(w.caption==="Your typing space") workspace.activeWindow=w;'
+script(
+    env,
+    out,
+    'recover-arrange.js',
+    'for(const w of workspace.windowList()) if(w.caption==="Your typing space") workspace.activeWindow=w;',
 )
-sid = subprocess.check_output(
-    ['qdbus6', 'org.kde.KWin', '/Scripting', 'org.kde.kwin.Scripting.loadScript', str(script)],
-    env=env,
-    text=True,
-).strip()
-subprocess.run(
-    ['qdbus6', 'org.kde.KWin', '/Scripting/Script' + sid, 'org.kde.kwin.Script.run'],
-    env=env,
-    check=True,
-)
-subprocess.run(
-    [
-        str(root / 'build/stock-test-input'),
-        state['wayland'],
-        'move',
-        str(human['x'] + 100),
-        str(human['y'] + 200),
-    ],
-    check=True,
-)
+human(state, 'move', str(typing['x'] + 100), str(typing['y'] + 200))
 
 spec = {
     'socket': state['control'],

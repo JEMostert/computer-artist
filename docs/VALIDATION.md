@@ -4,12 +4,6 @@ Source, recorded workflow evidence and the loaded host plugin are separate. Pyth
 tests do not prove desktop compatibility. This simplification does not deploy or
 reload the host plugin; inspect its actual build with `ca capabilities`.
 
-The CLI simplification passed **205 Python tests**, lint/format, skill validation,
-a fresh wheel installed outside the checkout and all six separate-KWin suites:
-pointer/capture, programs, host lanes, host text, independent keys and recovery.
-See the [fresh check record](validation/2026-09-30-simplification.json).
-These checks cover the exercised native Qt/KWrite workflows, not general app compatibility.
-
 On 4 October 2026, 222 Python tests and all separate-KWin suites, now including a
 Qt menu popup check, passed with the rebuilt plugin. Private environments were
 exercised with rootless Podman: Qt and terminal apps in containers, four concurrent
@@ -23,19 +17,9 @@ Qt6 accessibility tree and verified typed text through it. See the
 [improvement record](validation/2026-10-11-improvements.json); non-US layouts, GTK
 and browser trees remain untested.
 
-Historical evidence from 29 September 2026:
-
-- [Pointer/capture](validation/2026-09-29-gem/plugin-regression.json)
-- [Programs/guards/recovery](validation/2026-09-29-gem/harness-regression.json)
-- [Lane ownership](validation/2026-09-29-gem/host-lanes-regression.json)
-- [Host keyboard/clipboard and KWrite](validation/2026-09-29-gem/host-text-regression.json)
-- [Saved artwork](assets/kolourpaint-original.png)
-
-Recorded native pointer scope includes Qt fixtures, KolourPaint and scrcpy.
-Independent KWrite save/concurrent typing was reported for the 30 September source
-iteration in separate KWin; that iteration did not deploy it to the host.
-Historical captures/JSON prove their tested revisions, not current source. Archived
-HTML is historical evidence; HTML export and the web interface have been removed.
+Earlier records (29–30 September 2026: KolourPaint, scrcpy, KWrite and the
+removed HTML export) live in git history before this branch; they prove those
+revisions, not current source.
 
 Fresh checks: `scripts/check.sh`, Python unittest discovery and
 `scripts/test.sh --integration`. Integration builds and launches separate packaged

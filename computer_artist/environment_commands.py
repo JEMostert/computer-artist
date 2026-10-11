@@ -128,12 +128,6 @@ def add_command(commands):
     web.add_argument('--executable', required=True, help='e.g. chromium, vivaldi, firefox')
     web.add_argument('--url', default='about:blank')
     web.add_argument('--profile', help='Profile name inside the environment (default: executable)')
-    web.add_argument(
-        '--copy-profile',
-        metavar='PATH|default',
-        help='Seed a new profile from a closed browser profile',
-    )
-    web.add_argument('--replace-profile', action='store_true')
     web.add_argument('browser_args', nargs='*', help='Extra browser arguments after --')
 
 

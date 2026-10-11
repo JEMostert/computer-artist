@@ -2,13 +2,14 @@
 """Exercise real Qt menus in a separate KWin, with human focus elsewhere."""
 
 import json
-import subprocess
 import sys
 import time
 from pathlib import Path
 
 root = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(root))
+from harness import human
+
 from computer_artist.client import Client
 
 s = json.loads(Path(sys.argv[1]).read_text())
@@ -16,14 +17,8 @@ assert '/ca-stock-' in s['wayland'] and s['wayland'].endswith('/wayland-test')
 out = Path(s['output'])
 
 
-def human(*args):
-    subprocess.run(
-        [str(root / 'build/stock-test-input'), s['wayland'], *map(str, args)], check=True
-    )
-
-
-human('move', 200, 250)
-human('click')
+human(s, 'move', 200, 250)
+human(s, 'click')
 time.sleep(0.2)
 with Client(s['control']) as observer, Client(s['control']) as owner:
     canvas = next(w for w in observer.windows() if w['title'] == 'Agent canvas')
