@@ -1,11 +1,23 @@
 # Private environments
 
-`ca env` runs one systemd user service per environment: a private KWin with the
-matching plugin, a private D-Bus session bus and a small manager. With an image it
-also runs one rootless Podman container (`--userns=keep-id`, `--init`). The
-container receives only the desktop's Wayland/bus sockets, its HOME and browser
-profiles, and the declared mounts, all at their host paths. The CLI never routes
-a stopped or missing environment to the user's desktop.
+On Linux, `ca env` runs one systemd user service per environment: a private KWin
+with the matching plugin, a private D-Bus session bus and a small manager. With an
+image it also runs one container. The container receives only the desktop's
+Wayland/bus sockets, its HOME and browser profiles, and the declared mounts, all at
+their host paths. The CLI never routes a stopped or missing environment to the
+user's desktop. On Windows every environment is a Linux box instead; see
+[Windows](windows.md).
+
+## Container runtime
+
+Podman and Docker both work. The choice is `--runtime podman|docker` (stored with
+the definition), else `CA_CONTAINER_RUNTIME`, else Podman when installed, else
+Docker (on Windows: Docker first). Podman runs rootless with `--userns=keep-id`;
+rootless Docker maps container root to you; rootful Docker runs the container as
+your uid. Membership of the `docker` group is equivalent to root on the host;
+prefer rootless Podman or rootless Docker. `ca env doctor NAME` reports the runtime
+and whether its daemon answers. If neither is installed, `ca env start` says so:
+tell the user that this feature needs Docker or Podman, and stop.
 
 ## Recipes
 
@@ -37,13 +49,15 @@ timeout = 90
 (cached) and launches the apps, failing with their log tail when one dies. Flags
 (`--memory 2g`, `--mount SRC`) update a stopped definition; `ca env create` stores
 one without starting. Images need a `sleep` executable. `--pull` refreshes bases.
+With `--host`, or the environment's own default lane, `ca type` pastes the whole text
+at once and restores the previous plain-text clipboard.
 
 ## Applications and evidence
 
 - `--wait-window [TITLE]` waits for a new window; `--name` binds it for `--window`.
 - Without a window wait, exec reports whether the process is alive after a second.
 - `--wait` runs a command to completion and returns its status and output tail.
-- `ca env logs NAME` lists `kwin`, `build`, `podman` and this session's `a1`, `a2`…
+- `ca env logs NAME` lists `kwin`, `build`, `container` and this session's `a1`, `a2`…
 - Names and layout maps are per environment; fragments are shared with your main
   workspace. Run evidence goes to the environment's output folder.
 

@@ -1,70 +1,104 @@
-# Windows operation
+# Windows
 
-Use `ca` (or the checkout's `.venv\Scripts\ca.exe`). Start with `ca capabilities`,
-`ca monitors`, `ca windows` and `ca doctor --window ID`. Bind an exact live ID with
-`ca set ID --name APP`, then inspect `ca observe --window APP` and its image.
-Coordinates are physical client pixels on Windows, including at mixed DPI.
+Read this only on Windows. The rules in SKILL.md apply as well. The native backend
+needs no KWin plugin. Use `ca` (or the checkout's `.venv\Scripts\ca.exe`).
 
-When the user chooses a display, use its exact device or EDID ID from `ca monitors`
-(written as MONITOR_ID below) with `--monitor`.
-Keep that selector on every command or set `CA_WINDOWS_MONITOR` for the task.
-Targets must fit entirely within it. Private KDE environments are unavailable;
-never replace them with the user's desktop without the task's authorization.
+## Private environments: Linux boxes
 
-## Independent input
-
-The default agent lane sends bounded messages to standard Edit/RichEdit controls
-and push buttons. It uses its own animated click-through pointer and local
-modifier state, and does not call SendInput, set OS focus or use the shared
-clipboard. Keep the human's focus in another application. Returning to any window
-of the target process stops the lease. Different processes may be controlled
-concurrently; another lane cannot own the same process.
+For development and testing, default to a private environment. On Windows each one
+is a Linux box: a Docker (or Podman) container running its own KWin desktop, built
+from this checkout on first start (several minutes once, then cached). It tests
+Linux and web applications; Windows applications cannot run inside it. Docker
+Desktop with the WSL 2 backend is the expected runtime; if `ca env start` reports
+that no runtime is installed or that the daemon is not running, stop and tell the
+user (see SKILL.md). Never fall back to the user's desktop.
 
 ```powershell
-ca --monitor MONITOR_ID set ID --name editor
-ca --monitor MONITOR_ID observe --window editor
-ca --monitor MONITOR_ID write --window editor 'Hello'
-ca --monitor MONITOR_ID read --window editor
-ca --monitor MONITOR_ID window move --window editor --x 450 --y 180
+ca env start TASK --project .                 # project appears in the box at /project
+ca env exec TASK --name app --wait-window TITLE -- program args
+ca env exec TASK --wait -- npm test
+ca env browser TASK --family firefox --executable firefox --name web
+ca --environment TASK windows                  # every ca command takes --environment
+ca --environment TASK observe --window app
+ca --environment TASK type --window app 'Hello'
+ca env status TASK                             # "paths" maps box paths to Windows paths
+ca env stop TASK
 ```
 
-Select one supported control by moving inside it when the window has multiple
-edit controls. Clicking places the caret only in classic Edit controls; in RichEdit
-(including Notepad) a click only selects the control and leaves the caret where it
-was, so position with Ctrl+A or navigation keys and verify by reading back. Text insertion is undoable and supports Unicode and
-line breaks. Ctrl+A and Ctrl+Z, unmodified navigation, text and
-standard push-button notifications are supported. General shortcuts, shared
-clipboard, checkboxes/radios, scrolling, drawing and arbitrary canvas input are
-not implemented in this lane. Do not infer browser or Ninja-terminal compatibility
-from Notepad: WinUI Notepad and disposable standard controls were verified;
-Chromium/web-terminal independent input has not been verified.
+Commands run inside the box. Paths in arguments (`capture OUTPUT`, `--trace`,
+`--path-file`, `files PATH`) must lie under the project, a mount or the
+environment folder; replies show Windows paths again. Inside `ca execute`
+programs use box paths (`/project/...`). Install extra apps with a recipe
+`containerfile` that starts with `ARG BOX_IMAGE` and `FROM ${BOX_IMAGE}`; plain
+`--image` and `--gpu` are not supported in a box. Default lane, names, layouts,
+fragments and evidence behave as in [environments](environments.md).
 
-`ca read` returns the sole standard edit control's text, up to 65535 characters,
-without input. `ca window move` changes outer geometry without activation; bind
-and observe again afterwards before using old layouts. Screenshots are captures
-of the visible client region and can include overlapping windows. They do not
-prove that an obscured app rendered its own content.
+## The user's desktop (only when explicitly requested)
 
-## Explicit host input and verification
+Start with `ca capabilities`, `ca monitors`, `ca windows` and
+`ca doctor --window ID`. Bind an exact live ID with `ca set ID --name APP`, then
+inspect `ca observe --window APP` and its image. Coordinates are physical client
+pixels, including at mixed DPI. When the user chooses a display, pass its device
+or EDID ID from `ca monitors` with `--monitor` on every command (or set
+`CA_WINDOWS_MONITOR`); targets must fit entirely within it.
+
+### Independent agent lane (default)
+
+The agent has its own animated, click-through pointer drawn on screen. It never
+calls SendInput, never changes the foreground window and never touches the shared
+clipboard. Keep the human's focus in another application; focus entering any
+window of the target process stops the lease. Different processes may be
+controlled concurrently.
+
+Two deliveries, chosen per element under the agent pointer:
+
+- Standard Edit/RichEdit controls and push buttons get targeted Win32 messages:
+  caret placement, whole-text insertion (undoable, Unicode, line breaks),
+  Ctrl+A, Ctrl+Z, Backspace, Enter, Tab, unmodified navigation keys, and button
+  notification. In RichEdit (including Notepad) a click places the caret through
+  UI Automation; the reply says `selected_caret_unchanged` when it could not.
+- Every other element goes through UI Automation patterns: a click invokes,
+  toggles, selects or expands/collapses it; text and character keys append to its
+  value, Backspace removes the last character, Enter invokes; scrolling uses the
+  nearest scrollable ancestor. Replies name the `action` or `delivery` used.
+
+`ca a11y --window APP [--role ROLE] [--name TEXT]` lists UI Automation elements
+(roles use AT-SPI names such as `push button`, `check box`, `text`, plus
+`uia_control_type`). In programs use `ctx.find(role=..., name=...)` and
+`ctx.click(element=...)`. `ca read --window APP` returns the sole edit control's
+text (or the sole editable element's value) without input.
+
+Not supported in this lane: drawing and drags, canvases and apps that read raw
+input or the cursor position, general shortcuts and Alt menus, text insertion at a
+caret in UI Automation elements (it appends), and any app that ignores patterns.
+Such actions are refused; report the refusal instead of switching to `--host`.
+Application compatibility beyond Notepad and test fixtures is unverified: check
+each app with a fresh observation and read-back.
+
+Captures render the window's own client area (no overlapping windows, no agent
+pointer). When an app cannot render itself the reply says
+`may_include_overlapping_windows: true`. `ca window move` changes geometry without
+activation; observe again afterwards.
+
+### Explicit host lane
 
 Use `--host` only when the task authorizes real pointer, foreground, keys or
-clipboard changes. It uses SendInput and may activate the target. Secure desktops
-and higher-integrity applications remain unavailable. Foreground or pointer
-takeover stops input. General application-created dialog activation cannot be
-prevented. The agent lane never falls back to this mode.
+clipboard changes. It uses SendInput and may activate the target. `ca type --host`
+pastes the whole text and restores the user's clipboard (all formats) unless the
+user copied something new meanwhile; `ca write --host` presses keys one by one.
+Foreground or pointer takeover stops input. Secure desktops and higher-integrity
+applications remain unavailable. Scroll deltas use the same units as Linux (15 per
+wheel notch, positive is down).
 
-Use bounded `ca execute` programs and `ctx.verify`/`ctx.verify_file` for exact
-outcomes. On Windows, `ca stop` revokes native lanes, `ca runs stop ID` cancels
-one recorded program, and jobs enforce hard deadlines and descendant cleanup.
-Leases and pointer overlays end when their process ends. Verify read-back rather
-than treating successful message dispatch as successful editing.
+## Programs and verification
 
-For PowerShell pipelines use ASCII source with Unicode escapes, or a source file
-explicitly read as UTF-8. A console's encoding may otherwise corrupt Unicode
-before the backend receives it. Preserve existing text: read/snapshot it before
-editing, append or select only task-owned content, and check for concurrent edits.
+Use bounded `ca execute` programs and `ctx.verify`/`ctx.verify_file`. `ca stop`
+revokes native lanes, `ca runs stop ID` cancels one recorded program, and jobs
+enforce hard deadlines and descendant cleanup. For PowerShell pipelines use ASCII
+source with Unicode escapes, or a file read explicitly as UTF-8; the console
+encoding may otherwise corrupt Unicode. Preserve existing text: read or snapshot it
+first and change only task-owned content.
 
-`ca setup --skills-dir ~/.codex/skills` installs a managed copy on Windows without
-administrator privileges. The `.ca-install.json` record identifies its source.
-Re-running setup or `ca update` refreshes unmodified copies and preserves local
-edits. A new agent turn discovers the installed skill.
+`ca setup --skills-dir ~/.codex/skills` installs a managed copy without
+administrator privileges and never replaces a skill it did not install. Re-running
+setup or `ca update` refreshes unmodified copies and preserves local edits.

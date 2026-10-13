@@ -1,9 +1,9 @@
 # Capabilities
 
-This fork also has a native Windows backend. Its supported standard-control
-independent input, host input, monitor restrictions and verified Notepad behavior
-are described in [Windows capabilities and limits](WINDOWS.md). The KWin scope
-and validation below apply to the Linux backend.
+The table and validation below describe the Linux (KWin) backend. Windows has a
+separate backend whose agent lane uses window messages and UI Automation instead
+of a second input device; see [Windows](WINDOWS.md). It is narrower than the KWin
+lane: no drawing, drags or canvas input.
 
 The goal is independent agent input in existing applications on the user's actual
 desktop while the human works elsewhere. Private desktops and Xvfb do not fulfill
@@ -11,7 +11,7 @@ that goal. Separate KWin instances are development test harnesses.
 
 | Capability | Implemented scope |
 | --- | --- |
-| Private environments | Per-agent KWin desktop, seat, clipboard and session bus; rootless Podman apps, recipes, startup apps, private browser profiles |
+| Private environments | Per-agent KWin desktop, seat, clipboard and session bus; Podman or Docker apps, recipes, startup apps, private browser profiles; Linux boxes on Windows |
 | Independent input | Animated pointer and physical keys with separate modifier state; layout-resolved text entry; multi-clicks, drags, complete wheel frames; native Wayland |
 | Accessibility | Read-only AT-SPI trees: roles, names, states, text and window-content bounds; locate and click controls by role/name |
 | Human takeover | Pointer/focus return revokes the lease with a reported stop reason; cleanup on target loss, disconnect, lock and watchdog |

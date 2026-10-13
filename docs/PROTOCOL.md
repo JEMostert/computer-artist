@@ -19,6 +19,14 @@ Host negotiation requires `protocol >= 3`, `lane: host`, `host_pointer: true`.
 | `ping` | Status; any request from the owner renews its five-second watchdog |
 | `capture` | Exact `window`, absolute new `path`; composited client/subsurface PNG |
 
+The Windows backend runs in-process (socket `win32`) with the same operations and
+units (`delta` positive is down/right, 15 per notch; `v120` defaults to `delta × 8`
+and has the same sign). It adds `write_text` (agent: whole-text insertion), `read_text`,
+`accessible` (UI Automation elements: `window`, optional `role`, `name`,
+`max_nodes`) and host-only `clipboard_save`/`clipboard_restore`, which keep the
+user's clipboard inside the backend around a paste. Agent replies name the
+`delivery` (`control_messages`, `ui_automation`, ...) or `action` taken.
+
 Input carries `lease` and `generation`; stale ownership/geometry is rejected.
 Replies include `ok`, lease/generation, session, lane `keyboard_ready` and per-lane
 `stop_reason` (why the lane last stopped, such as `human_pointer_entered`,

@@ -5,7 +5,8 @@ build and session instructions below apply to Linux only.
 
 Requires Python 3.12+, Pillow, jeepney, KDE Wayland and matching installed KWin
 development headers. Accessibility reading needs `at-spi2-core`. Installing Python
-does not deploy the plugin.
+does not deploy the plugin. Container environments (`ca env --image`) need Podman
+(rootless, preferred) or Docker; `ca env doctor NAME` checks the runtime.
 
 ```bash
 python -m venv .venv

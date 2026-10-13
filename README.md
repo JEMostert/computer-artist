@@ -1,13 +1,5 @@
 # Computer Artist
 
-This fork adds native **Windows** support alongside the KDE Wayland backend.
-Windows can capture/read windows, move them without activation, and independently
-edit supported standard Edit/RichEdit fields and push buttons with an animated
-agent pointer. Explicit `--host` selects the real mouse, foreground, keyboard and
-clipboard. Independent WinUI Notepad editing was verified while human focus and
-pointer remained unchanged; browser/Ninja-terminal compatibility is unverified.
-See [Windows installation and limits](docs/WINDOWS.md).
-
 `ca` gives an agent its own animated pointer and physical keyboard input in supported
 native Wayland applications on your KDE desktop. You can keep using your pointer
 and keyboard in another application. It is a local CLI backed by a KWin plugin.
@@ -17,9 +9,16 @@ Returning to it revokes agent control. `--host` explicitly selects the real desk
 pointer, focus and clipboard. The agent lane never falls back to host input.
 XWayland, independent clipboard/IME and popup grabs are unsupported.
 
+On **Windows** the agent also gets its own drawn pointer, but it is not a second
+input device: it drives standard text fields and buttons with targeted window
+messages and other controls through UI Automation, without moving your pointer or
+focus. Canvases, drawing and apps that ignore UI Automation are refused there. See
+[Windows](docs/WINDOWS.md) for what is implemented and what is verified.
+
 For development and testing, give each agent a private environment instead: its own
-KWin desktop, seat, clipboard and session bus, with apps from the host or a rootless
-Podman container. Nothing in it touches your pointer, focus or browser:
+KWin desktop, seat, clipboard and session bus, with apps from the host or a Podman
+or Docker container. On Windows each environment is a Linux box container instead
+(see [Windows](docs/WINDOWS.md)). Nothing in it touches your pointer, focus or browser:
 
 ```bash
 ca env start web --image docker.io/library/node:22 --project .   # or --recipe ca-env.toml

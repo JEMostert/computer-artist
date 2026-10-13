@@ -17,6 +17,15 @@ Qt6 accessibility tree and verified typed text through it. See the
 [improvement record](validation/2026-10-11-improvements.json); non-US layouts, GTK
 and browser trees remain untested.
 
+On 13 and 14 October 2026, 360 Python tests and all separate-KWin suites passed
+both before (main at the Windows merge) and after Docker support, Linux boxes and
+clipboard-restoring paste. Linux environments ran with rootless Podman and through
+the Docker CLI (against Podman's Docker API, as no Docker daemon was available).
+Linux boxes ran with both: KWrite and Firefox launched, a pasted line appeared in
+KWrite with the clipboard restored, and captures and box writes reached the
+project folder. Docker Desktop on Windows and the new Windows UI Automation, capture
+and scroll code were not run; see [Windows](WINDOWS.md).
+
 Earlier records (29–30 September 2026: KolourPaint, scrcpy, KWrite and the
 removed HTML export) live in git history before this branch; they prove those
 revisions, not current source.

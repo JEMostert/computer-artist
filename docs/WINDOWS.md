@@ -1,10 +1,11 @@
 # Windows
 
 Requires Windows 10/11 and Python 3.12 or later. No KWin, WSL, administrator access,
-native build or Linux D-Bus dependency is needed.
+native build or Linux D-Bus dependency is needed for the desktop backend. Private
+environments additionally need Docker Desktop (WSL 2 backend) or Podman.
 
 ```powershell
-git clone https://github.com/wmostert76/computer-artist.git
+git clone https://github.com/JEMostert/computer-artist.git
 cd computer-artist
 python -m venv .venv
 & .\.venv\Scripts\python.exe -m pip install -e '.[dev]'
@@ -17,33 +18,61 @@ python -m venv .venv
 Add `.venv\Scripts` to this terminal's PATH, or call its `ca.exe` explicitly.
 The skill is discovered on the next agent turn. Setup uses managed copies without
 symlink privileges and refuses to overwrite manually edited or unrelated skills.
+The bundled skill asks the agent to detect the operating system first and then
+follows the Linux or Windows guide only.
 
 ## Implemented behavior
 
-| Feature | Windows scope |
-| --- | --- |
-| Independent text | Targeted Edit/RichEdit selection and undoable Unicode insertion; no SendInput, host focus or shared clipboard |
-| Independent pointer | Animated click-through overlay; control selection, click caret placement in classic Edit (not RichEdit) and push-button notification |
-| Concurrency | Separate application processes can receive independent input while the real keyboard works in another app; per-process ownership prevents conflicting lanes |
-| Explicit host input | SendInput mouse, physical scan-code keys, layout-based text, scroll, foreground and bounded Unicode clipboard, with `--host` |
-| Observation | Visible client-region screen capture, standard-control text read-back, pixel/geometry comparisons, bounded watch |
-| Window placement | `ca window info/move` with no activation; physical outer geometry verified after movement |
-| Monitor scope | `--monitor DEVICE_OR_EDID` or `CA_WINDOWS_MONITOR`; capture/input/placement outside the selected display is refused |
-| Programs | Conditional programs, fragments, file/outcome checks, bounded evidence, Windows job deadlines and descendant cleanup |
+Status: **implemented** means code and unit tests exist; **verified** names what
+was exercised live. Everything added on 14 October 2026 is implemented but not yet
+verified on Windows.
 
-Independent standard controls and concurrent separate text were verified in
-disposable Win32 applications. Actual Windows 11 Notepad (`RichEditD2DPT`) was
-verified for exact multiline Unicode write/read and window movement on a Philips
-346P1C (3440x1440), with human pointer and foreground preserved. This proves those
-workflows; it does not prove universal application compatibility.
+| Feature | Windows scope | Status |
+| --- | --- | --- |
+| Agent pointer | Animated click-through overlay drawn by `ca`; never receives input, never activates a window | Verified 13 Oct (fixtures, Notepad) |
+| Independent text (standard controls) | Caret-position, undoable Unicode insertion into Edit/RichEdit by window messages; no SendInput, focus or clipboard | Verified 13 Oct |
+| Independent buttons (standard) | Push-button notification to the parent | Verified 13 Oct |
+| RichEdit caret by click | UI Automation text range at the pointer | Implemented |
+| Independent UI Automation | Invoke, toggle, select, expand/collapse, value append, Backspace, scroll for WPF/WinUI/UWP/Qt/Chromium elements | Implemented |
+| Accessibility tree | `ca a11y --window`, `ctx.find`, `ctx.click(element=...)` through UI Automation, AT-SPI role names | Implemented |
+| Capture | PrintWindow of the client area (no overlapping windows, no agent pointer); screen-region fallback is reported | Implemented |
+| Explicit host input | SendInput mouse, scan-code keys, layout text, scroll, foreground, clipboard, with `--host` | Verified 13 Oct |
+| Host paste | Whole text at once; the user's clipboard (all bounded formats) is restored unless changed meanwhile | Implemented |
+| Host scroll | Same units as Linux: 15 per wheel notch, positive is down/right | Implemented (direction fixed) |
+| Window placement | `ca window info/move` with no activation | Verified 13 Oct |
+| Monitor scope | `--monitor DEVICE_OR_EDID` or `CA_WINDOWS_MONITOR` restricts capture, input and placement | Verified 13 Oct |
+| Private environments | One Linux box container per environment (`containers/linux-box`), Docker or Podman; commands run inside it with path translation | Box verified on Linux with Podman and the Docker CLI; Docker Desktop on Windows unverified |
+| Programs | Conditional programs, fragments, file/outcome checks, bounded evidence, job deadlines and descendant cleanup | Verified 13 Oct |
 
-Independent physical keyboard injection, generic accelerators, scrolling,
-checkbox/radio state, drawing/canvas gestures, browser/web terminals, private KDE
-environments and Windows UI Automation are not implemented. Unsupported agent
-input is refused; there is no automatic host fallback. Host pointer and foreground
-changes require task authorization. Capture includes overlapping windows and is
-not an offscreen-rendering API. Secure desktops, UIPI and app-created activation
-can restrict control. Input separation is not a security sandbox.
+The agent lane is not a second keyboard or pointer. Applications that read raw
+input, the cursor position or draw their own canvas cannot be driven by it, and
+drag gestures, general shortcuts and Alt menus are refused. UI Automation text
+entry appends to an element's value; it cannot insert at an arbitrary caret.
+Unsupported agent input is refused; there is no automatic host fallback. Host
+pointer and foreground changes require task authorization. Secure desktops, UIPI
+and app-created activation can restrict control. Focus moving into the agent's
+target process (by the human or by the app itself) stops the lease. Input
+separation is not a security sandbox.
+
+## Private environments (Linux boxes)
+
+`ca env start NAME [--project DIR] [--recipe FILE]` builds the box image from this
+checkout on first use (`localhost/computer-artist-box:<source hash>`; rebuilt when
+the sources change) and starts container `ca-box-NAME`. Inside it a private KWin
+with the plugin, a private D-Bus session and the environment manager run exactly
+as on Linux. Every `ca --environment NAME ...` and `ca env exec/logs/browser NAME`
+command runs inside the box with `exec`. Host paths in arguments are translated to
+box paths and box paths in replies back to Windows paths; a path outside the
+project, the mounts and the environment folder is refused. State lives in
+`%LOCALAPPDATA%\computer-artist\environments\NAME`; fragments are shared through
+the window folder. The box contains KWrite, Konsole and Firefox; recipes add more
+with a containerfile starting `ARG BOX_IMAGE` / `FROM ${BOX_IMAGE}`. Set
+`CA_CONTAINER_RUNTIME=podman` to use Podman. The same path can be exercised on
+Linux with `CA_ENVIRONMENT_BACKEND=box`.
+
+To check on Windows (not done yet): Docker Desktop bind mounts of
+`%LOCALAPPDATA%` (file locks and permissions), build time, KWin software rendering
+speed in WSL 2, and Podman machine compatibility.
 
 ## Validation
 
@@ -61,21 +90,22 @@ own fixtures. Add `--host-checks` to explicitly test simultaneous real and agent
 input and host clicks; that mode temporarily activates its own host fixture and
 restores the original foreground and pointer afterwards.
 
-`tests/integration/check_windows_full.py --monitor MONITOR_ID` covers every current
-feature (16 checks; 21 with `--host-checks`). `--placement-only` creates the hidden
-fixtures, reports their geometry and exits without input. Before input it re-reads
-the shown fixtures and stops if they are off the display, overlapping or resized.
-The fixtures refuse their own off-display moves. On mixed-DPI setups Windows was
-observed to relocate a newly shown window to another, differently scaled display.
-Agent connections replace SendInput with an assertion. Each check is reported as
-`passed`, `failed`, `skipped` or `interrupted_by_human`; the last is used only when
-low-level hooks counted real (non-injected) keyboard/mouse events during a failed
-check (counts only, no key contents). Exit code 0 means all passed, 2 means no
-failures but incomplete, 1 means a failure. Host focus and pointer are restored
-only while they are still where the harness left them.
-Evidence is retained in `local/windows-validation/`, which is excluded from git.
-Results of 13 October 2026 are summarized in
+`tests/integration/check_windows_full.py --monitor MONITOR_ID` covers the features
+verified on 13 October (16 checks; 21 with `--host-checks`). `--placement-only`
+creates the hidden fixtures, reports their geometry and exits without input.
+Before input it re-reads the shown fixtures and stops if they are off the display,
+overlapping or resized. Agent connections replace SendInput with an assertion.
+Each check is reported as `passed`, `failed`, `skipped` or
+`interrupted_by_human`; the last is used only when low-level hooks counted real
+(non-injected) keyboard/mouse events during a failed check (counts only, no key
+contents). Exit code 0 means all passed, 2 means no failures but incomplete, 1
+means a failure. Evidence is retained in `local/windows-validation/`, which is
+excluded from git. Results of 13 October 2026 are summarized in
 [docs/validation/2026-10-13-windows.json](validation/2026-10-13-windows.json).
 
+The UI Automation lane, PrintWindow capture, host paste restoration, the scroll
+fix and Linux boxes still need live checks on Windows; extend
+`check_windows_full.py` with a WPF or WinUI fixture for them.
+
 See the bundled [Windows skill reference](../skills/computer-artist/references/windows.md)
-for daily command use. The original KDE workflow continues to use its KWin plugin.
+for daily command use.
