@@ -62,7 +62,8 @@ class WatchTest(unittest.TestCase):
         self.assertEqual(self.backend.acquire_count, 0)
 
     def test_retention_bounds_frames_inside_one_run(self):
-        self.args.duration = 1.1
+        # Long enough that slow CI runners still produce well over 15 frames.
+        self.args.duration = 2.5
         result = watch(self.backend, self.args, self.events.append)
         self.assertGreater(result['frames'], 15)
         folder = Path(result['record']).parent
