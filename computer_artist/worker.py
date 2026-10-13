@@ -1,6 +1,7 @@
 """One execution process; its supervisor enforces a wall-clock deadline."""
 
 import json
+import os
 import sys
 from contextlib import redirect_stdout
 from pathlib import Path
@@ -54,6 +55,8 @@ def interruption_evidence(ctx, spec, result):
 def main(folder):
     folder = Path(folder)
     spec = json.loads((folder / 'request.json').read_text())
+    if spec.get('socket') == 'win32':
+        os.environ['CA_WIN32_CLEANUP_FILE'] = str(folder / 'windows-input.json')
     result = {'ok': False, 'status': 'failed'}
     ctx = None
     journal = None

@@ -1,13 +1,22 @@
 ---
 name: computer-artist
-description: Use the ca CLI to test and interact with GUI applications, preferring private agent environments; control the actual KDE Wayland desktop only when explicitly requested.
+description: Use the ca CLI to observe and control GUI applications on Windows or KDE Wayland, with independent supported-control input and verified outcomes. Use real desktop pointer or focus only when authorized.
 ---
 
 # Computer Artist
 
 Use `ca` from PATH or this skill's checkout. The CLI is the interface; Python
-`run(ctx)` programs are submitted through it, not a separate SDK. Desktop work
-requires the loaded KWin plugin. Skill setup does not deploy or update that plugin.
+`run(ctx)` programs are submitted through it, not a separate SDK.
+
+On Windows, read [Windows operation](references/windows.md) before input. The
+native backend needs no KWin plugin. Independent input is limited to supported
+standard Edit/RichEdit text fields and push buttons; it is not an independent
+physical keyboard. Never use host input to work around an agent-lane refusal.
+Honor the user's chosen display with `--monitor` (from `ca monitors`) or
+`CA_WINDOWS_MONITOR`; this also restricts capture and window placement.
+
+The following private-environment/KWin instructions apply to Linux. Linux desktop
+work requires the loaded KWin plugin. Skill setup does not deploy or update it.
 
 ## Select the environment first
 

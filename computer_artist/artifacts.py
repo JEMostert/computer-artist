@@ -10,6 +10,8 @@ import stat
 import time
 from pathlib import Path
 
+from .platform_io import open_no_follow
+
 MAX_BYTES = 64 * 1024 * 1024
 MAX_PIXELS = 16_000_000
 IMAGE_FORMATS = ('PNG', 'JPEG', 'WEBP', 'BMP', 'TIFF', 'GIF')
@@ -17,7 +19,9 @@ UNSET = object()
 
 
 def _identity(info):
-    return [info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns, info.st_ctime_ns]
+    # Windows stat/fstat disagree on deprecated st_ctime; birthtime is consistent.
+    changed = info.st_birthtime_ns if os.name == 'nt' else info.st_ctime_ns
+    return [info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns, changed]
 
 
 def _read(path, *, max_bytes=MAX_BYTES, check=None):
@@ -25,7 +29,7 @@ def _read(path, *, max_bytes=MAX_BYTES, check=None):
     if type(max_bytes) is not int or not 0 < max_bytes <= MAX_BYTES:
         raise ValueError(f'max_bytes must be between 1 and {MAX_BYTES}')
     path = Path(os.path.abspath(Path(path).expanduser()))
-    fd = os.open(path, os.O_RDONLY | os.O_NONBLOCK | os.O_NOFOLLOW)
+    fd = open_no_follow(path, os.O_RDONLY)
     try:
         before = os.fstat(fd)
         if not stat.S_ISREG(before.st_mode):

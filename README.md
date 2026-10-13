@@ -1,5 +1,13 @@
 # Computer Artist
 
+This fork adds native **Windows** support alongside the KDE Wayland backend.
+Windows can capture/read windows, move them without activation, and independently
+edit supported standard Edit/RichEdit fields and push buttons with an animated
+agent pointer. Explicit `--host` selects the real mouse, foreground, keyboard and
+clipboard. Independent WinUI Notepad editing was verified while human focus and
+pointer remained unchanged; browser/Ninja-terminal compatibility is unverified.
+See [Windows installation and limits](docs/WINDOWS.md).
+
 `ca` gives an agent its own animated pointer and physical keyboard input in supported
 native Wayland applications on your KDE desktop. You can keep using your pointer
 and keyboard in another application. It is a local CLI backed by a KWin plugin.

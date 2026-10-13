@@ -207,6 +207,13 @@ class Context:
         self.last_observation = record
         return record
 
+    def read_text(self):
+        """Read a supported standard edit control without acquiring input or focus."""
+        self.refresh()
+        if 'read_text' not in self.capabilities.get('operations', []):
+            raise ValueError('This backend does not expose standard-control text read-back')
+        return self.client.request('read_text', window=self.window_id)['text']
+
     def target(self, name, *, observation, rect):
         return self.observations.target(self.window_id, name, observation, rect)
 
@@ -240,6 +247,10 @@ class Context:
         The tree is the application's own claim; pointer input at an element's
         center still goes through the usual guards. Verify outcomes as usual.
         """
+        if self.capabilities.get('backend') == 'win32':
+            raise ValueError(
+                'Windows UI Automation is not implemented; use a fresh window observation'
+            )
         from .accessibility import elements
 
         window = self.refresh()
@@ -493,6 +504,15 @@ class Context:
         if not isinstance(text, str) or not text or len(text) > WRITE_MAX_CHARACTERS:
             raise ValueError(f'Text must be 1–{WRITE_MAX_CHARACTERS} characters')
         _nonnegative(interval, 'interval must be finite and nonnegative')
+        if self.lane == 'agent' and 'write_text' in self.capabilities.get('operations', []):
+            if interval:
+                raise ValueError(
+                    'Independent Windows text uses bounded control messages; interval is unsupported'
+                )
+            self._keyboard_operations()
+            self._own()
+            self.client.request('write_text', text=text)
+            return {'status': 'dispatched', 'characters': len(text), 'delivery': 'window_messages'}
         self._keyboard_operations()
         if 'keymap' not in self.capabilities.get('operations', []):
             raise ValueError(

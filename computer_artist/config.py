@@ -60,6 +60,8 @@ def socket_path(explicit=None):
         return explicit
     if os.environ.get('CA_SOCKET'):
         return os.environ['CA_SOCKET']
+    if os.name == 'nt':
+        return 'win32'
     runtime = os.environ.get('XDG_RUNTIME_DIR')
     if not runtime:
         raise ValueError('Set CA_SOCKET or pass --socket; XDG_RUNTIME_DIR is unavailable')

@@ -1,6 +1,5 @@
 """Bounded, explicitly managed run directories. Never adopts arbitrary files."""
 
-import fcntl
 import json
 import os
 import shutil
@@ -11,7 +10,9 @@ from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 
+from . import locking as fcntl
 from .files import atomic_json, directory_lock, key
+from .platform_io import open_no_follow
 
 MARKER = '.ca-run.json'
 
@@ -55,7 +56,7 @@ def _marker(folder):
     marker = folder / MARKER
     if folder.is_symlink() or marker.is_symlink() or not marker.is_file():
         raise ValueError('Not a managed run')
-    fd = os.open(marker, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    fd = open_no_follow(marker, os.O_RDONLY)
     try:
         if not stat.S_ISREG(os.fstat(fd).st_mode):
             raise ValueError('Not a managed run')
@@ -83,7 +84,7 @@ def _marker(folder):
 def _leased(folder):
     # Read-only callers must not create leases; a missing lock means nothing holds one.
     try:
-        fd = os.open(folder / '.active.lock', os.O_RDWR | os.O_NOFOLLOW)
+        fd = open_no_follow(folder / '.active.lock', os.O_RDWR)
     except FileNotFoundError:
         return False
     try:
@@ -145,7 +146,7 @@ def cleanup(root, *, dry_run=False, count=None, max_bytes=None, protect=()):
             # their lease under the same root lock, so none can start between
             # this check and removal.
             try:
-                fd = os.open(root / entry['id'] / '.active.lock', os.O_RDWR | os.O_NOFOLLOW)
+                fd = open_no_follow(root / entry['id'] / '.active.lock', os.O_RDWR)
             except FileNotFoundError:
                 continue  # Removed since the snapshot; nothing left to lease.
             try:
@@ -185,7 +186,7 @@ def managed_run(root, identity=None):
     with locked(root) as root:
         folder = root / key(identity or run_name())
         folder.mkdir(mode=0o700)
-        fd = os.open(folder / '.active.lock', os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
+        fd = open_no_follow(folder / '.active.lock', os.O_CREAT | os.O_RDWR, 0o600)
         try:
             fcntl.flock(fd, fcntl.LOCK_SH)
             atomic_json(folder / MARKER, {'format': 1, 'created': time.time(), 'completed': False})
@@ -215,7 +216,7 @@ def active_run(folder):
     folder = Path(folder)
     with locked(folder.parent):
         _marker(folder)
-        fd = os.open(folder / '.active.lock', os.O_RDWR | os.O_NOFOLLOW)
+        fd = open_no_follow(folder / '.active.lock', os.O_RDWR)
         try:
             fcntl.flock(fd, fcntl.LOCK_SH)
         except BaseException:

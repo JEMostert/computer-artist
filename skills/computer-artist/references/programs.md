@@ -55,8 +55,7 @@ double clicks and drags.
 ```python
 before = ctx.snapshot_file(path)
 ctx.press('Ctrl+S')
-ctx.verify_file('saved document', path, kind='text', after=before,
-                expected_text=text)
+ctx.verify_file('saved document', path, kind='text', after=before, expected_text=text)
 ```
 
 Use the app's actual save/export procedure and destination; unknown dialogs need

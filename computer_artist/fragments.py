@@ -39,6 +39,12 @@ class FragmentStore:
         if folder.is_symlink() or (folder / 'versions').is_symlink():
             raise ValueError('Module storage cannot be a symlink')
         if version is None:
+            if os.name == 'nt':
+                pointer = folder / 'current-version.json'
+                if pointer.is_symlink() or not pointer.is_file():
+                    raise ValueError('Current revision must be a library revision pointer')
+                version = key(json.loads(pointer.read_text())['version'])
+                return self._load(name, version)
             current = folder / 'current'
             if not current.is_symlink():
                 raise ValueError('Current revision must be a library revision link')
@@ -87,6 +93,17 @@ class FragmentStore:
         with self.locked():
             manifest, _ = self._load(name, version)
             folder = self.folder(name)
+            if os.name == 'nt':
+                pointer = folder / 'current-version.json'
+                if pointer.is_symlink():
+                    raise ValueError('Current revision pointer cannot be a link')
+                previous = json.loads(pointer.read_text())['version'] if pointer.exists() else None
+                atomic_json(pointer, {'version': manifest['version']})
+                return {
+                    'name': key(name),
+                    'version': manifest['version'],
+                    'previous_version': previous,
+                }
             current = folder / 'current'
             previous = os.readlink(current) if current.is_symlink() else None
             if current.exists() and not current.is_symlink():
@@ -121,6 +138,8 @@ class FragmentStore:
             if folder.is_symlink() or (folder / 'versions').is_symlink():
                 raise ValueError('Module storage cannot be a symlink')
             exists = (folder / 'current').exists() or (folder / 'current').is_symlink()
+            if os.name == 'nt':
+                exists = (folder / 'current-version.json').exists()
             if exists != update:
                 raise ValueError(
                     'Module already exists; use update'
@@ -152,12 +171,15 @@ class FragmentStore:
                 atomic_text(revision / 'module.py', source)
                 atomic_json(revision / 'manifest.json', manifest)
                 sync_directory(revision.parent)
-                temporary.symlink_to('versions/' + version)
-                for filename in ('module.py', 'manifest.json'):
-                    if not (folder / filename).is_symlink():
-                        (folder / filename).symlink_to('current/' + filename)
-                # Last step: once current points at the new revision it must be kept.
-                os.replace(temporary, folder / 'current')
+                if os.name == 'nt':
+                    atomic_json(folder / 'current-version.json', {'version': version})
+                else:
+                    temporary.symlink_to('versions/' + version)
+                    for filename in ('module.py', 'manifest.json'):
+                        if not (folder / filename).is_symlink():
+                            (folder / filename).symlink_to('current/' + filename)
+                    # Last step: once current points at the new revision it must be kept.
+                    os.replace(temporary, folder / 'current')
             except BaseException:
                 shutil.rmtree(revision, ignore_errors=True)
                 temporary.unlink(missing_ok=True)
