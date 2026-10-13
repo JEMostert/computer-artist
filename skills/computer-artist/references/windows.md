@@ -5,7 +5,8 @@ Use `ca` (or the checkout's `.venv\Scripts\ca.exe`). Start with `ca capabilities
 `ca set ID --name APP`, then inspect `ca observe --window APP` and its image.
 Coordinates are physical client pixels on Windows, including at mixed DPI.
 
-When the user chooses a display, use its exact device or EDID ID with `--monitor`.
+When the user chooses a display, use its exact device or EDID ID from `ca monitors`
+(written as MONITOR_ID below) with `--monitor`.
 Keep that selector on every command or set `CA_WINDOWS_MONITOR` for the task.
 Targets must fit entirely within it. Private KDE environments are unavailable;
 never replace them with the user's desktop without the task's authorization.
@@ -20,15 +21,17 @@ of the target process stops the lease. Different processes may be controlled
 concurrently; another lane cannot own the same process.
 
 ```powershell
-ca --monitor PHL093F set ID --name editor
-ca --monitor PHL093F observe --window editor
-ca --monitor PHL093F write --window editor 'Hello'
-ca --monitor PHL093F read --window editor
-ca --monitor PHL093F window move --window editor --x 450 --y 180
+ca --monitor MONITOR_ID set ID --name editor
+ca --monitor MONITOR_ID observe --window editor
+ca --monitor MONITOR_ID write --window editor 'Hello'
+ca --monitor MONITOR_ID read --window editor
+ca --monitor MONITOR_ID window move --window editor --x 450 --y 180
 ```
 
-Select one supported control by moving/clicking inside it when the window has
-multiple edit controls. Text insertion is undoable and supports Unicode and
+Select one supported control by moving inside it when the window has multiple
+edit controls. Clicking places the caret only in classic Edit controls; in RichEdit
+(including Notepad) a click only selects the control and leaves the caret where it
+was, so position with Ctrl+A or navigation keys and verify by reading back. Text insertion is undoable and supports Unicode and
 line breaks. Ctrl+A and Ctrl+Z, unmodified navigation, text and
 standard push-button notifications are supported. General shortcuts, shared
 clipboard, checkboxes/radios, scrolling, drawing and arbitrary canvas input are

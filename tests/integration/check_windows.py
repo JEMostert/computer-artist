@@ -15,12 +15,14 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
+from windows_placement import verify_fixture_placement
+
 from computer_artist.client import Client
 from computer_artist.runtime import Context
 from computer_artist.supervisor import run_supervised
 from computer_artist.windows import Win32
 from computer_artist.windows_agent import MessageLane
-from computer_artist.windows_monitors import contains, select_monitor
+from computer_artist.windows_monitors import select_monitor
 from computer_artist.workspace import Workspace
 
 
@@ -40,8 +42,9 @@ def main():
     os.environ['CA_WINDOWS_MONITOR'] = args.monitor
     api = Win32()
     monitor = select_monitor(api, args.monitor)
+    os.environ['CA_TEST_MONITOR_BOUNDS'] = json.dumps(monitor['bounds'])
     left, top, right, bottom = monitor['work']
-    if right - left < 1100 or bottom - top < 350:
+    if right - left < 1100 or bottom - top < 600:
         raise ValueError('The selected monitor is too small for both disposable test windows')
     foreground = api.user.GetForegroundWindow()
     cursor = wintypes.POINT()
@@ -76,11 +79,7 @@ def main():
                     break
                 time.sleep(0.05)
             targets = [next(w for w in windows if w['title'] == title) for title in titles]
-            if not all(
-                contains(monitor, [w[key] for key in ('x', 'y', 'width', 'height')])
-                for w in targets
-            ):
-                raise ValueError('A fixture is outside the selected monitor; refusing input')
+            verify_fixture_placement(monitor, targets)
             handles = [int(w['id'].split('-')[1], 16) for w in targets]
             if args.host_checks:
                 api.focus_host(handles[1])

@@ -9,6 +9,7 @@ import tempfile
 import time
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from computer_artist import locking
@@ -17,11 +18,40 @@ from computer_artist.config import socket_path
 from computer_artist.platform_io import open_no_follow
 from computer_artist.setup import install
 from computer_artist.storage import cleanup, inspect, managed_run
-from computer_artist.windows import Input, key_input
+from computer_artist.windows import Input, WindowsBackend, key_input
+from computer_artist.windows_agent import MessageLane
 from computer_artist.windows_monitors import contains
 
 
 class GeometryAndKeysTest(unittest.TestCase):
+    def test_session_status_reports_the_actual_connection_lane(self):
+        for lane in ('agent', 'host'):
+            backend = WindowsBackend.__new__(WindowsBackend)
+            backend.lane, backend.lease, backend.reason = lane, 'owned', 'test_reason'
+            status = backend.request('session_status')
+            self.assertTrue(status['lanes'][lane]['busy'])
+            self.assertFalse(status['lanes']['host' if lane == 'agent' else 'agent']['busy'])
+            self.assertEqual(status['lanes'][lane]['stop_reason'], 'test_reason')
+            backend.lease = ''
+            self.assertFalse(backend.request('session_status')['lanes'][lane]['busy'])
+
+    def test_independent_lane_accepts_only_push_buttons_and_never_sends_richedit_pointers(self):
+        styles = {1: 0, 2: 1, 3: 2, 4: 3, 5: 4, 6: 7, 7: 0x800}  # 0/1 are push buttons.
+        api = SimpleNamespace(
+            user=SimpleNamespace(
+                GetWindowLongW=lambda hwnd, _index: styles[hwnd],
+                IsWindowEnabled=lambda _hwnd: True,
+            )
+        )
+        lane = MessageLane.__new__(MessageLane)
+        lane.api, lane.position, sent = api, (10, 10), []
+        lane.class_name = lambda hwnd: 'button' if hwnd < 7 else 'richeditd2dpt'
+        lane.message = lambda *values: sent.append(values) or 0
+        self.assertEqual([hwnd for hwnd in range(1, 8) if lane.supported(hwnd)], [1, 2, 7])
+        lane.control = 7
+        lane.button(272, True)  # Selection only: keeps the lease, moves no caret.
+        self.assertEqual(sent, [])
+
     def test_monitor_bounds_include_negative_origins_and_reject_spanning(self):
         display = {'bounds': [-1920, -200, 0, 880]}
         self.assertTrue(contains(display, (-1800, -100, 800, 600)))

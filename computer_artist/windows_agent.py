@@ -1,7 +1,8 @@
 """Independent, targeted Win32 control messages; never inject into the human seat.
 
-This lane supports standard Edit/Button/scrollbar controls. It does not pretend
-that arbitrary applications accept background messages or independent physical keys.
+This lane supports standard Edit/RichEdit controls and push buttons; scrolling is not
+implemented. It does not pretend that arbitrary applications accept background
+messages or independent physical keys.
 """
 
 import ctypes
@@ -54,17 +55,21 @@ class MessageLane:
         self.api.user.GetClassNameW(hwnd, value, len(value))
         return value.value.casefold()
 
+    def supported(self, hwnd):
+        """Edit/RichEdit, or a push button; checkboxes, radios and group boxes are not."""
+        kind = self.class_name(hwnd)
+        if kind in BUTTON_CLASSES:
+            return self.api.user.GetWindowLongW(hwnd, -16) & 15 in (0, 1)
+        return kind in EDIT_CLASSES
+
     def controls(self):
         controls = []
-        if self.class_name(self.hwnd) in EDIT_CLASSES | BUTTON_CLASSES:
+        if self.supported(self.hwnd):
             controls.append(self.hwnd)
 
         @self.api.enum_callback
         def visit(hwnd, _):
-            if (
-                self.api.user.IsWindowVisible(hwnd)
-                and self.class_name(hwnd) in EDIT_CLASSES | BUTTON_CLASSES
-            ):
+            if self.api.user.IsWindowVisible(hwnd) and self.supported(hwnd):
                 controls.append(hwnd)
             return True
 
@@ -94,9 +99,10 @@ class MessageLane:
             if not child or child == hwnd:
                 break
             hwnd = child
-        if self.class_name(hwnd) not in EDIT_CLASSES | BUTTON_CLASSES:
+        if not self.supported(hwnd):
             raise ValueError(
-                'Independent Windows input supports standard Edit/Button controls here; no host fallback'
+                'Independent Windows input supports standard Edit controls and push buttons '
+                'here; no host fallback'
             )
         self.control = hwnd
         self.position = (round(x), round(y))
@@ -141,7 +147,7 @@ class MessageLane:
         if not self.api.user.IsWindowEnabled(self.control):
             raise ValueError('The selected control is disabled')
         if kind in BUTTON_CLASSES:
-            if self.api.user.GetWindowLongW(self.control, -16) & 15 not in (0, 1):
+            if not self.supported(self.control):
                 raise ValueError('Independent checkbox/radio state changes are not implemented')
             # Notify the parent directly; BM_CLICK/WM_LBUTTONDOWN may call SetFocus.
             identity = self.api.user.GetDlgCtrlID(self.control)
@@ -149,17 +155,17 @@ class MessageLane:
         elif kind in EDIT_CLASSES:
             if self.position is None:
                 raise ValueError('Observe and move to a control before clicking')
+            if kind != 'edit':
+                # RichEdit EM_CHARFROMPOS needs a POINTL inside the target process and a
+                # pointer into this process must never be sent across: the click only
+                # selects the control and leaves its caret unchanged (documented).
+                return
             point = wintypes.POINT(*self.position)
             self.api.user.ScreenToClient(self.control, ctypes.byref(point))
-            if kind == 'edit':
-                position = (
-                    self.message(
-                        self.control, 0x00D7, 0, (point.y & 65535) << 16 | (point.x & 65535)
-                    )
-                    & 65535
-                )
-            else:
-                position = self.message(self.control, 0x0439, 0, ctypes.addressof(point))
+            position = (
+                self.message(self.control, 0x00D7, 0, (point.y & 65535) << 16 | (point.x & 65535))
+                & 65535  # EM_CHARFROMPOS
+            )
             self.message(self.control, 0x00B1, position, position)  # EM_SETSEL, no focus change.
 
     def key(self, code, pressed, keymap):

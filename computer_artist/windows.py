@@ -1,4 +1,8 @@
-"""Native Windows observation and explicit host input; no independent input lane."""
+"""Native Windows observation, independent standard-control input and explicit host input.
+
+The agent lane delegates to windows_agent.MessageLane (no host fallback); the host
+lane uses SendInput only with explicit --host.
+"""
 
 import ctypes
 import hashlib
@@ -446,10 +450,18 @@ class WindowsBackend:
             raise PermissionError('Release the existing lease before acquiring another target')
         self.secure_desktop()
         hwnd, window = self.resolve(identity)
-        if self.lane == 'host' and any(
-            self.api.user.GetAsyncKeyState(code) & 0x8000 for code in range(1, 256)
-        ):
-            raise PermissionError('Release held human keys and mouse buttons before acquisition')
+        held = [
+            code
+            for code in (range(1, 256) if self.lane == 'host' else ())
+            if self.api.user.GetAsyncKeyState(code) & 0x8000
+        ]
+        if held:
+            # Counts only: which keys a human holds must not end up in run evidence.
+            buttons = sum(code in (1, 2, 4, 5, 6) for code in held)
+            raise PermissionError(
+                'Release held human keys and mouse buttons before acquisition '
+                f'({len(held) - buttons} keys, {buttons} mouse buttons held)'
+            )
         self.control_root.mkdir(parents=True, exist_ok=True)
         mutex = open_no_follow(
             self.control_root
@@ -632,9 +644,17 @@ class WindowsBackend:
         if op == 'session_status':
             return {
                 'ok': True,
+                'scope': 'connection',
                 'lanes': {
-                    'agent': {'busy': False, 'supported': False},
-                    'host': {'busy': bool(self.lease), 'stop_reason': self.reason},
+                    'agent': {
+                        'busy': bool(self.lease and self.lane == 'agent'),
+                        'supported': True,
+                        'stop_reason': self.reason if self.lane == 'agent' else None,
+                    },
+                    'host': {
+                        'busy': bool(self.lease and self.lane == 'host'),
+                        'stop_reason': self.reason if self.lane == 'host' else None,
+                    },
                 },
             }
         if op == 'acquire':
