@@ -53,6 +53,9 @@ def parser():
         '--socket', help='Control socket (default: CA_SOCKET, then the host session)'
     )
     shared.add_argument(
+        '--monitor', help='Windows: restrict input/capture/window placement to one display ID'
+    )
+    shared.add_argument(
         '--deadline', type=positive_number, help='Action deadline in seconds (default: 120)'
     )
     shared.add_argument('--trace', help='Write an action trace as JSON')
@@ -76,7 +79,7 @@ def parser():
         parents=[shared],
         description='Computer Artist: independent agent input on your desktop',
     )
-    result.add_argument('--version', action='version', version='Computer Artist 0.3.0')
+    result.add_argument('--version', action='version', version='Computer Artist 0.4.0')
     # Shared options are declared before child parsers copy them.
     shared.add_argument('--window-dir', help='Window layouts and fragments root')
     shared.add_argument('--output-dir', help='Run output root')
@@ -85,6 +88,18 @@ def parser():
     result.add_argument('--window-dir', default=argparse.SUPPRESS)
     result.add_argument('--budget', type=int, default=argparse.SUPPRESS)
     commands = result.add_subparsers(dest='command', required=True)
+    commands.add_parser(
+        'monitors', parents=[shared], help='List Windows displays and physical bounds'
+    )
+    placement = commands.add_parser(
+        'window', parents=[shared], help='Inspect or move a Windows window without activation'
+    )
+    placement.add_argument('action', choices=('info', 'move'))
+    placement.add_argument('--window', required=True)
+    placement.add_argument('--x', type=int)
+    placement.add_argument('--y', type=int)
+    placement.add_argument('--width', type=int)
+    placement.add_argument('--height', type=int)
     from .setup import add_command
 
     add_command(commands)
@@ -166,6 +181,10 @@ def parser():
         ('stop', 'Revoke the current agent lease and return its app'),
     ]:
         commands.add_parser(name, parents=[shared], help=help_text)
+    read = commands.add_parser(
+        'read', parents=[shared], help='Read the sole standard Windows edit control without input'
+    )
+    read.add_argument('--window', required=True)
     name_window = commands.add_parser(
         'set', parents=[shared], help='Give an open window a short reusable name'
     )
@@ -300,6 +319,8 @@ def execute(client, args):
     reply = connected_command(client, args)
     if reply is not None:
         return reply
+    if args.command == 'read':
+        return client.request('read_text', window=client.window_store.resolve_window(args.window))
     if args.command == 'session':
         return client.request('session_' + args.action)
     if args.command == 'a11y':
@@ -436,6 +457,21 @@ def main(argv=None):
 
     signal.signal(signal.SIGTERM, terminate)
     try:
+        if getattr(args, 'monitor', None):
+            if os.name != 'nt':
+                raise ValueError('--monitor currently requires the Windows backend')
+            os.environ['CA_WINDOWS_MONITOR'] = args.monitor
+        if args.command in ('monitors', 'window'):
+            if os.name != 'nt':
+                raise ValueError('Native monitor/window placement currently requires Windows')
+            from .windows_commands import dispatch
+
+            print(json.dumps(dispatch(args), indent=2))
+            return 0
+        if os.name == 'nt' and (args.command == 'env' or getattr(args, 'environment', None)):
+            raise ValueError(
+                'Private KDE environments require Linux; Windows never falls back to them'
+            )
         if args.command == 'env':
             from .environment_commands import dispatch
 
@@ -461,6 +497,10 @@ def main(argv=None):
             print(json.dumps(reply, indent=2))
             return 0 if reply['ok'] else 1
         if args.command == 'a11y' and (args.status or args.enable or not args.window):
+            if os.name == 'nt':
+                raise ValueError(
+                    'AT-SPI accessibility is Linux-only; Windows UI Automation is not implemented'
+                )
             from . import accessibility
 
             if not (args.status or args.enable):

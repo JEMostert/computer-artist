@@ -1,6 +1,5 @@
 """Process lifetime, hard deadlines and durable execution evidence."""
 
-import fcntl
 import json
 import os
 import signal
@@ -9,6 +8,7 @@ import sys
 import time
 from pathlib import Path
 
+from . import locking as fcntl
 from .control import read_stop
 from .files import atomic_json
 from .journal import partial_result
@@ -26,19 +26,28 @@ def _supervise(spec, folder, *, trace):
     atomic_json(folder / 'request.json', spec)
     started = time.monotonic()
     process = None
+    job = None
     failure = None
     interruption = None
     with (folder / '.active.lock').open('r') as lease, (folder / 'program.log').open('w') as log:
         fcntl.flock(lease.fileno(), fcntl.LOCK_SH)
         try:
+            platform_options = (
+                {'creationflags': subprocess.CREATE_NEW_PROCESS_GROUP}
+                if os.name == 'nt'
+                else {'start_new_session': True, 'pass_fds': (lease.fileno(),)}
+            )
             process = subprocess.Popen(
                 [sys.executable, '-m', 'computer_artist.worker', str(folder)],
                 cwd=Path(__file__).resolve().parents[1],
                 stdout=log,
                 stderr=subprocess.STDOUT,
-                start_new_session=True,
-                pass_fds=(lease.fileno(),),
+                **platform_options,
             )
+            if os.name == 'nt':
+                from .windows_process import ProcessJob
+
+                job = ProcessJob(process)
             while process.poll() is None:
                 stop = read_stop(folder)
                 if stop is not None:
@@ -62,7 +71,21 @@ def _supervise(spec, folder, *, trace):
             failure = f'Execution supervision failed: {error}'
             interruption = {'code': 'supervision_failed', 'reason': failure, 'details': {}}
         finally:
-            if process:
+            if process and os.name == 'nt':
+                if job is not None:
+                    job.close()
+                if process.poll() is None:
+                    process.kill()
+                process.wait()
+                if spec.get('socket') == 'win32':
+                    from .windows import cleanup_input
+
+                    try:
+                        cleanup_input(folder / 'windows-input.json')
+                    except (OSError, ValueError) as error:
+                        failure = f'Windows input cleanup failed: {error}'
+                        interruption = {'code': 'cleanup_failed', 'reason': failure, 'details': {}}
+            elif process:
                 # Kill any remaining descendants as well as a stalled worker.
                 try:
                     os.killpg(process.pid, signal.SIGTERM)

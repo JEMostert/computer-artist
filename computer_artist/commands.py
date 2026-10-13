@@ -193,7 +193,9 @@ def run_program(args, extra, socket_path):
         from .gestures import svg_path
 
         if args.path_file:
-            fd = os.open(args.path_file, os.O_RDONLY | os.O_NONBLOCK)
+            from .platform_io import open_no_follow
+
+            fd = open_no_follow(args.path_file, os.O_RDONLY)
             try:
                 if not stat.S_ISREG(os.fstat(fd).st_mode):
                     raise ValueError('Path file must be a regular UTF-8 text file')

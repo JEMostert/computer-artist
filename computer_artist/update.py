@@ -17,7 +17,8 @@ KWIN = ('qdbus6', 'org.kde.KWin', '/Plugins')
 
 def add_command(commands):
     parser = commands.add_parser(
-        'update', help='Pull this checkout, reinstall it and rebuild/reload the KWin plugin'
+        'update',
+        help='Update the source checkout and platform backend (KDE: rebuild/reload plugin)',
     )
     parser.add_argument('--check', action='store_true', help='Report what would change only')
     parser.add_argument('--no-pull', action='store_true', help='Use the checkout as it is')
@@ -288,6 +289,28 @@ def update(args):
             os.execv(
                 sys.executable, [sys.executable, str(root / 'ca'), 'update', '--no-pull', *flags]
             )
+    if os.name == 'nt':
+        result['backend'] = 'win32'
+        result['plugin_actions'] = []
+        if not args.check:
+            from .diagnostics import diagnose
+            from .setup import install
+
+            installed = []
+            for skills in (Path.home() / '.codex/skills', Path.home() / '.agents/skills'):
+                destination = skills / 'computer-artist'
+                if destination.is_symlink() or (destination / '.ca-install.json').is_file():
+                    installed.append(
+                        install(argparse.Namespace(skills_dir=skills, dry_run=False, remove=False))
+                    )
+            result['skills'] = installed
+            doctor = diagnose(argparse.Namespace(**{**vars(args), 'window': None, 'build': False}))
+            result['ok'] = doctor['ok']
+            result['doctor'] = {
+                'ok': doctor['ok'],
+                'failed': [c['name'] for c in doctor['checks'] if not c['passed']],
+            }
+        return result
     state = inspect(root)
     actions = plan(state, reload=not args.no_reload, force=args.force)
     result['plugin'] = {**state, 'actions': actions}

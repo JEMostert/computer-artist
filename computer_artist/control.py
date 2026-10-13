@@ -1,6 +1,5 @@
 """Targeted stop requests for managed programs; never signal recorded process IDs."""
 
-import fcntl
 import json
 import math
 import os
@@ -8,8 +7,10 @@ import stat
 import time
 from pathlib import Path
 
+from . import locking as fcntl
 from .errors import Interrupted
 from .files import atomic_json, key
+from .platform_io import open_no_follow
 from .records import _read
 from .storage import _marker, locked
 
@@ -66,7 +67,7 @@ def request_stop(output_root, identity, *, reason='Stopped by the user'):
             or isinstance(spec.get('module'), str)
         ):
             raise ValueError('This recorded work does not support targeted stopping')
-        fd = os.open(folder / '.active.lock', os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+        fd = open_no_follow(folder / '.active.lock', os.O_RDONLY)
         try:
             if not stat.S_ISREG(os.fstat(fd).st_mode):
                 raise ValueError('Run lease must be a regular file')

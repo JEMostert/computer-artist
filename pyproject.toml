@@ -4,12 +4,12 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "computer-artist"
-version = "0.3.0"
-description = "Independent desktop input, private agent environments and verified CLI programs for KDE Wayland"
+version = "0.4.0"
+description = "Independent KDE Wayland input, explicit Windows host input and verified CLI programs"
 readme = "README.md"
 requires-python = ">=3.12"
 license = "GPL-2.0-or-later"
-dependencies = ["Pillow==12.3.0", "jeepney==0.9.0"]
+dependencies = ["Pillow==12.3.0", "jeepney==0.9.0; sys_platform != 'win32'"]
 
 [project.optional-dependencies]
 dev = ["ruff==0.16.9"]
@@ -22,7 +22,7 @@ packages = ["computer_artist"]
 
 [tool.setuptools.data-files]
 "share/computer-artist/skills/computer-artist" = ["skills/computer-artist/SKILL.md"]
-"share/computer-artist/skills/computer-artist/references" = ["skills/computer-artist/references/programs.md", "skills/computer-artist/references/pointer-techniques.md", "skills/computer-artist/references/operating-tips.md", "skills/computer-artist/references/environments.md"]
+"share/computer-artist/skills/computer-artist/references" = ["skills/computer-artist/references/programs.md", "skills/computer-artist/references/pointer-techniques.md", "skills/computer-artist/references/operating-tips.md", "skills/computer-artist/references/environments.md", "skills/computer-artist/references/windows.md"]
 
 [tool.ruff]
 target-version = "py312"

@@ -1,0 +1,30 @@
+{
+  "date": "2026-10-13",
+  "platform": "Windows 11",
+  "python": "3.14.7",
+  "version": "0.4.0",
+  "monitor": {"model": "Philips 346P1C", "edid_model": "PHL093F", "pixels": [3440, 1440]},
+  "unit_tests": {"passed": 71, "command": "python scripts/test-windows.py"},
+  "live_standard_controls": {
+    "command": "python tests/integration/check_windows.py --monitor PHL093F",
+    "independent_text": true,
+    "independent_push_button": true,
+    "concurrent_separate_text": true,
+    "human_pointer_preserved": true,
+    "human_foreground_preserved": true,
+    "capture": true,
+    "verified_supervised_program": true,
+    "hard_deadline": true,
+    "deadline_evidence_preserved": true
+  },
+  "actual_notepad": {
+    "editor_class": "RichEditD2DPT",
+    "exact_multiline_unicode_write_read": true,
+    "human_pointer_preserved": true,
+    "human_foreground_preserved": true,
+    "window_placement_within_selected_monitor": true,
+    "window_placement_preserved_foreground": true,
+    "exact_utf8_text_export_verified": true
+  },
+  "scope": "These workflows verify standard Win32 controls and this Notepad version; independent browser, Ninja terminal, generic canvas and arbitrary application input remain unverified/unsupported."
+}

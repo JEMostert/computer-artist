@@ -71,8 +71,7 @@ Verify an actual save/export:
 ```python
 before = ctx.snapshot_file(path)
 ctx.press('Ctrl+S')
-ctx.verify_file('saved text', path, kind='text', after=before,
-                expected_text='requested text\n')
+ctx.verify_file('saved text', path, kind='text', after=before, expected_text='requested text\n')
 ```
 
 `verify_file` supports `kind='file'|'text'|'json'|'image'`, `expected_text`,

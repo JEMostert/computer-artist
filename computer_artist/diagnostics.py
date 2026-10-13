@@ -119,6 +119,10 @@ def diagnose(args):
     windows = []
     selected = None
     socket = None
+    if os.name == 'nt' and socket_path(args.socket) == 'win32':
+        from .windows_diagnostics import diagnose_backend
+
+        return diagnose_backend(args, store, checks, warnings, check)
     try:
         socket = socket_path(args.socket)
         with Client(

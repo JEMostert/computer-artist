@@ -59,14 +59,21 @@ class Client:
         self.window_store = Workspace(window_dir)
         self.shared = shared or ExecutionBudget(deadline, action_budget)
         self.expires = self.shared.expires
-        self.socket = socket.socket(socket.AF_UNIX)
-        self.socket.settimeout(max(0.001, min(3, self.expires - time.monotonic())))
-        try:
-            self.socket.connect(str(path))
-        except OSError:
-            self.socket.close()
-            raise
-        self.reader = self.socket.makefile('rb')
+        self.native_backend = None
+        self.socket = self.reader = None
+        if str(path) == 'win32':
+            from .windows import WindowsBackend
+
+            self.native_backend = WindowsBackend(lane)
+        else:
+            self.socket = socket.socket(socket.AF_UNIX)
+            self.socket.settimeout(max(0.001, min(3, self.expires - time.monotonic())))
+            try:
+                self.socket.connect(str(path))
+            except OSError:
+                self.socket.close()
+                raise
+            self.reader = self.socket.makefile('rb')
         self.lock = threading.RLock()
         self.closed = threading.Event()
         self.lease = ''
@@ -89,8 +96,9 @@ class Client:
                         'Connected plugin does not support the host lane; refusing fallback'
                     )
             except BaseException:
-                self.reader.close()
-                self.socket.close()
+                if self.reader:
+                    self.reader.close()
+                    self.socket.close()
                 raise
         self.heartbeat = threading.Thread(target=self._heartbeat, daemon=True)
         self.heartbeat.start()
@@ -105,6 +113,39 @@ class Client:
 
     def _request(self, op, **values):
         with self.lock:
+            if self.native_backend is not None:
+                try:
+                    reply = self.native_backend.request(op, **values)
+                except Exception as error:
+                    self.trace.append(
+                        {
+                            'time': time.monotonic(),
+                            'lane': self.lane,
+                            'operation': op,
+                            'ok': False,
+                            'error': str(error),
+                        }
+                    )
+                    if self.native_backend.reason:
+                        self.failure = ActionError(
+                            op, {'error': self.native_backend.reason, 'detail': str(error)}
+                        )
+                        raise self.failure from error
+                    if isinstance(error, OSError):
+                        self.failure = self.failure or error
+                    raise
+                self.trace.append(
+                    {
+                        'time': time.monotonic(),
+                        'lane': self.lane,
+                        'operation': op,
+                        'ok': reply.get('ok'),
+                        'error': reply.get('error'),
+                    }
+                )
+                if not reply.get('ok'):
+                    raise ActionError(op, reply)
+                return reply
             try:
                 # Cleanup gets a short independent allowance after expiry. All
                 # other exchanges share the execution's remaining wall time.
@@ -193,6 +234,7 @@ class Client:
                 'focus',
                 'clipboard_get',
                 'clipboard_set',
+                'write_text',
             ):
                 values.update(lease=self.lease, generation=self.generation)
             return self._request(op, **values)
@@ -378,6 +420,8 @@ class Client:
         The compositor aborts a revoked connection without a reply, so the
         reason is only available from session status afterwards.
         """
+        if self.native_backend is not None:
+            return self.native_backend.reason
         try:
             with socket.socket(socket.AF_UNIX) as probe:
                 probe.settimeout(0.5)
@@ -453,8 +497,11 @@ class Client:
             # A revoked/dead transport is already reconciled by the compositor.
             pass
         finally:
-            self.reader.close()
-            self.socket.close()
+            if self.native_backend is not None:
+                self.native_backend.close()
+            if self.reader:
+                self.reader.close()
+                self.socket.close()
 
     def __enter__(self):
         return self

@@ -1,5 +1,10 @@
 # Capabilities
 
+This fork also has a native Windows backend. Its supported standard-control
+independent input, host input, monitor restrictions and verified Notepad behavior
+are described in [Windows capabilities and limits](WINDOWS.md). The KWin scope
+and validation below apply to the Linux backend.
+
 The goal is independent agent input in existing applications on the user's actual
 desktop while the human works elsewhere. Private desktops and Xvfb do not fulfill
 that goal. Separate KWin instances are development test harnesses.

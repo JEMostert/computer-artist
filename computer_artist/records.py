@@ -1,13 +1,14 @@
 """Offline execution review. Reading evidence never dispatches desktop input."""
 
-import fcntl
 import json
 import math
 import os
 import stat
 from pathlib import Path
 
+from . import locking as fcntl
 from .files import key
+from .platform_io import open_no_follow
 from .storage import MARKER, _marker, locked
 
 JSON_LIMIT = 8 * 1024 * 1024
@@ -18,7 +19,7 @@ def _read(path, limit, *, tail=False):
     path = Path(path)
     if any(part.is_symlink() for part in (path, *path.parents)):
         raise ValueError('Symlink evidence is refused')
-    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    fd = open_no_follow(path, os.O_RDONLY)
     try:
         info = os.fstat(fd)
         if not stat.S_ISREG(info.st_mode):
@@ -107,7 +108,7 @@ def _lifecycle(folder, issues):
     try:
         _read(folder / MARKER, 16384)
         marker = _marker(folder)
-        fd = os.open(folder / '.active.lock', os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+        fd = open_no_follow(folder / '.active.lock', os.O_RDONLY)
         try:
             if not stat.S_ISREG(os.fstat(fd).st_mode):
                 raise ValueError('Run lease must be a regular file')
