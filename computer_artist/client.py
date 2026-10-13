@@ -420,7 +420,7 @@ class Client:
         The compositor aborts a revoked connection without a reply, so the
         reason is only available from session status afterwards.
         """
-        if self.native_backend is not None:
+        if getattr(self, 'native_backend', None) is not None:
             return self.native_backend.reason
         try:
             with socket.socket(socket.AF_UNIX) as probe:
