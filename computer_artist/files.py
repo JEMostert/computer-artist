@@ -39,14 +39,18 @@ def atomic_text(path, content):
         temp.unlink(missing_ok=True)
 
 
+WINDOWS = os.name == 'nt'
+
+
 def replace(source, destination):
     """os.replace; on Windows retry briefly while a scanner or reader holds the target."""
-    for attempt in range(20 if os.name == 'nt' else 1):
+    attempts = 20 if WINDOWS else 1
+    for attempt in range(attempts):
         try:
             os.replace(source, destination)
             return
         except PermissionError:
-            if attempt == 19 or os.name != 'nt':
+            if attempt == attempts - 1:
                 raise
             time.sleep(0.005 * (attempt + 1))
 

@@ -66,7 +66,7 @@ class GeometryAndKeysTest(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as folder:
             target = Path(folder) / 'windows-input.json'
-            with patch.object(files.os, 'name', 'nt'), patch.object(files.os, 'replace', busy_once):
+            with patch.object(files, 'WINDOWS', True), patch.object(files.os, 'replace', busy_once):
                 files.atomic_json(target, {'keys': []})
             self.assertEqual(json.loads(target.read_text()), {'keys': []})
             self.assertEqual(len(calls), 2)
