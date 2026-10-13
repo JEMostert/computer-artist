@@ -74,6 +74,7 @@ class DockerCommandTest(unittest.TestCase):
         state, runtime = environments.locations('web')
         return environments.container_command('web', definition, 'alpine', state, runtime, engine)
 
+    @unittest.skipIf(os.name == 'nt', 'Linux user mapping')
     def test_rootful_docker_runs_as_the_invoking_user(self):
         engine = Runtime('docker')
         engine._rootless = False

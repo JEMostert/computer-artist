@@ -79,7 +79,7 @@ def parser():
         parents=[shared],
         description='Computer Artist: independent agent input on your desktop',
     )
-    result.add_argument('--version', action='version', version='Computer Artist 0.4.0')
+    result.add_argument('--version', action='version', version='Computer Artist 0.5.0')
     # Shared options are declared before child parsers copy them.
     shared.add_argument('--window-dir', help='Window layouts and fragments root')
     shared.add_argument('--output-dir', help='Run output root')
@@ -270,7 +270,9 @@ def parser():
             )
             command.add_argument('--axis', choices=('vertical', 'horizontal'), default='vertical')
     a11y = commands.add_parser(
-        'a11y', parents=[shared], help="Read a window's accessibility tree (read-only AT-SPI)"
+        'a11y',
+        parents=[shared],
+        help="Read a window's accessibility tree (AT-SPI on Linux, UI Automation on Windows)",
     )
     a11y.add_argument('--window', help='Window ID or saved name')
     a11y.add_argument('--role', help='Exact role name, e.g. "push button"')
@@ -506,9 +508,20 @@ def main(argv=None):
             return 0 if reply['ok'] else 1
         if args.command == 'a11y' and (args.status or args.enable or not args.window):
             if os.name == 'nt':
-                raise ValueError(
-                    'AT-SPI accessibility is Linux-only; Windows UI Automation is not implemented'
-                )
+                if args.enable or not args.status:
+                    raise ValueError(
+                        'Windows UI Automation needs no enabling; use ca a11y --window APP'
+                    )
+                from .windows_uia import Automation, Unavailable
+
+                try:
+                    Automation()
+                    reply = {'ok': True, 'backend': 'ui_automation', 'reachable': True}
+                except Unavailable as error:
+                    reply = {'ok': True, 'backend': 'ui_automation', 'reachable': False,
+                             'error': str(error)}  # fmt: skip
+                print(json.dumps(reply, indent=2))
+                return 0
             from . import accessibility
 
             if not (args.status or args.enable):

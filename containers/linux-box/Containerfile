@@ -8,7 +8,7 @@ RUN pacman -Syu --noconfirm --needed \
         wayland wayland-protocols plasma-wayland-protocols vulkan-headers ripgrep \
         python python-pillow python-jeepney dbus at-spi2-core \
         xdg-desktop-portal xdg-desktop-portal-kde mesa noto-fonts \
-        kwrite konsole \
+        kwrite konsole firefox \
     && pacman -Scc --noconfirm \
     # Unprivileged containers cannot execute binaries with file capabilities.
     && setcap -r /usr/bin/kwin_wayland

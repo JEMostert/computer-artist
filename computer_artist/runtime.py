@@ -247,10 +247,13 @@ class Context:
         The tree is the application's own claim; pointer input at an element's
         center still goes through the usual guards. Verify outcomes as usual.
         """
-        if self.capabilities.get('backend') == 'win32':
-            raise ValueError(
-                'Windows UI Automation is not implemented; use a fresh window observation'
-            )
+        if 'accessible' in self.capabilities.get('operations', []):
+            # Windows: UI Automation through the backend, same element shape as AT-SPI.
+            self.refresh()
+            self.check_budget()
+            return self.client.request(
+                'accessible', window=self.window_id, role=role, name=name, max_nodes=max_nodes
+            )['elements']
         from .accessibility import elements
 
         window = self.refresh()

@@ -15,6 +15,8 @@ for filename in (
     'test_journal.py',
     'test_gestures.py',
     'test_agent_keyboard.py',
+    'test_box.py',
+    'test_containers.py',
 ):
     suite.addTests(unittest.defaultTestLoader.discover(str(root / 'tests'), pattern=filename))
 raise SystemExit(not unittest.TextTestRunner(verbosity=2).run(suite).wasSuccessful())

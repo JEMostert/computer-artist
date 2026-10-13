@@ -19,9 +19,10 @@ from computer_artist.config import socket_path
 from computer_artist.platform_io import open_no_follow
 from computer_artist.setup import install
 from computer_artist.storage import cleanup, inspect, managed_run
-from computer_artist.windows import Input, WindowsBackend, key_input
+from computer_artist.windows import Input, WindowsBackend, key_input, wheel_data
 from computer_artist.windows_agent import MessageLane
 from computer_artist.windows_monitors import contains
+from computer_artist.windows_uia import Unavailable
 
 
 class GeometryAndKeysTest(unittest.TestCase):
@@ -46,12 +47,66 @@ class GeometryAndKeysTest(unittest.TestCase):
         )
         lane = MessageLane.__new__(MessageLane)
         lane.api, lane.position, sent = api, (10, 10), []
+        lane.element = lane.automation = None
         lane.class_name = lambda hwnd: 'button' if hwnd < 7 else 'richeditd2dpt'
         lane.message = lambda *values: sent.append(values) or 0
         self.assertEqual([hwnd for hwnd in range(1, 8) if lane.supported(hwnd)], [1, 2, 7])
         lane.control = 7
-        lane.button(272, True)  # Selection only: keeps the lease, moves no caret.
+        # Without UI Automation the click selects the control and reports the unmoved caret.
+        lane.uia = lambda: (_ for _ in ()).throw(Unavailable('no comtypes'))
+        self.assertEqual(lane.button(272, True), 'selected_caret_unchanged')
         self.assertEqual(sent, [])
+        # With it, the text pattern places the caret at the pointer.
+        automation = SimpleNamespace(
+            from_handle=lambda hwnd: ('element', hwnd),
+            select_text_at=lambda element, x, y: element == ('element', 7) and (x, y) == (10, 10),
+        )
+        lane.uia = lambda: automation
+        self.assertEqual(lane.button(272, True), 'caret_placed')
+        self.assertEqual(sent, [])
+
+    def test_other_elements_use_ui_automation_patterns_without_host_input(self):
+        calls = []
+        element = SimpleNamespace(CurrentProcessId=42)
+        automation = SimpleNamespace(
+            from_point=lambda x, y: element,
+            activate=lambda e: calls.append(('activate', e)) or 'invoke',
+            append=lambda e, text: calls.append(('append', text)),
+            backspace=lambda e: calls.append(('backspace',)),
+            scroll=lambda e, delta, axis: calls.append(('scroll', delta, axis)) or 2,
+        )
+        lane = MessageLane.__new__(MessageLane)
+        lane.api = SimpleNamespace(identity=lambda hwnd: ('win-1-42', 42))
+        lane.hwnd, lane.modifiers, lane.pointer = 1, set(), SimpleNamespace(move=lambda x, y: None)
+        lane.automation = automation
+        lane.child_at = lambda x, y: 99
+        lane.supported = lambda hwnd: False
+        self.assertEqual(lane.pick(5, 6), 'ui_automation')
+        self.assertIs(lane.element, element)
+        self.assertEqual(lane.button(272, True), 'invoke')
+        self.assertEqual(lane.write('héllo'), 'ui_automation_value_append')
+        keymap = {'characters': {'a': [30], 'A': [42, 30]}}
+        lane.key(14, True, keymap)
+        lane.key(42, True, keymap)
+        lane.key(30, True, keymap)
+        self.assertEqual(lane.scroll(30, 'vertical'), 2)
+        self.assertEqual(
+            calls,
+            [('activate', element), ('append', 'héllo'), ('backspace',), ('append', 'A'),
+             ('scroll', 30, 'vertical')],
+        )  # fmt: skip
+        lane.modifiers = {29}
+        with self.assertRaisesRegex(ValueError, 'shortcuts on UI Automation elements'):
+            lane.key(30, True, keymap)
+        element.CurrentProcessId = 7
+        with self.assertRaisesRegex(ValueError, 'not over the target application'):
+            lane.pick(5, 6)
+
+    def test_scroll_deltas_match_linux_direction_and_scale(self):
+        self.assertEqual(wheel_data(15, 'vertical'), -120)  # One notch down.
+        self.assertEqual(wheel_data(-15, 'vertical'), 120)
+        self.assertEqual(wheel_data(15, 'horizontal'), 120)  # One notch right.
+        self.assertEqual(wheel_data(15, 'vertical', v120=240), -240)
 
     def test_windows_replace_retries_a_briefly_held_target(self):
         from computer_artist import files

@@ -286,9 +286,12 @@ def update(args):
                 if vars(args)[flag[2:].replace('-', '_')]
             ]
             os.environ['CA_UPDATE_PULLED'] = json.dumps(pulled)
-            os.execv(
-                sys.executable, [sys.executable, str(root / 'ca'), 'update', '--no-pull', *flags]
-            )
+            command = [sys.executable, str(root / 'ca'), 'update', '--no-pull', *flags]
+            if os.name == 'nt':
+                # Windows execv starts a detached process and returns to the shell at once,
+                # losing the exit status and interleaving output; wait for it instead.
+                raise SystemExit(subprocess.run(command).returncode)
+            os.execv(sys.executable, command)
     if os.name == 'nt':
         result['backend'] = 'win32'
         result['plugin_actions'] = []

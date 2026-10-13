@@ -70,6 +70,10 @@ class BoxDefinitionTest(unittest.TestCase):
         self.assertIn(f'type=bind,source={self.root / "project"},target=/project', mounts)
         self.assertEqual(command[command.index('img') :], ['img', 'web', '--width', '1280',
                                                             '--height', '1000'])  # fmt: skip
+        if os.name == 'nt':
+            # Docker Desktop shares Windows folders with the image's own user.
+            self.assertNotIn('--user', command)
+            return
         self.assertEqual(command[command.index('--user') + 1], '0:0')
         engine._rootless = False
         command = box.run_command('web', definition, 'img', engine)

@@ -416,8 +416,16 @@ class Client:
         if not self.request('ping').get('keyboard_ready'):
             raise ValueError('Paste requires keyboard focus on the host target')
         saved = self._save_clipboard() if restore else None
-        self.clipboard_set(text)
-        self.chord(*shortcut)
+        try:
+            self.clipboard_set(text)
+            self.chord(*shortcut)
+        except BaseException:
+            if saved is not None:
+                try:
+                    self._restore_clipboard(saved, text)
+                except Exception:
+                    pass  # Keep the original failure visible.
+            raise
         result = {'delivery': 'clipboard_paste', 'characters': len(text)}
         if not restore:
             return {**result, 'clipboard_restored': False, 'reason': 'Not requested'}

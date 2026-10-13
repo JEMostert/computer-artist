@@ -92,6 +92,20 @@ def key_input(code, pressed):
     return Input(type=1, ki=KeyboardInput(wScan=scan, dwFlags=flags | 8))
 
 
+def wheel_data(delta, axis, v120=None):
+    """Windows wheel data for a ca scroll delta.
+
+    ca deltas use Wayland axis units on every backend: 15 per wheel notch, positive is
+    down or right. Windows uses 120 per notch and positive is up on the vertical axis.
+    """
+    amount = v120 or round(delta * 8)
+    if axis == 'vertical':
+        amount = -amount
+    if not -2147483648 <= amount <= 2147483647:
+        raise ValueError('Scroll exceeds native input range')
+    return amount
+
+
 class Win32:
     """Declare every pointer-sized ABI explicitly (64-bit HWNDs must not truncate)."""
 
@@ -224,6 +238,7 @@ class WindowsBackend:
 
     def capabilities(self):
         operations = ['windows', 'capture', 'capabilities', 'ping', 'session_status', 'read_text']
+        operations.append('accessible')
         operations += [
             'acquire',
             'release',
@@ -252,7 +267,6 @@ class WindowsBackend:
                     'clipboard_set',
                     'clipboard_save',
                     'clipboard_restore',
-                    'scroll',
                 )
             ]
             operations += ['write_text']
@@ -270,17 +284,22 @@ class WindowsBackend:
                 'agent': {
                     'pointer': True,
                     'keyboard': True,
-                    'delivery': 'standard_control_messages',
+                    'delivery': ['standard_control_messages', 'ui_automation'],
                     'physical_keyboard': False,
+                    'drawn_pointer': True,
                 },
                 'host': {'pointer': True, 'keyboard': True},
             },
             'limitations': [
-                'Independent input is limited to standard Edit/Button controls; arbitrary app compatibility is unverified.',
+                'Independent input uses control messages for standard Edit/Button controls and '
+                'UI Automation patterns elsewhere; it is not a physical keyboard or second '
+                'pointer, and canvases, raw-input apps and drag gestures are unsupported.',
+                'Independent text into UI Automation elements appends to their value.',
                 'Host input requires explicit --host and uses the real desktop pointer and keyboard.',
-                'Capture shows the visible client region, including any overlapping windows.',
+                'Capture renders the client area with PrintWindow; some GPU-rendered apps fall '
+                'back to the visible screen region, which can include overlapping windows.',
                 'Secure desktops and higher-integrity targets cannot be controlled.',
-                'Private KDE environments and AT-SPI accessibility are Linux-only; Windows UI Automation is not implemented.',
+                'Private environments run in a Linux box (Docker or Podman); they test Linux apps.',
             ],
         }
 
@@ -339,8 +358,6 @@ class WindowsBackend:
             hwnd = int(window['id'].split('-')[1], 16)
             supported = bool(MessageLane(self.api, hwnd).controls())
             reasons = []
-            if not supported:
-                reasons.append('standard_controls_unavailable')
             if human_pid == window['pid']:
                 reasons.append('human_focus_in_application')
             try:
@@ -353,6 +370,9 @@ class WindowsBackend:
                 not reasons if self.lane == 'agent' else 'outside_selected_monitor' not in reasons
             )
             window['independent_controls'] = supported
+            window['agent_delivery'] = (
+                ['standard_control_messages', 'ui_automation'] if supported else ['ui_automation']
+            )
         generation = hashlib.sha256(
             json.dumps(
                 [(w['id'], w['x'], w['y'], w['width'], w['height']) for w in entries]
@@ -399,7 +419,8 @@ class WindowsBackend:
             if foreground and self.api.identity(foreground)[1] == self.api.identity(self.target)[1]:
                 self.revoke('human_focus_in_application')
                 raise PermissionError(
-                    'Human focus returned to the agent application; input stopped'
+                    'Focus moved into the agent application (the human or an app activation); '
+                    'input stopped'
                 )
             return
         if self.api.user.GetForegroundWindow() != self.target:
@@ -474,17 +495,15 @@ class WindowsBackend:
                 f'({len(held) - buttons} keys, {buttons} mouse buttons held)'
             )
         self.control_root.mkdir(parents=True, exist_ok=True)
-        mutex = open_no_follow(
-            self.control_root
-            / ('host-input.lock' if self.lane == 'host' else f'agent-{window["pid"]}.lock'),
-            os.O_CREAT | os.O_RDWR,
-        )
-        try:
-            locking.flock(mutex, locking.LOCK_EX | locking.LOCK_NB)
-        except BlockingIOError:
-            os.close(mutex)
-            raise PermissionError('The Windows host input lane is already busy') from None
-        self.mutex = mutex
+        if self.lane == 'host':
+            # One real pointer and keyboard: one host lane at a time.
+            mutex = open_no_follow(self.control_root / 'host-input.lock', os.O_CREAT | os.O_RDWR)
+            try:
+                locking.flock(mutex, locking.LOCK_EX | locking.LOCK_NB)
+            except BlockingIOError:
+                os.close(mutex)
+                raise PermissionError('The Windows host input lane is already busy') from None
+            self.mutex = mutex
         try:
             self.app_lease = open_no_follow(
                 self.control_root / f'app-{window["pid"]}.lock', os.O_CREAT | os.O_RDWR
@@ -500,10 +519,6 @@ class WindowsBackend:
                 if foreground and self.api.identity(foreground)[1] == window['pid']:
                     raise PermissionError('Keep human focus outside the agent application')
                 self.message_lane = MessageLane(self.api, hwnd)
-                if not self.message_lane.controls():
-                    raise ValueError(
-                        'This application has no supported standard Edit/Button controls; no host fallback'
-                    )
             elif self.api.user.GetForegroundWindow() != hwnd:
                 self.api.focus_host(hwnd)
             if self.lane == 'host' and self.api.user.GetForegroundWindow() != hwnd:
@@ -644,10 +659,12 @@ class WindowsBackend:
         if op == 'windows':
             return self.windows()
         if op == 'read_text':
-            from .windows_agent import MessageLane
+            from .windows_agent import EDIT_CLASSES, MessageLane
 
-            hwnd, _window = self.resolve(values['window'])
+            hwnd, window = self.resolve(values['window'])
             lane = MessageLane(self.api, hwnd)
+            if not any(lane.class_name(h) in EDIT_CLASSES for h in lane.controls()):
+                return self.read_element_text(hwnd, window)
             control = lane.edit()
             size = lane.message(control, 0x000E)
             if size > 65535:
@@ -660,18 +677,25 @@ class WindowsBackend:
                 'text': buffer.value,
                 'source': 'win32_standard_edit_control',
             }
+        if op == 'accessible':
+            return self.accessible(values)
         if op == 'capture':
             from PIL import ImageGrab
+
+            from .windows_capture import print_window
 
             self.secure_desktop()
             hwnd, window = self.resolve(values['window'])
             x, y, width, height = self.api.geometry(hwnd)
             destination = Path(values['path'])
+            # The window's own rendering: no overlapping windows and no agent pointer.
+            image, source = print_window(hwnd, width, height), 'win32_print_window'
+            if image is None:
+                image = ImageGrab.grab(bbox=(x, y, x + width, y + height), all_screens=True)
+                source = 'win32_visible_client_region'
             with destination.open('xb') as stream:
                 try:
-                    ImageGrab.grab(bbox=(x, y, x + width, y + height), all_screens=True).save(
-                        stream, 'PNG'
-                    )
+                    image.save(stream, 'PNG')
                 except BaseException:
                     stream.close()
                     destination.unlink(missing_ok=True)
@@ -679,9 +703,9 @@ class WindowsBackend:
             return {
                 'ok': True,
                 'path': str(destination),
-                'source': 'win32_visible_client_region',
+                'source': source,
                 'window': window,
-                'may_include_overlapping_windows': True,
+                'may_include_overlapping_windows': source == 'win32_visible_client_region',
             }
         if op == 'ping':
             if self.lease:
@@ -723,28 +747,15 @@ class WindowsBackend:
             return self.clipboard_restore()
         self.guard(values)
         if self.lane == 'agent':
-            if op == 'move':
-                x, y = values['x'], values['y']
-                left, top, width, height = self.baseline
-                if any(isinstance(v, bool) or not math.isfinite(v) for v in (x, y)) or not (
-                    left <= x < left + width and top <= y < top + height
-                ):
-                    raise ValueError('Point is outside the acquired client region')
-                self.message_lane.pick(x, y)
-            elif op == 'button':
-                self.message_lane.button(values['code'], values['pressed'])
-            elif op == 'key':
-                self.message_lane.key(values['code'], values['pressed'], self.keymap())
-            elif op == 'write_text':
-                self.message_lane.write(values['text'])
-            elif op == 'scroll':
-                raise ValueError(
-                    'Independent scrolling is not implemented for these Windows controls'
-                )
-            else:
-                raise ValueError(f'Independent operation {op!r} is unsupported; no host fallback')
+            try:
+                reply = self.agent_operation(op, values)
+            except Exception as error:
+                if type(error).__name__ != 'COMError':
+                    raise
+                # A UI Automation element vanished or refused; report it like any refusal.
+                raise ValueError(f'UI Automation call failed: {error}; no host fallback') from None
             self.guard(values)
-            return {'ok': True}
+            return {'ok': True, **reply}
         if op == 'focus':
             if values['window'] != self.identity:
                 raise PermissionError('Focus requires the acquired target')
@@ -803,9 +814,7 @@ class WindowsBackend:
                 or not math.isfinite(delta)
             ):
                 raise ValueError('Invalid scroll')
-            amount = values.get('v120') or round(delta * 120)
-            if not -2147483648 <= amount <= 2147483647:
-                raise ValueError('Scroll exceeds native input range')
+            amount = wheel_data(delta, axis, values.get('v120'))
             self.api.send(
                 Input(
                     type=0,
@@ -820,6 +829,66 @@ class WindowsBackend:
         else:
             raise ValueError(f'Operation {op!r} is unsupported by the Windows backend')
         return {'ok': True}
+
+    def agent_operation(self, op, values):
+        lane = self.message_lane
+        if op == 'move':
+            x, y = values['x'], values['y']
+            left, top, width, height = self.baseline
+            if any(isinstance(v, bool) or not math.isfinite(v) for v in (x, y)) or not (
+                left <= x < left + width and top <= y < top + height
+            ):
+                raise ValueError('Point is outside the acquired client region')
+            return {'delivery': lane.pick(x, y)}
+        if op == 'button':
+            return {'action': lane.button(values['code'], values['pressed'])}
+        if op == 'key':
+            return {'action': lane.key(values['code'], values['pressed'], self.keymap())}
+        if op == 'write_text':
+            return {'delivery': lane.write(values['text'])}
+        if op == 'scroll':
+            axis = values.get('axis', 'vertical')
+            delta = values['delta']
+            if (
+                axis not in ('vertical', 'horizontal')
+                or isinstance(delta, bool)
+                or not (math.isfinite(delta) and delta)
+            ):
+                raise ValueError('Invalid scroll')
+            return {'notches': lane.scroll(delta, axis), 'delivery': 'ui_automation'}
+        raise ValueError(f'Independent operation {op!r} is unsupported; no host fallback')
+
+    def accessible(self, values):
+        """Read-only UI Automation elements of a window, in window-content coordinates."""
+        from .windows_uia import Automation
+
+        hwnd, _window = self.resolve(values['window'])
+        x, y, _width, _height = self.api.geometry(hwnd)
+        role, name = values.get('role'), values.get('name')
+        max_nodes = values.get('max_nodes', 2000)
+        if type(max_nodes) is not int or not 1 <= max_nodes <= 20000:
+            raise ValueError('max_nodes must be 1–20000')
+        automation = self.message_lane.uia() if self.message_lane else Automation()
+        result = automation.elements(hwnd, (x, y), role=role, name=name, max_nodes=max_nodes)
+        return {'ok': True, 'source': 'ui_automation', **result}
+
+    def read_element_text(self, hwnd, window):
+        """The value of the window's single editable UI Automation element."""
+        from .windows_uia import Automation
+
+        x, y, _w, _h = self.api.geometry(hwnd)
+        found = Automation().elements(hwnd, (x, y), max_nodes=4000)['elements']
+        editable = [e for e in found if 'editable' in e['states'] and 'showing' in e['states']]
+        if len(editable) != 1:
+            raise ValueError(
+                f'Found {len(editable)} editable elements; read a specific one with ca a11y'
+            )
+        return {
+            'ok': True,
+            'window': window['id'],
+            'text': editable[0]['text'] or '',
+            'source': 'ui_automation_value',
+        }
 
     def close(self):
         self.drop_saved_clipboard()
