@@ -2,6 +2,7 @@
 
 import argparse
 import ctypes
+import json
 import os
 import subprocess
 import sys
@@ -51,6 +52,24 @@ class GeometryAndKeysTest(unittest.TestCase):
         lane.control = 7
         lane.button(272, True)  # Selection only: keeps the lease, moves no caret.
         self.assertEqual(sent, [])
+
+    def test_windows_replace_retries_a_briefly_held_target(self):
+        from computer_artist import files
+
+        real, calls = files.os.replace, []
+
+        def busy_once(source, destination):
+            calls.append(source)
+            if len(calls) == 1:
+                raise PermissionError(5, 'Access is denied')
+            real(source, destination)
+
+        with tempfile.TemporaryDirectory() as folder:
+            target = Path(folder) / 'windows-input.json'
+            with patch.object(files.os, 'name', 'nt'), patch.object(files.os, 'replace', busy_once):
+                files.atomic_json(target, {'keys': []})
+            self.assertEqual(json.loads(target.read_text()), {'keys': []})
+            self.assertEqual(len(calls), 2)
 
     def test_monitor_bounds_include_negative_origins_and_reject_spanning(self):
         display = {'bounds': [-1920, -200, 0, 880]}

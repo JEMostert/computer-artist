@@ -3,6 +3,7 @@
 import json
 import os
 import re
+import time
 import uuid
 from contextlib import contextmanager
 from pathlib import Path
@@ -32,10 +33,22 @@ def atomic_text(path, content):
             stream.write(content)
             stream.flush()
             os.fsync(stream.fileno())
-        os.replace(temp, path)
+        replace(temp, path)
         sync_directory(path.parent)
     finally:
         temp.unlink(missing_ok=True)
+
+
+def replace(source, destination):
+    """os.replace; on Windows retry briefly while a scanner or reader holds the target."""
+    for attempt in range(20 if os.name == 'nt' else 1):
+        try:
+            os.replace(source, destination)
+            return
+        except PermissionError:
+            if attempt == 19 or os.name != 'nt':
+                raise
+            time.sleep(0.005 * (attempt + 1))
 
 
 def sync_directory(path):
