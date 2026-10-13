@@ -11,8 +11,9 @@ from contextlib import redirect_stdout
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-from computer_artist import environments
+from computer_artist import containers, environments
 from computer_artist.cli import main, parser
+from computer_artist.containers import Runtime
 
 
 def flags(**values):
@@ -123,7 +124,10 @@ class EnvironmentDefinitionTest(unittest.TestCase):
             {'image': 'alpine', 'project': str(project), 'cpus': 2, 'network': 'host'}, self.root
         )
         state, runtime = environments.locations('web')
-        command = environments.container_command('web', definition, 'alpine', state, runtime)
+        engine = Runtime('podman')
+        command = environments.container_command(
+            'web', definition, 'alpine', state, runtime, engine
+        )
         volumes = [command[i + 1] for i, arg in enumerate(command) if arg == '--volume']
         self.assertIn(f'{runtime / "shared"}:{runtime / "shared"}', volumes)
         self.assertIn(f'{project}:{project}:rw', volumes)
@@ -233,13 +237,13 @@ class EnvironmentDefinitionTest(unittest.TestCase):
             environments.exchange(self.root, request)
         opened.assert_not_called()
 
-    def test_stop_post_quotes_every_word_and_needs_podman(self):
+    def test_stop_post_quotes_every_word_and_needs_the_runtime(self):
         runtime = self.root / 'my "run" time'
         with (
             patch.dict(os.environ, XDG_RUNTIME_DIR=str(runtime)),
             patch.object(environments.shutil, 'which', return_value='/opt/my tools/podman'),
         ):
-            line = environments.exec_stop_post('web')
+            line = environments.exec_stop_post('web', Runtime('podman'))
         self.assertTrue(line.startswith('--property=ExecStopPost=-"/usr/bin/env" '))
         self.assertIn('"/opt/my tools/podman" "rm" "--force"', line)
         self.assertIn(f'"XDG_RUNTIME_DIR={self.root}/my \\"run\\" time"', line)
@@ -247,30 +251,31 @@ class EnvironmentDefinitionTest(unittest.TestCase):
         self.assertEqual(environments.systemd_quote('a\\b%c$d'), '"a\\\\b%%c$$d"')
         with (
             patch.object(environments.shutil, 'which', return_value=None),
-            self.assertRaisesRegex(RuntimeError, 'podman not found'),
+            self.assertRaisesRegex(RuntimeError, 'Docker or Podman'),
         ):
-            environments.exec_stop_post('web')
+            environments.exec_stop_post('web', Runtime('podman'))
 
     def test_image_preparation_errors_are_actionable(self):
         definition = {'image': 'alpine', 'containerfile': None}
         log = self.root / 'build.log'
+        engine = Runtime('podman')
         with (
-            patch.object(environments, 'run', side_effect=FileNotFoundError('podman')),
-            self.assertRaisesRegex(RuntimeError, 'podman not found'),
+            patch.object(containers.subprocess, 'run', side_effect=FileNotFoundError('podman')),
+            self.assertRaisesRegex(RuntimeError, 'Docker or Podman'),
         ):
-            environments.ensure_image('web', definition, log)
+            environments.ensure_image('web', definition, log, engine)
         cases = [
-            (FileNotFoundError('podman'), 'podman not found'),
+            (FileNotFoundError('podman'), 'Docker or Podman'),
             (subprocess.TimeoutExpired('podman', 1800), 'timed out'),
         ]
         for failure, message in cases:
             with (
                 self.subTest(failure=failure),
-                patch.object(environments, 'run', return_value=MagicMock(returncode=1)),
+                patch.object(engine, 'image_exists', return_value=False),
                 patch.object(environments.subprocess, 'run', side_effect=failure),
                 self.assertRaisesRegex(RuntimeError, message),
             ):
-                environments.ensure_image('web', definition, log)
+                environments.ensure_image('web', definition, log, engine)
 
 
 class EnvironmentCommandTest(unittest.TestCase):

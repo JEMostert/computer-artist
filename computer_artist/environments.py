@@ -2,9 +2,10 @@
 
 An environment is a stored definition plus, while running, one systemd user
 service owning a private KWin, a private D-Bus session bus and a manager socket.
-Container applications share one rootless Podman container per environment. It
+Container applications share one container per environment. It
 sees the private desktop's display and bus sockets plus the folders the definition
-mounts at their host paths. Nothing here falls back to the user's own desktop.
+mounts at their host paths. Podman and Docker are both supported (containers.py).
+Nothing here falls back to the user's own desktop.
 """
 
 import hashlib
@@ -38,10 +39,11 @@ DEFAULTS = {
     'memory': None,
     'gpu': False,
     'network': 'private',
+    'runtime': None,
     'apps': [],
 }
 MAX_REQUEST = 65536
-CONTAINER_KEYS = ('mounts', 'workdir', 'cpus', 'memory', 'gpu')
+CONTAINER_KEYS = ('mounts', 'workdir', 'cpus', 'memory', 'gpu', 'runtime')
 # Toolkits otherwise pick X11 or a missing portal; keep apps on the private display.
 APP_ENV = {
     'XDG_SESSION_TYPE': 'wayland',
@@ -104,9 +106,17 @@ def image_tag(name):
     return 'localhost/computer-artist-env-' + check_name(name).lower() + ':latest'
 
 
+RUNTIME_VARIABLES = ('DOCKER_HOST', 'DOCKER_CONTEXT', 'DOCKER_CONFIG', 'CONTAINER_HOST')
+
+
+def runtime_variables():
+    return {k: os.environ[k] for k in RUNTIME_VARIABLES if os.environ.get(k)}
+
+
 def host_environment():
-    """Environment for podman/systemctl: always the user's real session, never a private one."""
+    """Environment for containers/systemctl: always the user's real session, never a private one."""
     keep = ('HOME', 'USER', 'LOGNAME', 'PATH', 'LANG', 'LC_ALL', 'SHELL')
+    keep += RUNTIME_VARIABLES
     env = {k: v for k, v in os.environ.items() if k in keep or k.startswith('LC_')}
     runtime = host_runtime()
     env['XDG_RUNTIME_DIR'] = str(runtime)
@@ -266,6 +276,12 @@ def normalize(data, base, current=None):
         if data['network'] not in ('private', 'host', 'none'):
             raise ValueError('network must be private, host or none')
         result['network'] = data['network']
+    if data.get('runtime') is not None:
+        from .containers import RUNTIMES
+
+        if data['runtime'] not in RUNTIMES:
+            raise ValueError(f'runtime must be one of {RUNTIMES}')
+        result['runtime'] = data['runtime']
     if 'apps' in data:
         if not isinstance(data['apps'], list):
             raise ValueError('apps must be a list')
@@ -276,7 +292,8 @@ def normalize(data, base, current=None):
             or result['network'] != 'private'
         ):
             raise ValueError(
-                'mounts, workdir, cpus, memory, gpu and network require image or containerfile; '
+                'mounts, workdir, cpus, memory, gpu, network and runtime require image or '
+                'containerfile; '
                 'host applications already see your files'
             )
     return result
@@ -303,7 +320,7 @@ def flag_values(args):
                 if k in ('containerfile', 'context', 'project')
                 else getattr(args, k)
             )
-    for k in ('width', 'height', 'network'):
+    for k in ('width', 'height', 'network', 'runtime'):
         if getattr(args, k, None) is not None:
             values[k] = getattr(args, k)
     for k in ('xwayland', 'gpu'):
@@ -355,6 +372,22 @@ def define(name, args, *, replace=False):
 
 def kind(definition):
     return 'container' if definition.get('image') or definition.get('containerfile') else 'host'
+
+
+def engine_for(name, definition=None):
+    """The container runtime a started environment used, else the one it would use now."""
+    from .containers import Runtime, choose
+
+    state, _ = locations(name)
+    try:
+        recorded = json.loads((state / 'environment.json').read_text()).get('container_runtime')
+    except (OSError, ValueError):
+        recorded = None
+    if recorded:
+        return Runtime(recorded, env=host_environment())
+    engine = choose((definition or stored(name) or {}).get('runtime'))
+    engine.env = host_environment()
+    return engine
 
 
 # Running environments
@@ -431,23 +464,25 @@ def plugin_source(explicit):
     return path
 
 
-def ensure_image(name, definition, log, pull=False):
+def ensure_image(name, definition, log, engine, pull=False):
     """Build or pull the image, returning its reference; build layers are cached."""
+    from .containers import MISSING
+
     if definition.get('containerfile'):
         tag = image_tag(name)
-        command = ['podman', 'build', '--tag', tag, '--file', definition['containerfile']]
-        command += ['--pull=always'] if pull else []
-        command.append(definition['context'])
+        command = engine.build_command(
+            tag, definition['containerfile'], definition['context'], pull=pull
+        )
     else:
         tag = definition['image']
         try:
-            if not pull and run(['podman', 'image', 'exists', tag], timeout=60).returncode == 0:
+            if not pull and engine.image_exists(tag):
                 return tag
         except FileNotFoundError:
-            raise RuntimeError('podman not found; install Podman for container environments')
+            raise RuntimeError(MISSING) from None
         except subprocess.TimeoutExpired:
-            raise RuntimeError(f'podman did not answer while checking image {tag}') from None
-        command = ['podman', 'pull', tag]
+            raise RuntimeError(f'{engine.name} did not answer while checking image {tag}') from None
+        command = engine.pull_command(tag)
     with log.open('ab') as stream:
         stream.write(f'\n$ {shlex.join(command)}\n'.encode())
         stream.flush()
@@ -457,7 +492,7 @@ def ensure_image(name, definition, log, pull=False):
                 timeout=1800,
             )  # fmt: skip
         except FileNotFoundError:
-            raise RuntimeError('podman not found; install Podman for container environments')
+            raise RuntimeError(MISSING) from None
         except subprocess.TimeoutExpired:
             raise RuntimeError(f'Image preparation timed out after 1800 s; see {log}') from None
     if result.returncode:
@@ -476,8 +511,8 @@ def gpu_devices():
     return devices
 
 
-def container_command(name, definition, image, state, runtime, display=None):
-    """Return the podman run argument list for an environment's application container."""
+def container_command(name, definition, image, state, runtime, engine, display=None):
+    """Return the run argument list for an environment's application container."""
     shared = runtime / 'shared'
     home = state / 'home'
     env = {
@@ -488,12 +523,11 @@ def container_command(name, definition, image, state, runtime, display=None):
         'HOME': str(home),
         'CA_ENVIRONMENT': name,
     }
-    command = [
-        'podman', 'run', '--detach', '--rm', '--replace', '--init',
-        '--name', container_name(name),
+    devices = gpu_devices() if definition['gpu'] else []
+    command = engine.run_prefix(container_name(name)) + [
         '--label', f'computer-artist.environment={name}',
         '--hostname', 'ca-' + name.lower().replace('_', '-'),
-        '--userns=keep-id',
+        *engine.user_args(devices),
         '--security-opt', 'label=disable',
         '--stop-timeout', '3',
     ]  # fmt: skip
@@ -511,9 +545,7 @@ def container_command(name, definition, image, state, runtime, display=None):
         command += ['--cpus', str(definition['cpus'])]
     if definition['memory']:
         command += ['--memory', definition['memory']]
-    if definition['gpu']:
-        for device in gpu_devices():
-            command += ['--device', device]
+    command += engine.device_args(devices)
     command += ['--workdir', definition['workdir'] or str(home)]
     for k, v in {**env, **definition['env']}.items():
         command += ['--env', f'{k}={v}']
@@ -547,16 +579,21 @@ def systemd_quote(argument):
     return '"' + escaped.replace('%', '%%').replace('$', '$$') + '"'
 
 
-def exec_stop_post(name):
-    podman = shutil.which('podman')
-    if not podman:
-        raise RuntimeError('podman not found')
+def exec_stop_post(name, engine):
+    binary = shutil.which(engine.name)
+    if not binary:
+        from .containers import MISSING
+
+        raise RuntimeError(MISSING)
+    passed = {
+        k: v for k, v in host_environment().items() if k.startswith(('DOCKER_', 'CONTAINER_'))
+    }
     words = [
         '/usr/bin/env',
         f'XDG_RUNTIME_DIR={host_runtime()}',
-        podman,
-        *('rm --force --ignore --time 3'.split()),
-        container_name(name),
+        *[f'{k}={v}' for k, v in passed.items()],
+        binary,
+        *engine.remove_words(container_name(name)),
     ]
     return '--property=ExecStopPost=-' + ' '.join(systemd_quote(w) for w in words)
 
@@ -567,6 +604,98 @@ def stop_after_failure(name, error):
         stop(name)
     except Exception as cleanup:
         error.add_note(f'Cleanup stop of environment {name!r} also failed: {cleanup}')
+
+
+def make_folders(state):
+    for folder in (
+        'config',
+        'cache',
+        'data',
+        'state',
+        'window',
+        'output',
+        'logs/apps',
+        'browsers',
+        'home',
+    ):
+        (state / folder).mkdir(parents=True, exist_ok=True, mode=0o700)
+
+
+def prepare_service(name, definition, plugin, engine=None, image=None):
+    """Write the runtime files and return (environment, command) for the desktop service.
+
+    Both the systemd user service and a Windows-hosted Linux box run this command.
+    """
+    state, runtime = locations(name)
+    container = kind(definition) == 'container'
+    shared = runtime / 'shared'
+    shared.mkdir(parents=True, exist_ok=True, mode=0o700)
+    runtime.chmod(0o700)
+    shared.chmod(0o700)
+    for stale in (
+        'manager',
+        'control',
+        'shared/wayland',
+        'shared/wayland.lock',
+        'shared/bus',
+        'shared/xauthority',
+    ):
+        (runtime / stale).unlink(missing_ok=True)
+    log = state / 'logs/kwin.log'
+    if log.exists() and log.stat().st_size > 4 * 1024 * 1024:
+        log.replace(log.with_suffix('.log.1'))
+    plugins = runtime / 'plugins/kwin/plugins'
+    plugins.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(plugin, plugins / 'computerartist.so')
+    (runtime / 'dbus.conf').write_text(bus_config(shared / 'bus'))
+    (state / 'config/kwinrc').write_text(
+        '[Plugins]\ncomputerartistEnabled=true\nnightlightEnabled=false\n[Wayland]\nInputMethod=\n'
+    )
+    config = {
+        'name': name,
+        'kind': kind(definition),
+        'state': str(state),
+        'runtime': str(runtime),
+        'width': definition['width'],
+        'height': definition['height'],
+        'xwayland': definition['xwayland'],
+        'container': container_name(name) if container else None,
+        'container_runtime': engine.name if engine else None,
+        # The service runs with a scrubbed environment; exec must reach the same daemon.
+        'container_env': runtime_variables() if engine else {},
+        'image': image,
+        'workdir': definition.get('workdir'),
+        'host_runtime': str(host_runtime()),
+        'started_at': time.time(),
+    }
+    (state / 'environment.json').write_text(json.dumps(config))
+    # An explicit environment keeps the user's desktop/session variables out of
+    # the compositor and everything it starts.
+    keep = ('HOME', 'USER', 'LOGNAME', 'PATH', 'LANG', 'LC_ALL', 'SHELL')
+    env = {k: v for k, v in os.environ.items() if k in keep or k.startswith('LC_')}
+    env.update(
+        XDG_RUNTIME_DIR=str(runtime),
+        XDG_CONFIG_HOME=str(state / 'config'),
+        XDG_CACHE_HOME=str(state / 'cache'),
+        XDG_DATA_HOME=str(state / 'data'),
+        XDG_STATE_HOME=str(state / 'state'),
+        XDG_SESSION_TYPE='wayland',
+        XDG_CURRENT_DESKTOP='KDE',
+        # Chromium picks its Qt shim from this; without it KDE implies Qt 5 and aborts.
+        KDE_SESSION_VERSION=os.environ.get('KDE_SESSION_VERSION') or kwin_major(),
+        CA_PLUGIN_RUNTIME=str(runtime),
+        CA_ENVIRONMENT=name,
+        CA_HOST_RUNTIME_DIR=str(host_runtime()),
+        QT_PLUGIN_PATH=str(runtime / 'plugins'),
+        PYTHONPATH=str(Path(__file__).resolve().parents[1]),
+        KWIN_USE_OVERLAYS='0',
+    )
+    service = [
+        'dbus-run-session', '--config-file=' + str(runtime / 'dbus.conf'), '--',
+        sys.executable, '-m', 'computer_artist.environment_service', '_serve',
+        str(state / 'environment.json'),
+    ]  # fmt: skip
+    return env, service
 
 
 def start(args):
@@ -592,88 +721,25 @@ def start(args):
         if active.stdout.strip() in ('active', 'activating', 'deactivating'):
             raise ValueError('Environment service is still starting or stopping; retry shortly')
         plugin = plugin_source(getattr(args, 'plugin', None))
-        required = ['systemd-run', 'dbus-run-session', 'kwin_wayland'] + (
-            ['podman'] if container else []
-        )
-        for command in required:
+        for command in ['systemd-run', 'dbus-run-session', 'kwin_wayland']:
             if not shutil.which(command):
                 raise ValueError(f'Required executable is missing: {command}')
-        for folder in (
-            'config',
-            'cache',
-            'data',
-            'state',
-            'window',
-            'output',
-            'logs/apps',
-            'browsers',
-            'home',
-        ):
-            (state / folder).mkdir(parents=True, exist_ok=True, mode=0o700)
+        engine = None
+        if container:
+            from .containers import choose
+
+            engine = choose(definition.get('runtime'))
+            engine.env = host_environment()
+            engine.check()
+        make_folders(state)
         image = (
-            ensure_image(name, definition, state / 'logs/build.log', getattr(args, 'pull', False))
+            ensure_image(
+                name, definition, state / 'logs/build.log', engine, getattr(args, 'pull', False)
+            )
             if container
             else None
         )
-        shared = runtime / 'shared'
-        shared.mkdir(parents=True, exist_ok=True, mode=0o700)
-        runtime.chmod(0o700)
-        shared.chmod(0o700)
-        for stale in (
-            'manager',
-            'control',
-            'shared/wayland',
-            'shared/wayland.lock',
-            'shared/bus',
-            'shared/xauthority',
-        ):
-            (runtime / stale).unlink(missing_ok=True)
-        log = state / 'logs/kwin.log'
-        if log.exists() and log.stat().st_size > 4 * 1024 * 1024:
-            log.replace(log.with_suffix('.log.1'))
-        plugins = runtime / 'plugins/kwin/plugins'
-        plugins.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(plugin, plugins / 'computerartist.so')
-        (runtime / 'dbus.conf').write_text(bus_config(shared / 'bus'))
-        (state / 'config/kwinrc').write_text(
-            '[Plugins]\ncomputerartistEnabled=true\nnightlightEnabled=false\n[Wayland]\nInputMethod=\n'
-        )
-        config = {
-            'name': name,
-            'kind': kind(definition),
-            'state': str(state),
-            'runtime': str(runtime),
-            'width': definition['width'],
-            'height': definition['height'],
-            'xwayland': definition['xwayland'],
-            'container': container_name(name) if container else None,
-            'image': image,
-            'workdir': definition.get('workdir'),
-            'host_runtime': str(host_runtime()),
-            'started_at': time.time(),
-        }
-        (state / 'environment.json').write_text(json.dumps(config))
-        # An explicit environment keeps the user's desktop/session variables out of
-        # the compositor and everything it starts.
-        keep = ('HOME', 'USER', 'LOGNAME', 'PATH', 'LANG', 'LC_ALL', 'SHELL')
-        env = {k: v for k, v in os.environ.items() if k in keep or k.startswith('LC_')}
-        env.update(
-            XDG_RUNTIME_DIR=str(runtime),
-            XDG_CONFIG_HOME=str(state / 'config'),
-            XDG_CACHE_HOME=str(state / 'cache'),
-            XDG_DATA_HOME=str(state / 'data'),
-            XDG_STATE_HOME=str(state / 'state'),
-            XDG_SESSION_TYPE='wayland',
-            XDG_CURRENT_DESKTOP='KDE',
-            # Chromium picks its Qt shim from this; without it KDE implies Qt 5 and aborts.
-            KDE_SESSION_VERSION=os.environ.get('KDE_SESSION_VERSION') or kwin_major(),
-            CA_PLUGIN_RUNTIME=str(runtime),
-            CA_ENVIRONMENT=name,
-            CA_HOST_RUNTIME_DIR=str(host_runtime()),
-            QT_PLUGIN_PATH=str(runtime / 'plugins'),
-            PYTHONPATH=str(Path(__file__).resolve().parents[1]),
-            KWIN_USE_OVERLAYS='0',
-        )
+        env, service = prepare_service(name, definition, plugin, engine, image)
         command = [
             'systemd-run', '--user', '--quiet', '--collect', '--service-type=exec',
             '--unit=' + unit(name),
@@ -683,19 +749,17 @@ def start(args):
         ]  # fmt: skip
         if container:
             # Removes the container even if the manager or compositor dies.
-            command.append(exec_stop_post(name))
-        command += [
-            '--', '/usr/bin/env', '-i', *[f'{k}={v}' for k, v in env.items()],
-            'dbus-run-session', '--config-file=' + str(runtime / 'dbus.conf'), '--',
-            sys.executable, '-m', 'computer_artist.environment_service', '_serve', str(state / 'environment.json'),
-        ]  # fmt: skip
+            command.append(exec_stop_post(name, engine))
+        command += ['--', '/usr/bin/env', '-i', *[f'{k}={v}' for k, v in env.items()], *service]
         result = run(command)
         if result.returncode:
             raise RuntimeError(result.stderr.strip())
         try:
             info = wait_ready(name, state)
             if container:
-                start_container(name, definition, image, state, runtime, info.get('display'))
+                start_container(
+                    name, definition, image, state, runtime, engine, info.get('display')
+                )
         except BaseException as error:
             stop_after_failure(name, error)
             raise
@@ -735,17 +799,16 @@ def wait_ready(name, state, timeout=30):
     )
 
 
-def start_container(name, definition, image, state, runtime, display):
-    command = container_command(name, definition, image, state, runtime, display)
-    with (state / 'logs/podman.log').open('a') as log:
+def start_container(name, definition, image, state, runtime, engine, display):
+    command = container_command(name, definition, image, state, runtime, engine, display)
+    with (state / 'logs/container.log').open('a') as log:
         log.write(f'\n$ {shlex.join(command)}\n')
+    if engine.name == 'docker' and engine.exists(container_name(name)):
+        engine.remove(container_name(name))  # Docker has no --replace.
     result = run(command, timeout=120)
     if result.returncode:
         raise RuntimeError('Container failed to start: ' + result.stderr.strip()[-2000:])
-    probe = run(
-        ['podman', 'container', 'inspect', '--format', '{{.State.Running}}', container_name(name)]
-    )
-    if probe.stdout.strip() != 'true':
+    if engine.state(container_name(name), 'Running') != 'true':
         raise RuntimeError('Container exited immediately; the image needs a sleep executable')
 
 
@@ -754,13 +817,11 @@ def stop(name, timeout=20):
     was_running = status(name)['running']
     result = run(['systemctl', '--user', 'stop', unit(name)], timeout=timeout + 10)
     leftovers = []
-    if (
-        shutil.which('podman')
-        and run(['podman', 'container', 'exists', container_name(name)]).returncode == 0
-    ):
-        run(['podman', 'rm', '--force', '--time', '3', container_name(name)], timeout=30)
-        if run(['podman', 'container', 'exists', container_name(name)]).returncode == 0:
-            leftovers.append(container_name(name))
+    for engine in _engines(name):
+        if engine.exists(container_name(name)):
+            engine.remove(container_name(name))
+            if engine.exists(container_name(name)):
+                leftovers.append(f'{engine.name}:{container_name(name)}')
     active = run(['systemctl', '--user', 'is-active', unit(name)]).stdout.strip()
     if active in ('active', 'activating', 'deactivating'):
         leftovers.append(unit(name))
@@ -798,10 +859,23 @@ def remove(name, confirmed):
                 f'Removing deletes {state} including browser profiles, window maps and evidence; '
                 'pass --yes to confirm'
             )
+        engines = _engines(name)
         shutil.rmtree(state)
-    if shutil.which('podman'):
-        run(['podman', 'image', 'rm', '--ignore', image_tag(name)])
+    for engine in engines:
+        engine.remove_image(image_tag(name))
     return {'ok': True, 'name': name, 'removed': str(state)}
+
+
+def _engines(name):
+    """Every installed runtime that may own this environment's container, recorded one first."""
+    from .containers import Runtime, available
+
+    try:
+        first = engine_for(name).name
+    except (RuntimeError, ValueError):
+        first = None
+    names = ([first] if first else []) + [n for n in available() if n != first]
+    return [Runtime(n, env=host_environment()) for n in names]
 
 
 def doctor(name):
@@ -820,17 +894,24 @@ def doctor(name):
     )
     definition = definition or DEFAULTS
     container = kind(definition) == 'container'
-    for command in ['systemd-run', 'dbus-run-session', 'dbus-send', 'kwin_wayland'] + (
-        ['podman'] if container else []
-    ):
+    for command in ['systemd-run', 'dbus-run-session', 'dbus-send', 'kwin_wayland']:
         check('executable_' + command, shutil.which(command), shutil.which(command) or 'missing')
+    engine = None
+    if container:
+        try:
+            engine = engine_for(name, definition)
+            engine.check()
+            check('container_runtime', True, engine.name)
+        except (RuntimeError, ValueError) as error:
+            check('container_runtime', False, str(error), 'Install Podman or Docker and start it')
+            engine = None
     try:
         check('plugin', True, str(plugin_source(None)))
     except ValueError as error:
         check('plugin', False, str(error), 'Run scripts/build-plugin.sh')
-    if container and shutil.which('podman'):
+    if engine is not None:
         if definition.get('image'):
-            present = run(['podman', 'image', 'exists', definition['image']]).returncode == 0
+            present = engine.image_exists(definition['image'])
             check(
                 'image', True, definition['image'] + ('' if present else ' (pulled on first start)')
             )
@@ -863,17 +944,8 @@ def doctor(name):
             check('plugin_identity', True, info['socket'])
         except Exception as error:
             check('plugin_identity', False, str(error))
-        if container:
-            state_text = run(
-                [
-                    'podman',
-                    'container',
-                    'inspect',
-                    '--format',
-                    '{{.State.Status}}',
-                    container_name(name),
-                ]
-            ).stdout.strip()
+        if engine is not None:
+            state_text = engine.state(container_name(name))
             check(
                 'container',
                 state_text == 'running',

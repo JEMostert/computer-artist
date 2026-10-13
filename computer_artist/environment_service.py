@@ -151,13 +151,12 @@ class Manager:
             argv, env = command, {**self.env, **extra}
             cwd = cwd or str(Path.home())
         else:
-            argv = ['podman', 'exec', '--interactive=false']
-            for k, v in extra.items():
-                argv += ['--env', f'{k}={v}']
-            if cwd:
-                argv += ['--workdir', cwd]
-            argv += [self.config['container'], *command]
-            env, cwd = host_environment(), str(self.state)
+            from .containers import Runtime
+
+            engine = Runtime(self.config.get('container_runtime') or 'podman')
+            argv = engine.exec_command(self.config['container'], command, extra, cwd)
+            env = {**host_environment(), **self.config.get('container_env', {})}
+            cwd = str(self.state)
         with log_path.open('wb') as log:
             log.write(f'$ {shlex.join(command)}\n'.encode())
             log.flush()

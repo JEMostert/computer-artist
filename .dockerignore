@@ -1,0 +1,8 @@
+# Linux box build context (containers/linux-box/Containerfile): sources only.
+*
+!ca
+!pyproject.toml
+!computer_artist/
+!plugin/
+!scripts/build-plugin.sh
+**/__pycache__

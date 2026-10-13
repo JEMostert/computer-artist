@@ -402,8 +402,12 @@ class Client:
             raise ValueError('Clipboard access requires explicit host access')
         return self.request('clipboard_set', text=text)
 
-    def paste(self, text, *, shortcut=(42, 110)):
-        """Paste into the already focused, leased host target (Shift+Insert)."""
+    def paste(self, text, *, shortcut=(42, 110), restore=True, settle=0.5):
+        """Paste into the already focused, leased host target (Shift+Insert).
+
+        The whole text arrives at once. The user's clipboard is saved first and put
+        back after `settle` seconds, unless someone copied something else meanwhile.
+        """
         self.validate_text(text)
         if self.lane != 'host' or not self.lease:
             raise ValueError('Paste requires an acquired host window')
@@ -411,8 +415,51 @@ class Client:
             raise ValueError('Release held keys before pasting')
         if not self.request('ping').get('keyboard_ready'):
             raise ValueError('Paste requires keyboard focus on the host target')
+        saved = self._save_clipboard() if restore else None
         self.clipboard_set(text)
         self.chord(*shortcut)
+        result = {'delivery': 'clipboard_paste', 'characters': len(text)}
+        if not restore:
+            return {**result, 'clipboard_restored': False, 'reason': 'Not requested'}
+        # The application reads the clipboard asynchronously after the shortcut.
+        time.sleep(settle)
+        return {**result, **self._restore_clipboard(saved, text)}
+
+    def _operations(self):
+        if self._keyboard_capabilities is None:
+            self._keyboard_capabilities = self.request('capabilities')
+        return set(self._keyboard_capabilities.get('operations', []))
+
+    def _save_clipboard(self):
+        if 'clipboard_save' in self._operations():
+            reply = self.request('clipboard_save')
+            return {'native': reply.get('saved'), 'reason': reply.get('reason')}
+        try:
+            return {'text': self.clipboard_get()}
+        except (ActionError, KeyError) as error:
+            # Non-text content (an image, files) cannot be kept through a text-only API.
+            return {'reason': f'Previous clipboard is not plain text: {error}'}
+
+    def _restore_clipboard(self, saved, text):
+        if saved.get('native') is not None:
+            if not saved['native']:
+                return {'clipboard_restored': False, 'reason': saved['reason']}
+            reply = self.request('clipboard_restore')
+            return {'clipboard_restored': reply.get('restored', False)} | (
+                {'reason': reply['reason']} if reply.get('reason') else {}
+            )
+        if 'text' not in saved:
+            return {'clipboard_restored': False, 'reason': saved['reason']}
+        try:
+            if self.clipboard_get() != text:
+                return {
+                    'clipboard_restored': False,
+                    'reason': 'Clipboard changed in the meantime; preserving the latest clipboard',
+                }
+            self.clipboard_set(saved['text'])
+        except ActionError as error:
+            return {'clipboard_restored': False, 'reason': str(error)}
+        return {'clipboard_restored': True}
 
     def stop_reason(self):
         """Ask a fresh connection why this lane last stopped; None when unknown.

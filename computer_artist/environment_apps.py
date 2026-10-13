@@ -143,7 +143,8 @@ def logs(name, source, lines):
     """List or tail logs; a1, a2… name this session's apps, older ones keep their file stem."""
     state, _ = locations(name)
     folder = state / 'logs'
-    files = {k: folder / f'{k}.log' for k in ('kwin', 'build', 'podman')}
+    files = {k: folder / f'{k}.log' for k in ('kwin', 'build', 'container')}
+    files['podman'] = folder / 'podman.log'  # Written before Docker support.
     current = {a['id']: Path(a['log']) for a in status(name).get('applications', [])}
     files.update(current)
     older = sorted(

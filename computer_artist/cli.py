@@ -394,7 +394,7 @@ def execute(client, args):
     elif args.command == 'paste' or (args.command == 'type' and ctx.lane == 'host'):
         if getattr(args, 'interval', 0):
             raise ValueError('Host typing pastes the whole text; --interval is unsupported')
-        ctx.paste(args.text, shortcut=args.shortcut)
+        details = ctx.paste(args.text, shortcut=args.shortcut) or {}
     elif args.command in ('type', 'write'):
         details = ctx.write(args.text, interval=args.interval)
     elif args.command == 'key':
@@ -457,6 +457,18 @@ def main(argv=None):
 
     signal.signal(signal.SIGTERM, terminate)
     try:
+        from . import box
+
+        if box.enabled() and (args.command == 'env' or getattr(args, 'environment', None)):
+            # Hosts without KWin run private environments in a Linux box container.
+            raw = list(sys.argv[1:] if argv is None else argv)
+            if args.command != 'env':
+                return box.proxy(args.environment, raw, args)
+            reply = box.dispatch(args, raw)
+            if isinstance(reply, int):
+                return reply
+            print(json.dumps(reply, indent=2))
+            return 0 if reply.get('ok') else 1
         if getattr(args, 'monitor', None):
             if os.name != 'nt':
                 raise ValueError('--monitor currently requires the Windows backend')
@@ -468,10 +480,6 @@ def main(argv=None):
 
             print(json.dumps(dispatch(args), indent=2))
             return 0
-        if os.name == 'nt' and (args.command == 'env' or getattr(args, 'environment', None)):
-            raise ValueError(
-                'Private KDE environments require Linux; Windows never falls back to them'
-            )
         if args.command == 'env':
             from .environment_commands import dispatch
 

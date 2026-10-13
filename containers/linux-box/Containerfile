@@ -1,0 +1,33 @@
+# Linux box: one private KWin desktop per container, for hosts without KWin
+# (Windows with Docker Desktop or Podman). `ca env start` builds it from the
+# checkout root; recipes may extend it with `ARG BOX_IMAGE` and `FROM ${BOX_IMAGE}`.
+FROM docker.io/library/archlinux:latest
+
+RUN pacman -Syu --noconfirm --needed \
+        kwin qt6-base qt6-tools qt6-wayland extra-cmake-modules cmake ninja gcc pkgconf \
+        wayland wayland-protocols plasma-wayland-protocols vulkan-headers ripgrep \
+        python python-pillow python-jeepney dbus at-spi2-core \
+        xdg-desktop-portal xdg-desktop-portal-kde mesa noto-fonts \
+        kwrite konsole \
+    && pacman -Scc --noconfirm \
+    # Unprivileged containers cannot execute binaries with file capabilities.
+    && setcap -r /usr/bin/kwin_wayland
+
+RUN useradd --create-home --uid 1000 ca \
+    && install -d -o ca -g ca /opt/computer-artist /ca
+
+USER ca
+WORKDIR /opt/computer-artist
+COPY --chown=ca:ca plugin plugin
+COPY --chown=ca:ca scripts/build-plugin.sh scripts/build-plugin.sh
+RUN scripts/build-plugin.sh
+COPY --chown=ca:ca ca pyproject.toml ./
+COPY --chown=ca:ca computer_artist computer_artist
+
+ENV PATH=/opt/computer-artist:$PATH \
+    PYTHONPATH=/opt/computer-artist \
+    XDG_RUNTIME_DIR=/tmp/ca-runtime \
+    CA_ENVIRONMENTS_DIR=/ca/environments \
+    CA_WINDOW_DIR=/ca/window
+WORKDIR /home/ca
+ENTRYPOINT ["python", "-m", "computer_artist.box_service"]

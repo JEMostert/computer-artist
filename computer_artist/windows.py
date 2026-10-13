@@ -210,6 +210,7 @@ class WindowsBackend:
         self.stop_stamp = None
         self.app_lease = None
         self.message_lane = None
+        self.saved_clipboard = None
         self.monitor_selector = os.environ.get('CA_WINDOWS_MONITOR')
 
     def monitor_guard(self, geometry):
@@ -235,6 +236,8 @@ class WindowsBackend:
             'scroll',
             'clipboard_get',
             'clipboard_set',
+            'clipboard_save',
+            'clipboard_restore',
             'session_close',
             'takeover',
         ]
@@ -242,7 +245,15 @@ class WindowsBackend:
             operations = [
                 op
                 for op in operations
-                if op not in ('focus', 'clipboard_get', 'clipboard_set', 'scroll')
+                if op
+                not in (
+                    'focus',
+                    'clipboard_get',
+                    'clipboard_set',
+                    'clipboard_save',
+                    'clipboard_restore',
+                    'scroll',
+                )
             ]
             operations += ['write_text']
         return {
@@ -547,9 +558,41 @@ class WindowsBackend:
             'layout_name': f'Windows HKL {layout:x}',
         }
 
+    def clipboard_save(self):
+        """Keep a private copy of the user's clipboard (all bounded formats) for restore."""
+        self.require_host()
+        from .windows_clipboard import ClipboardSnapshot, NotPreservable
+
+        self.drop_saved_clipboard()
+        snapshot = ClipboardSnapshot(self.api)
+        try:
+            snapshot.__enter__()
+        except NotPreservable as reason:
+            return {'ok': True, 'saved': False, 'reason': str(reason)}
+        self.saved_clipboard = snapshot
+        return {'ok': True, 'saved': True}
+
+    def clipboard_restore(self):
+        """Put the saved clipboard back unless someone copied something after our paste."""
+        self.require_host()
+        snapshot, self.saved_clipboard = self.saved_clipboard, None
+        if snapshot is None:
+            return {'ok': True, 'restored': False, 'reason': 'Nothing was saved'}
+        try:
+            snapshot.restore()
+        except (RuntimeError, OSError) as reason:
+            return {'ok': True, 'restored': False, 'reason': str(reason)}
+        return {'ok': True, 'restored': True}
+
+    def drop_saved_clipboard(self):
+        if self.saved_clipboard is not None:
+            self.saved_clipboard.release_graphics(self.saved_clipboard.formats)
+            self.saved_clipboard = None
+
     def clipboard(self, text=None):
         self.require_host()
-        if not self.api.user.OpenClipboard(self.target):
+        # No owner window: the target application must not become the clipboard owner.
+        if not self.api.user.OpenClipboard(None):
             raise OSError('Clipboard is busy; retry after its owner releases it')
         memory = None
         try:
@@ -591,6 +634,9 @@ class WindowsBackend:
             if memory:
                 self.api.kernel.GlobalFree(memory)
             self.api.user.CloseClipboard()
+            if text is not None and self.saved_clipboard is not None:
+                # Our own write is the expected state; any later copy keeps the user's data.
+                self.saved_clipboard.checkpoint()
 
     def request(self, op, **values):
         if op == 'capabilities':
@@ -671,6 +717,10 @@ class WindowsBackend:
             return self.clipboard()
         if op == 'clipboard_set' and not self.lease:
             return self.clipboard(values['text'])
+        if op == 'clipboard_save':
+            return self.clipboard_save()
+        if op == 'clipboard_restore':
+            return self.clipboard_restore()
         self.guard(values)
         if self.lane == 'agent':
             if op == 'move':
@@ -772,6 +822,7 @@ class WindowsBackend:
         return {'ok': True}
 
     def close(self):
+        self.drop_saved_clipboard()
         self.revoke()
 
 

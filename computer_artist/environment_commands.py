@@ -29,9 +29,7 @@ def add_definition_arguments(parser):
         '--recipe', type=Path, help='TOML/JSON recipe; relative paths follow the file'
     )
     source = group.add_mutually_exclusive_group()
-    source.add_argument(
-        '--image', help='Run applications in a rootless Podman container from IMAGE'
-    )
+    source.add_argument('--image', help='Run applications in a Podman/Docker container from IMAGE')
     source.add_argument('--containerfile', type=Path, help='Build the application image (cached)')
     group.add_argument('--context', type=Path, help='Build context (default: Containerfile folder)')
     group.add_argument(
@@ -61,6 +59,11 @@ def add_definition_arguments(parser):
     )
     group.add_argument('--network', choices=('private', 'host', 'none'))
     group.add_argument(
+        '--runtime',
+        choices=('podman', 'docker'),
+        help='Container runtime (default: CA_CONTAINER_RUNTIME, then Podman, then Docker)',
+    )
+    group.add_argument(
         '--xwayland',
         action=argparse.BooleanOptionalAction,
         default=None,
@@ -79,7 +82,7 @@ def env_item(value):
 def add_command(commands):
     parser = commands.add_parser(
         'env',
-        help='Private agent desktops (rootless Podman or host apps) that never use your desktop',
+        help='Private agent desktops (Podman/Docker containers or host apps) that never use your desktop',
         description='Create, start and use private agent desktops. Select one in other commands '
         'with ca --environment NAME ...; a stopped or missing environment is an error, never a '
         'fallback to your desktop.',
@@ -108,9 +111,11 @@ def add_command(commands):
     remove_parser = actions.add_parser('remove', help='Delete a stopped environment and its data')
     remove_parser.add_argument('name')
     remove_parser.add_argument('--yes', action='store_true')
-    logs = actions.add_parser('logs', help='Tail kwin, build, podman or an application log')
+    logs = actions.add_parser('logs', help='Tail kwin, build, container or an application log')
     logs.add_argument('name')
-    logs.add_argument('source', nargs='?', help='kwin, build, podman or an app id (default: list)')
+    logs.add_argument(
+        'source', nargs='?', help='kwin, build, container or an app id (default: list)'
+    )
     logs.add_argument('--lines', type=int, default=40)
     execute = actions.add_parser('exec', help='Start an application inside the environment')
     execute.add_argument('name')

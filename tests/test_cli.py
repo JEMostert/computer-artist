@@ -28,6 +28,7 @@ class CLITest(unittest.TestCase):
         self.acquire_reply_delay = 0
         self.window_ids = ['target']
         self.window_titles = {'target': 'Untitled — KolourPaint'}
+        self.clipboard = None
         test = self
 
         class Handler(socketserver.StreamRequestHandler):
@@ -85,6 +86,10 @@ class CLITest(unittest.TestCase):
                                     'kwin_running': '6.7.5',
                                 },
                             )
+                    if op == 'clipboard_get' and test.clipboard is not None:
+                        reply['text'] = test.clipboard
+                    if op == 'clipboard_set':
+                        test.clipboard = request['text']
                     if op == 'focus' and test.reject_focus:
                         reply.update(ok=False, error='rejected')
                     try:
@@ -142,6 +147,20 @@ class CLITest(unittest.TestCase):
         self.assertEqual([e['code'] for e in self.events if e['op'] == 'key'], [42, 110, 110, 42])
         self.assertFalse(any(op in ('move', 'button') for op in ops))
         self.assertEqual(ops[-1], 'release')
+        self.assertFalse(json.loads(result.stdout)['clipboard_restored'])
+
+    def test_host_paste_restores_the_users_clipboard(self):
+        self.clipboard = 'what the user copied'
+        result = self.ca('--host', 'type', '--window', 'target', 'pasted text')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        sets = [e['text'] for e in self.events if e['op'] == 'clipboard_set']
+        self.assertEqual(sets, ['pasted text', 'what the user copied'])
+        ops = [e['op'] for e in self.events]
+        self.assertLess(ops.index('key'), len(ops) - 1 - ops[::-1].index('clipboard_set'))
+        reply = json.loads(result.stdout)
+        self.assertEqual(
+            (reply['delivery'], reply['clipboard_restored']), ('clipboard_paste', True)
+        )
 
     def test_doctor_does_not_create_a_session_or_send_input(self):
         result = self.ca('doctor', '--window', 'target')
