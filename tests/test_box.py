@@ -98,6 +98,11 @@ class BoxDefinitionTest(unittest.TestCase):
         with patch.object(box.sys, 'platform', 'darwin'), patch.dict(os.environ, {}, clear=True):
             self.assertTrue(box.enabled())
             self.assertEqual(socket_path('/tmp/explicit'), '/tmp/explicit')
+            with patch('shutil.which', side_effect=lambda n: n if n == 'podman' else None):
+                with self.assertRaisesRegex(RuntimeError, 'Docker Desktop'):
+                    box.engine_for()  # Podman is never picked on Windows or macOS.
+                with self.assertRaisesRegex(ValueError, 'Podman is not supported'):
+                    box.engine_for({'runtime': 'podman'})
             if os.name == 'nt':
                 return  # Windows has its own desktop backend.
             self.assertEqual(box.user_args(box.Runtime('docker')), [])

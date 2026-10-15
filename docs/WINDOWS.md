@@ -2,7 +2,8 @@
 
 Requires Windows 10/11 and Python 3.12 or later. No KWin, WSL, administrator access,
 native build or Linux D-Bus dependency is needed for the desktop backend. Private
-environments additionally need Docker Desktop (WSL 2 backend) or Podman.
+environments additionally need Docker Desktop (WSL 2 backend); Podman is not used
+on Windows.
 
 ```powershell
 git clone https://github.com/JEMostert/computer-artist.git
@@ -41,7 +42,7 @@ verified on Windows.
 | Host scroll | Same units as Linux: 15 per wheel notch, positive is down/right | Implemented (direction fixed) |
 | Window placement | `ca window info/move` with no activation | Verified 13 Oct |
 | Monitor scope | `--monitor DEVICE_OR_EDID` or `CA_WINDOWS_MONITOR` restricts capture, input and placement | Verified 13 Oct |
-| Private environments | One Linux box container per environment (`containers/linux-box`), Docker or Podman; commands run inside it with path translation | Box verified on Linux with Podman and the Docker CLI; Docker Desktop on Windows unverified |
+| Private environments | One Linux box container per environment (`containers/linux-box`) in Docker Desktop; commands run inside it with path translation | Box verified on Linux with Podman and the Docker CLI; Docker Desktop on Windows unverified |
 | Programs | Conditional programs, fragments, file/outcome checks, bounded evidence, job deadlines and descendant cleanup | Verified 13 Oct |
 
 The agent lane is not a second keyboard or pointer. Applications that read raw
@@ -66,13 +67,13 @@ box paths and box paths in replies back to Windows paths; a path outside the
 project, the mounts and the environment folder is refused. State lives in
 `%LOCALAPPDATA%\computer-artist\environments\NAME`; fragments are shared through
 the window folder. The box contains KWrite, Konsole and Firefox; recipes add more
-with a containerfile starting `ARG BOX_IMAGE` / `FROM ${BOX_IMAGE}`. Set
-`CA_CONTAINER_RUNTIME=podman` to use Podman. The same path can be exercised on
-Linux with `CA_ENVIRONMENT_BACKEND=box`.
+with a containerfile starting `ARG BOX_IMAGE` / `FROM ${BOX_IMAGE}`. Selecting
+Podman is refused on Windows. The same path can be exercised on Linux with
+`CA_ENVIRONMENT_BACKEND=box` (Docker or Podman).
 
 To check on Windows (not done yet): Docker Desktop bind mounts of
 `%LOCALAPPDATA%` (file locks and permissions), build time, KWin software rendering
-speed in WSL 2, and Podman machine compatibility.
+speed in WSL 2.
 
 ## Validation
 

@@ -1,6 +1,6 @@
 # macOS
 
-Requires macOS with Python 3.12 or later and Docker Desktop (or Podman). There is
+Requires macOS with Python 3.12 or later and Docker Desktop. There is
 no native macOS desktop backend: `ca` does not see or drive Mac applications, and
 desktop commands without `--environment` refuse with a pointer to `ca env`.
 Agents work in private environments, each a Linux box container with its own KWin
@@ -31,7 +31,7 @@ was exercised live.
 | Apple silicon | The Arch-based box runs as `linux/amd64` under Docker Desktop's emulation; first build about 3 minutes, later starts about 20 seconds | Verified 15 Oct |
 | Apps in the box | KWrite type/save with a fresh-file check, Firefox with a private profile, recipe-derived images, startup apps, AT-SPI tree | Verified 15 Oct |
 | Host dev servers | `http://host.docker.internal:PORT` reaches a Mac server listening on all interfaces | Verified 15 Oct; loopback-only servers unverified |
-| Podman machine | Same code path as Docker (`CA_CONTAINER_RUNTIME=podman`) | Implemented, unverified |
+| Container runtime | Docker Desktop only, as on Windows; selecting Podman is refused | Implemented |
 | User's Mac desktop | None; no independent or host input, capture or accessibility on macOS itself | Not implemented |
 
 The box image is about 5 GB. Docker Desktop's default memory limit is enough for

@@ -20,7 +20,6 @@
     "stop_and_remove": true
   },
   "not_verified": [
-    "Podman machine",
     "dev servers bound only to the Mac loopback",
     "network = host",
     "several concurrent environments"

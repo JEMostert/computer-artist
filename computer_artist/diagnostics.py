@@ -349,7 +349,7 @@ def diagnose_macos(lane, checks, warnings, check):
         engine.check()
         check('container_runtime', True, engine.name)
     except (RuntimeError, ValueError) as error:
-        check('container_runtime', False, str(error), 'Install Docker Desktop or Podman.')
+        check('container_runtime', False, str(error), 'Install and start Docker Desktop.')
     warnings.append({'code': 'platform_limit', 'detail': MACOS_DESKTOP})
     return {
         'ok': all(c['passed'] for c in checks),

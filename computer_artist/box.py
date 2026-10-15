@@ -1,7 +1,7 @@
 """Private environments on hosts without KWin: one Linux box container per environment.
 
 On Windows and macOS, `ca env` runs the same private KWin desktop as on Linux, but
-inside a Docker (or Podman) container built from containers/linux-box. Every
+inside a Docker Desktop container built from containers/linux-box. Every
 `ca --environment NAME ...` command runs inside that box through `exec`; paths in
 its arguments and JSON output are translated between the host and the box. The
 box never touches the user's own desktop, and a stopped box is an error, never a
@@ -45,6 +45,10 @@ PATH_DESTS = ('trace', 'window_dir', 'output_dir', 'path_file', 'output', 'path'
 PLATFORM = 'linux/amd64'
 
 
+def docker_only():
+    return os.name == 'nt' or sys.platform == 'darwin'
+
+
 def enabled():
     return (
         os.name == 'nt'
@@ -69,17 +73,25 @@ def container(name):
 
 
 def engine_for(definition=None):
-    """CA_CONTAINER_RUNTIME or the definition's choice, else Docker, then Podman."""
+    """CA_CONTAINER_RUNTIME or the definition's choice, else Docker, then Podman.
+
+    Windows and macOS boxes use Docker Desktop only; Podman remains for Linux.
+    """
     import shutil
 
+    allowed = ('docker',) if docker_only() else ('docker', 'podman')
     preferred = (definition or {}).get('runtime') or os.environ.get('CA_CONTAINER_RUNTIME')
     if preferred:
         if preferred not in RUNTIMES:
             raise ValueError(f'Container runtime must be one of {RUNTIMES}')
+        if preferred not in allowed:
+            raise ValueError(
+                'Windows and macOS environments use Docker Desktop; Podman is not supported'
+            )
         if not shutil.which(preferred):
             raise RuntimeError(f'{preferred} was selected but is not installed. ' + MISSING)
         return Runtime(preferred)
-    for name in ('docker', 'podman'):
+    for name in allowed:
         if shutil.which(name):
             return Runtime(name)
     raise RuntimeError(MISSING)
@@ -368,11 +380,11 @@ def run_command(name, definition, image, engine):
 def user_args(engine):
     """Who runs the box so that it can write the host folders it mounts.
 
-    Docker Desktop and Podman on Windows and macOS share host folders with any
-    container user, so the image's own user stays. On Linux the box user must map to
+    Docker Desktop on Windows and macOS shares host folders with any container
+    user, so the image's own user stays. On Linux the box user must map to
     the invoking user.
     """
-    if os.name == 'nt' or sys.platform == 'darwin':
+    if docker_only():
         return []
     if engine.name == 'podman':
         return ['--userns=keep-id:uid=1000,gid=1000']
@@ -563,7 +575,12 @@ def doctor(name):
         engine.check()
         check('container_runtime', True, engine.name)
     except (RuntimeError, ValueError) as error:
-        check('container_runtime', False, str(error), 'Install Docker Desktop or Podman')
+        check(
+            'container_runtime',
+            False,
+            str(error),
+            'Install Docker Desktop' + ('' if docker_only() else ' or Podman'),
+        )
         engine = None
     try:
         source = checkout()

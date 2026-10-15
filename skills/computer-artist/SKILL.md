@@ -23,11 +23,12 @@ exactly one guide and follow its steps; never mix them:
 
 - Prefer a private environment for development and testing (`ca env`). Use the
   user's actual desktop only when the user explicitly asks for it.
-- Container environments need Docker or Podman (on Windows and macOS every
-  environment does). When `ca env start` reports that neither is installed or
-  usable, stop and tell the user: "Private test environments need Docker or Podman;
-  please install one (Linux: Podman or Docker; Windows: Docker Desktop with WSL 2;
-  macOS: Docker Desktop)". Never fall back to the user's desktop instead.
+- Container environments need a container runtime, chosen by operating system:
+  Linux uses Podman or Docker; Windows and macOS use Docker Desktop only (every
+  environment there is a container). When `ca env start` reports that the runtime
+  is missing or not running, stop and tell the user: "Private test environments
+  need Docker Desktop (Windows: with WSL 2)" or, on Linux, "need Podman or Docker".
+  Never fall back to the user's desktop instead.
 - Never silently move the human's pointer or steal focus. The default agent lane
   never falls back to host input; do not use `--host` to work around a refusal.
   `--host` needs the user's authorization in the current task.

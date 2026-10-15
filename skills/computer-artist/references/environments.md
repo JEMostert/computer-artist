@@ -10,14 +10,16 @@ user's desktop. On Windows and macOS every environment is a Linux box instead; s
 
 ## Container runtime
 
-Podman and Docker both work. The choice is `--runtime podman|docker` (stored with
-the definition), else `CA_CONTAINER_RUNTIME`, else Podman when installed, else
-Docker (on Windows and macOS: Docker first). Podman runs rootless with `--userns=keep-id`;
-rootless Docker maps container root to you; rootful Docker runs the container as
-your uid. Membership of the `docker` group is equivalent to root on the host;
-prefer rootless Podman or rootless Docker. `ca env doctor NAME` reports the runtime
-and whether its daemon answers. If neither is installed, `ca env start` says so:
-tell the user that this feature needs Docker or Podman, and stop.
+The runtime depends on the operating system. Windows and macOS use Docker Desktop
+only; selecting Podman there is refused. On Linux, Podman and Docker both work: the
+choice is `--runtime podman|docker` (stored with the definition), else
+`CA_CONTAINER_RUNTIME`, else Podman when installed, else Docker. Podman runs
+rootless with `--userns=keep-id`; rootless Docker maps container root to you;
+rootful Docker runs the container as your uid. Membership of the `docker` group is
+equivalent to root on the host; prefer rootless Podman or rootless Docker.
+`ca env doctor NAME` reports the runtime and whether its daemon answers. If no
+usable runtime is installed, `ca env start` says so: tell the user which runtime
+this operating system needs, and stop.
 
 ## Recipes
 
@@ -89,10 +91,10 @@ session. `ca env doctor NAME` checks tools, image, mounts, GPU, services and app
 
 ## Linux boxes (Windows and macOS)
 
-There each environment is one Docker (or Podman) container running the private
-KWin desktop, its D-Bus session and the manager described above. The box image is
-built from this checkout on first start (several minutes once, then cached; rebuilt
-when the sources change). On Apple silicon it runs under amd64 emulation.
+There each environment is one Docker Desktop container running the private KWin
+desktop, its D-Bus session and the manager described above. The box image is built
+from this checkout on first start (several minutes once, then cached; rebuilt when
+the sources change). On Apple silicon it runs under amd64 emulation.
 
 ```bash
 ca env start TASK --project .                 # project appears in the box at /project

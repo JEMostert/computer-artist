@@ -5,8 +5,8 @@ Read this only on macOS. The rules in SKILL.md apply as well.
 macOS has no native desktop backend: `ca` cannot see or drive Mac applications or
 the user's own desktop, and desktop commands without `--environment` refuse. All
 work happens in private environments, each a Linux box with its own KWin desktop
-running in Docker Desktop (or Podman). They test Linux and web applications; Mac
-applications cannot run inside them.
+running in Docker Desktop (Podman is not used on macOS). They test Linux and web
+applications; Mac applications cannot run inside them.
 
 ```bash
 ca doctor                                      # container_runtime must pass

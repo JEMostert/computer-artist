@@ -6,7 +6,7 @@ needs no KWin plugin. Use `ca` (or the checkout's `.venv\Scripts\ca.exe`).
 ## Private environments: Linux boxes
 
 For development and testing, default to a private environment. On Windows each one
-is a Linux box: a Docker (or Podman) container running its own KWin desktop. It
+is a Linux box: a Docker Desktop container running its own KWin desktop. It
 tests Linux and web applications; Windows applications cannot run inside it.
 Docker Desktop with the WSL 2 backend is the expected runtime; if `ca env start`
 reports that no runtime is installed or that the daemon is not running, stop and
