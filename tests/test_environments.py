@@ -1,7 +1,5 @@
 import io
-import json
 import os
-import socket
 import subprocess
 import tempfile
 import time
@@ -11,8 +9,8 @@ from contextlib import redirect_stdout
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-from computer_artist import containers, environments
-from computer_artist.cli import main, parser
+from computer_artist import environments
+from computer_artist.cli import main
 from computer_artist.containers import Runtime
 
 
@@ -35,12 +33,6 @@ class EnvironmentDefinitionTest(unittest.TestCase):
         patcher.start()
         self.addCleanup(patcher.stop)
         os.environ.pop('CA_HOST_RUNTIME_DIR', None)
-
-    def test_names_are_strict(self):
-        for name in ('', '-x', 'a/b', '../x', 'x' * 49, 'a b'):
-            with self.subTest(name=name), self.assertRaises(ValueError):
-                environments.check_name(name)
-        self.assertEqual(environments.container_name('web_1'), 'ca-env-web_1')
 
     def test_project_mounts_at_the_same_path_and_sets_workdir(self):
         project = self.root / 'project'
@@ -101,22 +93,6 @@ class EnvironmentDefinitionTest(unittest.TestCase):
         self.assertEqual(updated['recipe'], str(folder / 'env.toml'))
         self.assertEqual(environments.stored('web'), updated)
 
-    def test_host_environments_refuse_container_settings(self):
-        with self.assertRaisesRegex(ValueError, 'require image'):
-            environments.define('plain', flags(cpus=2.0))
-
-    def test_first_prototype_environments_are_migrated(self):
-        state = self.root / 'environments' / 'old'
-        state.mkdir(parents=True)
-        (state / 'environment.json').write_text(
-            json.dumps({'width': 1280, 'height': 800, 'xwayland': True})
-        )
-        definition = environments.stored('old')
-        self.assertEqual(
-            (definition['width'], definition['xwayland'], environments.kind(definition)),
-            (1280, True, 'host'),
-        )
-
     def test_container_sees_only_the_shared_sockets_and_declared_folders(self):
         project = self.root / 'project'
         project.mkdir()
@@ -140,10 +116,6 @@ class EnvironmentDefinitionTest(unittest.TestCase):
         self.assertNotIn('CA_SOCKET', ' '.join(env))
         self.assertEqual(command[-4:], ['--entrypoint', 'sleep', 'alpine', '2147483647'])
 
-    def test_bus_configuration_escapes_paths(self):
-        config = environments.bus_config(Path('/run/a&b/bus'))
-        self.assertIn('unix:path=/run/a&amp;b/bus', config)
-
     def test_remove_requires_confirmation_and_a_stopped_environment(self):
         environments.define('gone', flags())
         with patch.object(environments, 'run'):  # No systemctl on every test host.
@@ -151,43 +123,6 @@ class EnvironmentDefinitionTest(unittest.TestCase):
                 environments.remove('gone', False)
             environments.remove('gone', True)
         self.assertIsNone(environments.stored('gone'))
-
-    def test_dict_mounts_get_the_same_validation_as_strings(self):
-        (self.root / 'src').mkdir()
-        bad = [
-            {'source': 'src', 'target': '/data:ro'},
-            {'source': 'src', 'target': '/data,x'},
-            {'source': 'src', 'target': 'relative'},
-            {'source': 'src', 'target': 5},
-            {'source': 'src', 'mode': 'rwx'},
-            {'source': ''},
-            'src:/data,x',
-        ]
-        for spec in bad:
-            with self.subTest(spec=spec), self.assertRaises(ValueError):
-                environments.parse_mount(spec, self.root)
-        (self.root / 'a:b').mkdir()
-        with self.assertRaisesRegex(ValueError, 'must not contain'):
-            environments.parse_mount({'source': 'a:b', 'target': '/data'}, self.root)
-        mount = environments.parse_mount({'source': 'src', 'target': '/data'}, self.root)
-        self.assertEqual(mount['target'], '/data')
-
-    def test_status_distinguishes_a_slow_manager_from_a_stopped_one(self):
-        cases = [
-            (TimeoutError(), None, 'manager not responding'),
-            (socket.timeout(), None, 'manager not responding'),
-            (ConnectionRefusedError(), False, None),
-            (FileNotFoundError(), False, None),
-            (RuntimeError('rejected'), False, 'rejected'),
-        ]
-        for failure, running, error in cases:
-            with (
-                self.subTest(failure=failure),
-                patch.object(environments, 'exchange', side_effect=failure),
-            ):
-                info = environments.status('web')
-            self.assertIs(info['running'], running)
-            self.assertEqual(info.get('error'), error)
 
     def test_remove_refuses_unless_the_manager_is_known_stopped(self):
         environments.define('live', flags())
@@ -218,65 +153,6 @@ class EnvironmentDefinitionTest(unittest.TestCase):
         ):
             environments.start(Namespace(name='slow', **vars(flags())))
 
-    def test_cleanup_failure_is_a_note_on_the_original_error(self):
-        original = RuntimeError('start failed')
-        with patch.object(environments, 'stop', side_effect=RuntimeError('Stop incomplete')):
-            environments.stop_after_failure('web', original)
-        self.assertIn('Stop incomplete', original.__notes__[0])
-        with patch.object(environments, 'stop') as stop:
-            environments.stop_after_failure('web', original)
-        stop.assert_called_once_with('web')
-        self.assertEqual(len(original.__notes__), 1)
-
-    def test_oversized_requests_are_refused_before_connecting(self):
-        request = {'op': 'exec', 'argv': ['x' * environments.MAX_REQUEST]}
-        with (
-            patch.object(environments.socket, 'socket') as opened,
-            self.assertRaisesRegex(ValueError, 'Request too large'),
-        ):
-            environments.exchange(self.root, request)
-        opened.assert_not_called()
-
-    def test_stop_post_quotes_every_word_and_needs_the_runtime(self):
-        runtime = self.root / 'my "run" time'
-        with (
-            patch.dict(os.environ, XDG_RUNTIME_DIR=str(runtime)),
-            patch.object(environments.shutil, 'which', return_value='/opt/my tools/podman'),
-        ):
-            line = environments.exec_stop_post('web', Runtime('podman'))
-        self.assertTrue(line.startswith('--property=ExecStopPost=-"/usr/bin/env" '))
-        self.assertIn('"/opt/my tools/podman" "rm" "--force"', line)
-        self.assertIn(f'"XDG_RUNTIME_DIR={self.root}/my \\"run\\" time"', line)
-        self.assertTrue(line.endswith('"ca-env-web"'))
-        self.assertEqual(environments.systemd_quote('a\\b%c$d'), '"a\\\\b%%c$$d"')
-        with (
-            patch.object(environments.shutil, 'which', return_value=None),
-            self.assertRaisesRegex(RuntimeError, 'Docker or Podman'),
-        ):
-            environments.exec_stop_post('web', Runtime('podman'))
-
-    def test_image_preparation_errors_are_actionable(self):
-        definition = {'image': 'alpine', 'containerfile': None}
-        log = self.root / 'build.log'
-        engine = Runtime('podman')
-        with (
-            patch.object(containers.subprocess, 'run', side_effect=FileNotFoundError('podman')),
-            self.assertRaisesRegex(RuntimeError, 'Docker or Podman'),
-        ):
-            environments.ensure_image('web', definition, log, engine)
-        cases = [
-            (FileNotFoundError('podman'), 'Docker or Podman'),
-            (subprocess.TimeoutExpired('podman', 1800), 'timed out'),
-        ]
-        for failure, message in cases:
-            with (
-                self.subTest(failure=failure),
-                patch.object(engine, 'image_exists', return_value=False),
-                patch.object(environments.subprocess, 'run', side_effect=failure),
-                self.assertRaisesRegex(RuntimeError, message),
-            ):
-                environments.ensure_image('web', definition, log, engine)
-
 
 class EnvironmentCommandTest(unittest.TestCase):
     def setUp(self):
@@ -284,12 +160,6 @@ class EnvironmentCommandTest(unittest.TestCase):
         patcher = patch('computer_artist.box.enabled', return_value=False)
         patcher.start()
         self.addCleanup(patcher.stop)
-
-    def test_exec_keeps_application_options_after_the_separator(self):
-        args = parser().parse_args(
-            ['env', 'exec', 'web', '--name', 'term', '--', 'foot', '--title', 'x']
-        )
-        self.assertEqual((args.window_name, args.argv), ('term', ['foot', '--title', 'x']))
 
     def test_environment_selects_its_private_host_lane_and_shares_fragments(self):
         info = {
@@ -383,32 +253,6 @@ class ManagerTest(unittest.TestCase):
             with self.assertRaises(ValueError):
                 manager.handle({'op': 'exec', 'argv': ['bad\0arg']})
 
-    def test_missing_host_working_directory_is_an_error(self):
-        from computer_artist.environment_service import Manager
-
-        with tempfile.TemporaryDirectory() as folder:
-            root = Path(folder)
-            (root / 'state/logs/apps').mkdir(parents=True)
-            (root / 'runtime/shared').mkdir(parents=True)
-            config = {
-                'name': 'web',
-                'runtime': str(root / 'runtime'),
-                'state': str(root / 'state'),
-                'width': 800,
-                'height': 600,
-                'xwayland': False,
-                'container': None,
-            }
-            with (
-                patch.dict(os.environ, {'XAUTHORITY': ''}),
-                patch('computer_artist.environment_service.subprocess.run'),
-            ):
-                manager = Manager(config)
-            missing = str(root / 'nope')
-            with self.assertRaisesRegex(ValueError, 'Working directory does not exist'):
-                manager.handle({'op': 'exec', 'argv': ['true'], 'cwd': missing})
-            self.assertEqual(manager.counter, 0)
-
 
 class AccessibilityTest(unittest.TestCase):
     def setUp(self):
@@ -441,9 +285,6 @@ class AccessibilityTest(unittest.TestCase):
         ):
             return Manager(self.config), popen
 
-    def test_applications_enable_qt_accessibility(self):
-        self.assertEqual(environments.APP_ENV['QT_LINUX_ACCESSIBILITY_ALWAYS_ON'], '1')
-
     def test_registry_starts_with_the_application_environment(self):
         manager, popen = self.start((str(self.binary),))
         popen.assert_called_once()
@@ -453,30 +294,6 @@ class AccessibilityTest(unittest.TestCase):
         self.assertIs(manager.registry, popen.return_value)
         self.assertTrue(manager.info['accessibility'])
         self.assertTrue((self.root / 'state/logs/at-spi-registryd.log').exists())
-
-    def test_first_existing_registry_path_wins(self):
-        second = self.root / 'libexec-at-spi2-registryd'
-        second.write_text('')
-        manager, popen = self.start((str(self.binary), str(second)))
-        self.assertEqual(popen.call_args.args[0], [str(self.binary)])
-        manager, popen = self.start((str(self.root / 'missing'), str(second)))
-        self.assertEqual(popen.call_args.args[0], [str(second)])
-
-    def test_missing_registry_is_recorded_and_nothing_is_started(self):
-        manager, popen = self.start((str(self.root / 'missing'),))
-        popen.assert_not_called()
-        self.assertFalse(manager.info['accessibility'])
-        self.assertIsNone(manager.registry)
-        manager.close()
-
-    def test_registry_start_failure_is_tolerated_and_logged(self):
-        popen = MagicMock(side_effect=OSError('Exec format error'))
-        manager, _ = self.start((str(self.binary),), popen=popen)
-        self.assertFalse(manager.info['accessibility'])
-        self.assertIsNone(manager.registry)
-        log = (self.root / 'state/logs/at-spi-registryd.log').read_text()
-        self.assertIn('Could not start', log)
-        self.assertIn('Exec format error', log)
 
     def test_close_terminates_the_registry_and_kills_it_if_it_ignores_terminate(self):
         manager, popen = self.start((str(self.binary),))

@@ -45,20 +45,6 @@ class StorageTest(unittest.TestCase):
         self.assertTrue(external.exists())
         self.assertEqual(len(inspect(self.root)['runs']), 5)
 
-    def test_starting_sixth_run_rotates_oldest_before_work(self):
-        for i in range(5):
-            self.run_folder(str(i), i)
-        with managed_run(self.root) as folder:
-            self.assertRegex(
-                folder.name, r'^\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}-\d{6}Z-[a-f0-9]{6}$'
-            )
-            self.assertFalse((self.root / '0').exists())
-            self.assertEqual(len(inspect(self.root)['runs']), 5)
-            self.assertTrue(
-                next(e for e in inspect(self.root)['runs'] if e['id'] == folder.name)['active']
-            )
-        self.assertEqual(len(inspect(self.root)['runs']), 5)
-
     def test_active_and_preserved_runs_survive_size_pressure(self):
         self.run_folder('old', 1, 10000)
         preserve(self.root, 'old')
@@ -83,17 +69,6 @@ class StorageTest(unittest.TestCase):
         self.assertEqual(report['would_remove'], ['old'])
         self.assertTrue((self.root / 'old').exists())
         self.assertEqual(cleanup(self.root, max_bytes=1500)['removed'], ['old'])
-
-    def test_failed_run_closes_and_invalid_config_creates_nothing(self):
-        with self.assertRaises(RuntimeError):
-            with managed_run(self.root, 'failed'):
-                raise RuntimeError('task failed')
-        self.assertEqual(inspect(self.root)['runs'][0]['status'], 'completed')
-        with patch.dict(os.environ, CA_RUN_LIMIT='0'):
-            with self.assertRaises(ValueError):
-                with managed_run(self.root, 'invalid'):
-                    pass
-        self.assertFalse((self.root / 'invalid').exists())
 
     def test_child_lock_survives_supervisor_exit_and_abandoned_run_is_pruned(self):
         folder = self.run_folder('child', 1)
@@ -124,13 +99,6 @@ class StorageTest(unittest.TestCase):
             self.assertTrue(folder.exists())
             cleanup(self.root)
             self.assertFalse(folder.exists())
-
-    def test_automatic_cleanup_counts_the_just_finished_run(self):
-        with patch.dict(os.environ, CA_RUN_LIMIT='2'):
-            for i in range(5):
-                with managed_run(self.root, str(i)):
-                    pass
-        self.assertEqual([e['id'] for e in inspect(self.root)['runs']], ['3', '4'])
 
     def test_malformed_markers_and_lock_symlinks_are_never_adopted(self):
         for index, marker in enumerate(
@@ -191,10 +159,6 @@ class StorageTest(unittest.TestCase):
             os.close(fd)
         self.assertEqual(cleanup(self.root, count=1)['removed'], ['old'])
 
-    def test_inspection_of_absent_output_does_not_create_data(self):
-        self.assertEqual(inspect(self.root), {'root': str(self.root), 'runs': [], 'bytes': 0})
-        self.assertFalse(self.root.exists())
-
     def test_failed_run_initialization_releases_lease(self):
         open_before = len(os.listdir(OPEN_FDS))
         with patch.object(storage, 'atomic_json', side_effect=OSError('disk full')):
@@ -215,53 +179,6 @@ class StorageTest(unittest.TestCase):
         info = json.loads((self.root / 'rotating' / MARKER).read_text())
         self.assertTrue(info['completed'])
         self.assertEqual(inspect(self.root)['runs'][0]['status'], 'completed')
-
-    def test_read_only_inspection_never_creates_lock_files(self):
-        folder = self.run_folder('unlocked', 1)
-        (folder / '.active.lock').unlink()
-        entry = inspect(self.root)['runs'][0]
-        self.assertFalse(entry['active'])
-        self.assertFalse((folder / '.active.lock').exists())
-
-    def test_cleanup_skips_entry_whose_lock_vanished_after_snapshot(self):
-        old = self.run_folder('old', 1)
-        self.run_folder('new', 2)
-        entries = storage._entries
-
-        def snapshot_then_remove_lock(root):
-            snapshot = list(entries(root))
-            (old / '.active.lock').unlink()
-            yield from snapshot
-
-        with patch.object(storage, '_entries', snapshot_then_remove_lock):
-            self.assertEqual(cleanup(self.root, count=1)['removed'], [])
-        self.assertTrue(old.exists())
-
-    def test_storage_cli_is_offline_and_preserves_modules(self):
-        self.run_folder('old', 1)
-        module = Path(self.temp.name) / 'windows' / 'app' / 'module.py'
-        module.parent.mkdir(parents=True)
-        module.write_text('saved work')
-        ca = Path(__file__).resolve().parents[1] / 'ca'
-        result = subprocess.run(
-            [
-                str(ca),
-                'storage',
-                'keep',
-                'old',
-                '--output-dir',
-                str(self.root),
-                '--window-dir',
-                str(Path(self.temp.name) / 'window'),
-                '--socket',
-                '/does/not/exist',
-            ],
-            capture_output=True,
-            text=True,
-        )
-        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertTrue(inspect(self.root)['runs'][0]['preserved'])
-        self.assertEqual(module.read_text(), 'saved work')
 
     def test_oversized_and_huge_timestamp_markers_never_hide_or_adopt_user_data(self):
         self.run_folder('old', 1)

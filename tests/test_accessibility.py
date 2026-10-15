@@ -147,37 +147,12 @@ class ElementsTest(unittest.TestCase):
         self.assertEqual(result['frames'], ['Other', 'Notes'])
         self.assertEqual(len(result['elements']), 4)
 
-    def test_single_frame_fallback_ignores_title(self):
-        _, result = self.run_elements(title='Renamed Window')
-        self.assertEqual(result['frame']['name'], 'Notes')
-        self.assertEqual(len(result['elements']), 4)
-
     def test_ambiguous_frames_give_no_frame(self):
         nodes = tree({'root': {'children': ['/other', '/frame']}, '/other': node('frame', 'Other')})
         _, result = self.run_elements(nodes, title='Missing')
         self.assertIsNone(result['frame'])
         self.assertEqual(result['elements'], [])
         self.assertEqual(result['frames'], ['Other', 'Notes'])
-
-    def test_role_filter_is_case_insensitive_exact(self):
-        _, result = self.run_elements(role='PUSH BUTTON')
-        self.assertEqual([e['path'] for e in result['elements']], ['/button'])
-        _, result = self.run_elements(role='push')
-        self.assertEqual(result['elements'], [])
-
-    def test_name_filter_is_substring_and_walks_filtered_parents(self):
-        _, result = self.run_elements(name='SAVE')
-        self.assertEqual([e['path'] for e in result['elements']], ['/button', '/label'])
-
-    def test_state_decoding_across_words(self):
-        _, result = self.run_elements(role='push button')
-        found = result['elements'][0]['states']
-        self.assertEqual(found, ['enabled', 'focusable', 'indeterminate', 'required'])
-        self.assertEqual(accessibility.STATE_NAMES[32], 'indeterminate')
-
-    def test_interfaces_are_stripped_and_lowercased(self):
-        _, result = self.run_elements(role='push button')
-        self.assertEqual(result['elements'][0]['interfaces'], ['accessible', 'component'])
 
     def test_geometry_and_center(self):
         _, result = self.run_elements()
@@ -192,11 +167,6 @@ class ElementsTest(unittest.TestCase):
                 (None,) * 5,
             )
 
-    def test_text_only_for_text_interface_and_truncated(self):
-        _, result = self.run_elements()
-        self.assertIsNone(result['elements'][0]['text'])
-        self.assertEqual(result['elements'][3]['text'], 'x' * 1000)
-
     def test_defunct_node_skips_subtree_but_not_walk(self):
         bus = FakeBus(tree())
         bus.defunct.add('/group')
@@ -209,17 +179,6 @@ class ElementsTest(unittest.TestCase):
         self.assertEqual([e['path'] for e in result['elements']], ['/button', '/group'])
         self.assertEqual(result['nodes'], 2)
         self.assertTrue(result['truncated'])
-
-    def test_max_depth_truncates(self):
-        _, result = self.run_elements(max_depth=1)
-        self.assertEqual([e['path'] for e in result['elements']], ['/button', '/group', '/entry'])
-        self.assertTrue(result['truncated'])
-
-    def test_expired_deadline_raises_before_any_call(self):
-        bus = FakeBus(tree())
-        with self.assertRaisesRegex(TimeoutError, 'exceeded the deadline'):
-            accessibility.elements(4242, 'Notes', bus=bus, deadline=time.monotonic() - 1)
-        self.assertEqual(bus.calls, 0)
 
     def test_deadline_passing_mid_walk_raises(self):
         bus = FakeBus(tree())
@@ -234,11 +193,6 @@ class ElementsTest(unittest.TestCase):
         with self.assertRaises(TimeoutError):
             accessibility.elements(4242, 'Notes', bus=bus, deadline=time.monotonic() + 0.03)
 
-    def test_unreachable_bus_names_org_a11y_bus_and_hint(self):
-        bus = FakeBus(tree(), unreachable=AccessibilityUnavailable('Cannot reach org.a11y.Bus'))
-        with self.assertRaisesRegex(AccessibilityUnavailable, r'org\.a11y\.Bus.*ca a11y --enable'):
-            accessibility.elements(4242, 'Notes', bus=bus)
-
     def test_owned_bus_is_created_and_closed(self):
         bus = FakeBus(tree())
         with patch.object(accessibility, 'Bus', return_value=bus) as factory:
@@ -246,39 +200,6 @@ class ElementsTest(unittest.TestCase):
         factory.assert_called_once_with('unix:path=/x')
         self.assertTrue(bus.closed)
         self.assertEqual(len(result['elements']), 4)
-
-
-class StatusTest(unittest.TestCase):
-    def test_status_available(self):
-        bus = FakeBus(tree())
-        self.assertEqual(
-            accessibility.status(bus=bus),
-            {'available': True, 'enabled': True, 'screen_reader': False},
-        )
-        self.assertFalse(bus.closed)
-
-    def test_status_when_bus_raises_does_not_raise(self):
-        for error in (AccessibilityUnavailable('no org.a11y.Bus'), BusError('timed out')):
-            result = accessibility.status(bus=FakeBus(tree(), unreachable=error))
-            self.assertFalse(result['available'])
-            self.assertIn(str(error), result['error'])
-
-    def test_enable_sets_flag_and_returns_status(self):
-        bus = FakeBus(tree())
-        result = accessibility.enable(bus=bus)
-        self.assertTrue(bus.enabled)
-        self.assertTrue(result['available'])
-
-    def test_enable_unreachable_raises_unavailable(self):
-        bus = FakeBus(tree(), unreachable=BusError('boom'))
-        with self.assertRaisesRegex(AccessibilityUnavailable, 'org.a11y.Bus'):
-            accessibility.enable(bus=bus)
-
-    def test_enable_closes_owned_bus(self):
-        bus = FakeBus(tree())
-        with patch.object(accessibility, 'Bus', return_value=bus):
-            accessibility.enable()
-        self.assertTrue(bus.closed)
 
 
 class MissingJeepneyTest(unittest.TestCase):

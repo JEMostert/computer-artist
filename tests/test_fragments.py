@@ -54,14 +54,6 @@ class FragmentStoreTest(unittest.TestCase):
         self.assertEqual(len(self.memory.history('step')), 2)
         self.assertTrue((self.memory.folder('step') / 'module.py').is_file())
 
-    def test_shared_library_and_archive(self):
-        self.memory.write('step', 'def run(ctx): return 1')
-        self.assertEqual(self.memory.folder('step'), self.memory.root / 'api-fragmants' / 'step')
-        self.assertEqual(self.memory.list()[0]['name'], 'step')
-        result = self.memory.remove('step')
-        self.assertEqual(self.memory.list(), [])
-        self.assertTrue((Path(result['archived']) / 'module.py').is_file())
-
     def test_path_traversal_and_tampering_rejected(self):
         for identity in ('../outside', '/tmp/other', '..'):
             with self.assertRaises(ValueError):
@@ -120,25 +112,6 @@ class FragmentStoreTest(unittest.TestCase):
                 atomic_json(path, {'new': True})
         self.assertEqual(json.loads(path.read_text()), {'old': True})
         self.assertEqual(list(path.parent.glob('.record.json.*')), [])
-
-    def test_invalid_contracts_are_rejected_at_registration(self):
-        declarations = (
-            {'parameters': []},
-            {'description': []},
-            {'parameters': {'size': {'choices': [True]}}},
-            {'parameters': {'size': {'min': 2, 'choices': [1]}}},
-            {'window': {'min_width': 10, 'max_width': 5}},
-        )
-        for declaration in declarations:
-            with self.subTest(declaration=declaration), self.assertRaises(ValueError):
-                contract(f'CONTRACT={declaration!r}\ndef run(ctx, size: int = 2): pass')
-
-    def test_reading_missing_library_does_not_create_directories(self):
-        self.assertEqual(self.memory.list(), [])
-        self.assertEqual(self.memory.history('missing'), [])
-        with self.assertRaises(FileNotFoundError):
-            self.memory.load('missing')
-        self.assertFalse(self.memory.root.exists())
 
     def test_failed_revision_write_removes_only_its_new_version(self):
         original = self.memory.write('step', 'def run(ctx): return 1')

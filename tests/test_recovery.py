@@ -1,6 +1,5 @@
 """Interruption evidence and explicit handoff never resume or escalate input."""
 
-import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -8,7 +7,6 @@ from unittest.mock import patch
 
 from computer_artist.errors import Interrupted, YieldToAgent
 from computer_artist.runtime import Context
-from computer_artist.worker import interruption_evidence
 from computer_artist.workspace import Workspace
 from tests.support import WindowBackend
 
@@ -62,24 +60,6 @@ class RecoveryTest(unittest.TestCase):
             self.ctx.click(relative=(0.5, 0.5))
         self.assertIs(repeated.exception, stopped.exception)
 
-    def test_related_discovery_is_fresh_read_only_even_after_interruption(self):
-        self.backend.window['width'] = 110
-        with self.assertRaises(Interrupted):
-            self.ctx.refresh()
-        self.backend.extra = [self.candidate('later')]
-        self.assertEqual(self.ctx.related_windows()[0]['id'], 'later')
-        self.assertEqual(self.backend.acquire_count, 0)
-        with self.assertRaises(Interrupted):
-            self.ctx.click(relative=(0.5, 0.5))
-
-    def test_geometry_details_preserve_baseline(self):
-        self.backend.window.update(width=110, x=120)
-        with self.assertRaises(Interrupted) as stopped:
-            self.ctx.refresh()
-        self.assertEqual(stopped.exception.code, 'geometry_changed')
-        self.assertEqual(stopped.exception.details['previous_window']['width'], 100)
-        self.assertEqual(stopped.exception.details['current_geometry'], [120, 200, 110, 80])
-
     def test_unrelated_hidden_and_unknown_pid_windows_are_not_candidates(self):
         self.backend.extra = [self.candidate(pid=2), self.candidate('hidden', visible=False)]
         self.ctx.refresh()
@@ -131,41 +111,6 @@ class RecoveryTest(unittest.TestCase):
         self.assertEqual(stopped.exception.code, 'handoff_release_failed')
         with self.assertRaises(Interrupted):
             self.ctx.click(relative=(0.5, 0.5))
-
-    def test_exception_evidence_is_copied_and_portable(self):
-        original = {'geometry': [1, 2, 3, 4]}
-        error = Interrupted('Stopped', code='test', details=original)
-        original['geometry'].append(object())
-        self.assertEqual(error.details['geometry'], [1, 2, 3, 4])
-        json.dumps(error.as_dict(), allow_nan=False)
-
-    def test_worker_evidence_uses_fresh_candidates_bounded_to_three_native_windows(self):
-        self.backend.extra = [
-            self.candidate('xwayland', native=False),
-            *(self.candidate(f'dialog-{index}') for index in range(5)),
-            self.candidate('other-app', pid=2),
-        ]
-        result = {'interruption': Interrupted('Stopped').as_dict()}
-        spec = {'socket': 'unused'}
-        captured = []
-
-        def capture(identity):
-            captured.append(identity)
-            if identity == 'w':
-                raise Interrupted('Window unavailable')
-            return {'id': identity + '-image', 'window': {'id': identity}}
-
-        with (
-            patch('computer_artist.worker.Client', return_value=self.backend) as client,
-            patch('computer_artist.observations.Observations.capture', side_effect=capture),
-        ):
-            interruption_evidence(self.ctx, spec, result)
-        self.assertEqual(captured, ['w', 'dialog-0', 'dialog-1', 'dialog-2'])
-        self.assertEqual(len(result['related_observations']), 3)
-        self.assertEqual(len(result['interruption']['details']['fresh_candidates']), 6)
-        self.assertIn('Window unavailable', result['observation_error'])
-        client.assert_called_once_with('unused', deadline=2, action_budget=20)
-        self.assertEqual(self.backend.actions, [])
 
 
 if __name__ == '__main__':

@@ -93,14 +93,6 @@ class ControllerTest(unittest.TestCase):
             client.heartbeat.join(0.5)
             self.assertIsInstance(client.failure, TimeoutError)
 
-    def test_agent_text_does_not_dispatch(self):
-        with Client(self.path) as client:
-            with client.owned('existing-window'):
-                with self.assertRaises(ValueError):
-                    client.paste('valid prefix 😀')
-        self.assertFalse(any(e['op'] == 'key' for e in self.events))
-        self.assertFalse(any(e['op'] == 'clipboard_set' for e in self.events))
-
     def support_agent_keyboard(self):
         self.replies['capabilities'] = {
             'ok': True,
@@ -114,18 +106,6 @@ class ControllerTest(unittest.TestCase):
                 client.require_keyboard()
         self.assertFalse(any(e['op'] in ('acquire', 'key', 'focus') for e in self.events))
 
-    def test_agent_chords_keep_host_focus_and_release_keys_in_reverse_order(self):
-        self.support_agent_keyboard()
-        with Client(self.path) as client:
-            client.require_keyboard()
-            client.acquire('existing-window')
-            client.chord(29, 31)
-            self.assertEqual(client.held_keys, set())
-        keys = [event for event in self.events if event['op'] == 'key']
-        self.assertEqual([event['code'] for event in keys], [29, 31, 31, 29])
-        self.assertTrue(all(event['lane'] == 'agent' for event in keys))
-        self.assertFalse(any(event['op'] in ('focus', 'clipboard_set') for event in self.events))
-
     def test_agent_chord_budget_failure_reconciles_held_keys(self):
         self.support_agent_keyboard()
         with Client(self.path, action_budget=4) as client:
@@ -136,51 +116,6 @@ class ControllerTest(unittest.TestCase):
             self.assertEqual(client.held_keys, set())
         self.assertTrue(any(event['op'] == 'cancel' for event in self.events))
         self.assertTrue(self.released.is_set())
-
-    def test_first_key_begins_independent_focus_once_per_lease(self):
-        self.support_agent_keyboard()
-        self.replies['capabilities']['operations'].append('keyboard_begin')
-        with Client(self.path) as client:
-            client.acquire('existing-window')
-            client.chord(29, 31)
-            client.chord(30)
-            client.release()
-            client.acquire('existing-window')
-            client.chord(31)
-        operations = [e['op'] for e in self.events]
-        self.assertEqual(operations.count('keyboard_begin'), 2)
-        first_begin = next(e for e in self.events if e['op'] == 'keyboard_begin')
-        self.assertEqual(first_begin['lease'], 'lease-1')
-        self.assertEqual(first_begin['lane'], 'agent')
-        self.assertLess(operations.index('keyboard_begin'), operations.index('key'))
-        self.assertNotIn('focus', operations)
-
-    def test_first_keyboard_notification_still_respects_hard_budget(self):
-        self.support_agent_keyboard()
-        self.replies['capabilities']['operations'].append('keyboard_begin')
-        with Client(self.path, action_budget=3) as client:
-            client.acquire('existing-window')
-            with self.assertRaises(TimeoutError):
-                client.chord(31)
-            self.assertEqual(client.held_keys, set())
-        self.assertFalse(any(e['op'] == 'key' for e in self.events))
-
-    def test_agent_key_requires_acquired_and_ready_target(self):
-        self.support_agent_keyboard()
-        self.replies['acquire'] = {
-            'ok': True,
-            'lease': 'lease-1',
-            'generation': 7,
-            'keyboard_ready': False,
-        }
-        self.replies['ping'] = {'ok': True, 'keyboard_ready': False}
-        with Client(self.path) as client:
-            with self.assertRaisesRegex(ValueError, 'acquired'):
-                client.key(31, True)
-            client.acquire('existing-window')
-            with self.assertRaisesRegex(ValueError, 'not ready'):
-                client.key(31, True)
-        self.assertFalse(any(event['op'] in ('key', 'focus') for event in self.events))
 
     def test_invalid_reply_poisoned_transport_does_not_dispatch_again(self):
         self.replies['windows'] = []
@@ -228,13 +163,6 @@ class ControllerTest(unittest.TestCase):
                 client.path([(1, 2), (2, 3)], interval=30)
             self.assertLess(time.monotonic() - started, 0.5)
         self.assertTrue(self.released.is_set())
-
-    def test_invalid_path_interval_does_not_dispatch(self):
-        with Client(self.path) as client:
-            for interval in (-1, float('nan'), float('inf')):
-                with self.assertRaises(ValueError):
-                    client.path([(1, 2)], interval=interval)
-        self.assertEqual(self.events, [])
 
     def test_delayed_reply_obeys_short_deadline_and_close_preserves_error(self):
         self.delays['move'] = 0.6

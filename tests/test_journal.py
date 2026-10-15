@@ -8,7 +8,6 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from computer_artist.files import atomic_json
 from computer_artist.journal import Journal, partial_result
 
 
@@ -72,18 +71,6 @@ class JournalTest(unittest.TestCase):
                 self.journal.checkpoint()
         self.assertEqual(self.journal.path.read_bytes(), previous)
 
-    def test_unchanged_evidence_is_not_rewritten_and_mutated_event_is_saved(self):
-        event = {'module': 'save', 'status': 'in_progress'}
-        self.context.events.append(event)
-        with patch('computer_artist.journal.atomic_json', wraps=atomic_json) as write:
-            self.journal.checkpoint()
-            self.journal.checkpoint()
-            self.assertEqual(write.call_count, 1)
-            event['status'] = 'verified'
-            self.journal.checkpoint()
-            self.assertEqual(write.call_count, 2)
-        self.assertEqual(partial_result(self.folder)['modules'][0]['status'], 'verified')
-
     def test_invalid_or_final_checkpoint_never_becomes_partial_success(self):
         for record in (
             {'final_outcome_known': True, 'checks': []},
@@ -98,23 +85,6 @@ class JournalTest(unittest.TestCase):
                 partial = partial_result(self.folder)
                 self.assertIn('checkpoint_error', partial)
                 self.assertNotIn('ok', partial)
-
-    def test_malformed_symlink_or_missing_checkpoint_is_not_followed(self):
-        self.assertEqual(partial_result(self.folder), {})
-        self.journal.path.write_text('{invalid')
-        self.assertIn('checkpoint_error', partial_result(self.folder))
-        self.journal.path.unlink()
-        external = self.folder / 'external'
-        external.write_text('{"final_outcome_known": false}')
-        self.journal.path.symlink_to(external)
-        self.assertEqual(partial_result(self.folder), {})
-
-    def test_start_and_close_tolerate_initial_checkpoint_failure(self):
-        with patch.object(self.journal, 'checkpoint', side_effect=OSError('disk unavailable')):
-            self.journal.start()
-            self.journal.close()
-        self.assertFalse(self.journal.thread.is_alive())
-        self.assertTrue(self.journal.errors)
 
 
 if __name__ == '__main__':

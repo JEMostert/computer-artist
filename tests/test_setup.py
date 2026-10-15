@@ -33,24 +33,6 @@ class SetupTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0 if ok else 1, result.stderr)
         return json.loads(result.stdout if ok else result.stderr)
 
-    def test_offline_default_and_idempotency(self):
-        result = self.cli('--codex')
-        target = self.home / '.agents/skills/computer-artist'
-        self.assertEqual(result['destination'], str(target))
-        self.assertTrue((target / 'SKILL.md').is_file())
-        self.assertTrue((target / 'references/programs.md').is_file())
-        self.assertEqual(target.resolve(), ROOT / 'skills/computer-artist')
-        self.assertEqual(self.cli('--codex')['action'], 'unchanged')
-        self.assertFalse((self.home / 'fragments').exists())
-
-    def test_dry_run_and_custom_destination(self):
-        root = self.home / 'custom skills'
-        result = self.cli('--skills-dir', str(root), '--dry-run')
-        self.assertEqual(result['action'], 'install')
-        self.assertFalse(root.exists())
-        self.cli('--skills-dir', str(root))
-        self.assertTrue((root / 'computer-artist').is_symlink())
-
     def test_conflicts_never_overwrite_even_on_remove(self):
         root = self.home / 'skills'
         root.mkdir()

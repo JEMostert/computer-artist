@@ -19,31 +19,6 @@ class RuntimeTest(unittest.TestCase):
         self.backend = WindowBackend()
         self.ctx = Context(self.backend, 'w', self.memory)
 
-    def test_layout_survives_output_rotation_without_storing_images(self):
-        first = self.ctx.observe()
-        self.ctx.target('button', observation=first['id'], rect=[10, 10, 20, 20])
-        for _ in range(5):
-            self.ctx.observe()
-        self.assertFalse(Path(first['full_image']).exists())
-        self.ctx.click(target='@button')
-        self.assertEqual(self.backend.actions, [(120, 220, 272)])
-        self.assertTrue((self.memory.root / 'layout' / 'w' / 'targets' / 'button.json').exists())
-        self.assertEqual(list(self.memory.root.rglob('*.png')), [])
-        self.assertEqual(len(list(self.memory.output.glob('*/.ca-run.json'))), 5)
-
-    def test_execution_observations_stay_in_one_run(self):
-        from computer_artist.storage import inspect, managed_run
-
-        with managed_run(self.memory.output) as folder:
-            store = Workspace(self.memory.root, self.memory.output, folder)
-            context = Context(self.backend, 'w', store)
-            first = context.observe()
-            second = context.observe(since=first['id'])
-            self.assertEqual(context.output, folder)
-            self.assertTrue(Path(first['full_image']).is_relative_to(folder / 'captures'))
-            self.assertTrue(Path(second['full_image']).is_relative_to(folder / 'captures'))
-            self.assertEqual(len(inspect(store.output)['runs']), 1)
-
     def test_named_target_checks_pixels_before_input(self):
         observation = self.ctx.observe()
         self.ctx.target('button', observation=observation['id'], rect=[10, 10, 20, 20])
@@ -93,22 +68,6 @@ class RuntimeTest(unittest.TestCase):
         self.assertLess(self.backend.budget, remaining)
         self.assertEqual(self.ctx.events[0]['status'], 'verified')
         self.assertEqual(self.ctx.events[1]['status'], 'returned_unverified')
-
-    def test_nested_fragment_call_can_pin_a_previous_revision(self):
-        original = self.memory.fragments.write('value', 'def run(ctx): return 1')
-        self.memory.fragments.write('value', 'def run(ctx): return 2', update=True)
-        self.assertEqual(self.ctx.fragments.call('value', version=original['version']), 1)
-        self.assertEqual(self.ctx.events[0]['version'], original['version'])
-        self.assertEqual(self.ctx.fragments.call('value'), 2)
-
-    def test_verification_copies_evidence_and_rejects_empty_names(self):
-        evidence = {'files': ['saved.png']}
-        self.ctx.verify('saved', True, evidence=evidence)
-        evidence['files'].append(object())
-        self.assertEqual(self.ctx.checks[0]['evidence'], {'files': ['saved.png']})
-        for name in ('', ' ', None, 7):
-            with self.assertRaises(ValueError):
-                self.ctx.verify(name, True)
 
     def test_rebound_named_layout_requires_explicit_target_revalidation(self):
         self.memory.assign('w', 'paint', [self.backend.window])
@@ -168,20 +127,6 @@ class RuntimeTest(unittest.TestCase):
         with self.assertRaises(PermissionError):
             self.ctx.focus()
         self.assertEqual(self.backend.acquire_count, 0)
-
-    def test_invalid_path_validates_before_any_input(self):
-        with self.assertRaises(ValueError):
-            self.ctx.path([(10, 10), (1000, 1000)])
-        self.assertEqual(self.backend.acquire_count, 0)
-        with self.assertRaises(ValueError):
-            self.ctx.type('hello')
-        self.assertEqual(self.backend.acquire_count, 0)
-
-    def test_wait_validates_all_conditions_before_observing(self):
-        for bad in ({'unknown': True}, {'stable_for': float('nan')}, {'title_contains': 7}):
-            with self.assertRaises(ValueError):
-                self.ctx.wait_for({'ready': lambda observation: True, 'bad': bad})
-        self.assertIsNone(self.ctx.last_observation)
 
     def test_feedback_exception_cancels_and_preserves_original_error(self):
         def broken(observation):

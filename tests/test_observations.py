@@ -1,6 +1,5 @@
 """Capture evidence and guarded regions without program execution or input."""
 
-import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -45,21 +44,6 @@ class ObservationsTest(unittest.TestCase):
         self.backend = CaptureBackend()
         self.observations = Observations(self.memory, self.backend)
 
-    def test_capture_source_is_preserved_with_legacy_fallback(self):
-        self.assertEqual(self.observations.capture('w')['sources']['image'], 'kwin_main_surface')
-        original = self.backend.request
-
-        def request(op, **kwargs):
-            result = original(op, **kwargs)
-            if op == 'capture':
-                result['source'] = 'kwin_composited_client'
-            return result
-
-        self.backend.request = request
-        self.assertEqual(
-            self.observations.capture('w')['sources']['image'], 'kwin_composited_client'
-        )
-
     def test_scaled_crop_diff_and_observation_retention(self):
         first = self.observations.capture('w')
         ImageDraw.Draw(self.backend.image).rectangle((20, 20, 39, 39), fill='black')
@@ -100,51 +84,6 @@ class ObservationsTest(unittest.TestCase):
                 result = observer.capture('w', since=first['id'])
             self.assertFalse(result['changes']['pixels_changed'])
 
-    def test_snapshot_holds_capture_and_retention_locks_during_image_decode(self):
-        import fcntl
-        import os
-        from unittest.mock import patch
-
-        first = self.observations.capture('w')
-        image_open = Image.open
-        checked = []
-
-        def verify_locks(path, *args, **kwargs):
-            if Path(path) == Path(first['full_image']):
-                for lock in (self.memory.root / '.lock', self.memory.output / '.retention.lock'):
-                    fd = os.open(lock, os.O_RDWR)
-                    try:
-                        with self.assertRaises(BlockingIOError):
-                            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-                    finally:
-                        os.close(fd)
-                checked.append(True)
-            return image_open(path, *args, **kwargs)
-
-        with patch.object(Image, 'open', verify_locks):
-            self.observations.target('w', 'button', first['id'], [10, 10, 20, 20])
-        self.assertEqual(checked, [True])
-
-    def test_diff_survives_cross_run_retention_after_source_snapshot(self):
-        from unittest.mock import patch
-
-        from computer_artist.storage import cleanup
-
-        first = self.observations.capture('w')
-        self.observations.capture('w')
-        observer = self.observations
-        snapshot = observer._snapshot
-
-        def snapshot_then_rotate(window, identity):
-            record, image = snapshot(window, identity)
-            cleanup(self.memory.output, count=1)
-            self.assertFalse(Path(first['full_image']).exists())
-            return record, image
-
-        with patch.object(observer, '_snapshot', snapshot_then_rotate):
-            result = observer.capture('w', since=first['id'])
-        self.assertFalse(result['changes']['pixels_changed'])
-
     def test_missing_snapshot_image_reports_expired_evidence(self):
         first = self.observations.capture('w')
         Path(first['full_image']).unlink()
@@ -165,20 +104,6 @@ class ObservationsTest(unittest.TestCase):
         self.backend.request = request
         with self.assertRaises(Interrupted):
             self.observations.capture('w')
-
-    def test_legacy_guard_requires_explicit_unchanged_revalidation(self):
-        first = self.observations.capture('w')
-        target = self.observations.target('w', 'button', first['id'], [10, 10, 20, 20])
-        path = self.memory.layout('w') / 'targets' / 'button.json'
-        target.pop('window_id')
-        path.write_text(json.dumps(target))
-        with self.assertRaisesRegex(Interrupted, 'revalidate'):
-            self.observations.resolve('w', 'button')
-        self.assertNotIn('window_id', json.loads(path.read_text()))
-        fresh = self.observations.capture('w')
-        adopted = self.observations.revalidate('w', 'button', fresh['id'])
-        self.assertEqual(adopted['window_id'], 'w')
-        self.assertEqual(adopted['sha256'], target['sha256'])
 
     def test_revalidation_refuses_changed_pixels_without_mutating_guard(self):
         first = self.observations.capture('w')

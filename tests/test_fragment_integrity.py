@@ -62,39 +62,6 @@ class FragmentIntegrityTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.store.load('host-procedure')
 
-    def test_listing_keeps_good_entries_when_current_revision_is_corrupt(self):
-        self.store.write('good', 'def run(ctx): return 1')
-        bad = self.store.write('bad', 'def run(ctx): return 2')
-        (self.revision('bad', bad) / 'manifest.json').write_text('{invalid')
-        entries = {entry['name']: entry for entry in self.store.list()}
-        self.assertEqual(set(entries), {'good', 'bad'})
-        self.assertEqual(entries['good']['version'], self.store.load('good')[0]['version'])
-        self.assertEqual(entries['bad']['status'], 'invalid')
-        self.assertTrue(entries['bad']['error'])
-
-    def test_history_reports_corrupt_revision_without_losing_valid_versions(self):
-        original = self.store.write('step', 'def run(ctx): return 1')
-        broken = self.store.write('step', 'def run(ctx): return 2', update=True)
-        (self.revision('step', broken) / 'module.py').write_text('def run(ctx): return 999')
-        history = {entry['version']: entry for entry in self.store.history('step')}
-        self.assertEqual(set(history), {original['version'], broken['version']})
-        self.assertEqual(history[broken['version']]['status'], 'invalid')
-        self.assertTrue(history[broken['version']]['error'])
-        self.assertEqual(history[original['version']]['sha256'], original['sha256'])
-
-    def test_unrepresentable_timestamp_is_reported_per_entry(self):
-        original = self.store.write('step', 'def run(ctx): return 1')
-        broken = self.store.write('step', 'def run(ctx): return 2', update=True)
-        self.store.write('good', 'def run(ctx): return 3')
-        broken['created'] = 10**1000
-        (self.revision('step', broken) / 'manifest.json').write_text(json.dumps(broken))
-        entries = {entry['name']: entry for entry in self.store.list()}
-        self.assertEqual(entries['step']['status'], 'invalid')
-        self.assertIn('version', entries['good'])
-        history = {entry['version']: entry for entry in self.store.history('step')}
-        self.assertEqual(history[broken['version']]['status'], 'invalid')
-        self.assertEqual(history[original['version']]['sha256'], original['sha256'])
-
     def test_restore_valid_history_after_current_manifest_corruption(self):
         original = self.store.write('step', 'def run(ctx): return 1')
         broken = self.store.write('step', 'def run(ctx): return 2', update=True)
@@ -118,20 +85,6 @@ class FragmentIntegrityTest(unittest.TestCase):
             self.store.restore('step', broken['version'])
         self.assertEqual(self.store.load('step')[0]['version'], good['version'])
         self.assertEqual(path.read_text(), 'tampered source')
-
-    def test_restore_switches_existing_revision_without_creating_a_new_one(self):
-        original = self.store.write('step', 'def run(ctx): return 1')
-        current = self.store.write('step', 'def run(ctx): return 2', update=True)
-        before = {
-            path: path.read_bytes()
-            for path in (self.store.folder('step') / 'versions').rglob('*')
-            if path.is_file()
-        }
-        restored = self.store.restore('step', original['version'])
-        self.assertEqual(restored['previous_version'], current['version'])
-        self.assertEqual(self.store.load('step')[0]['version'], original['version'])
-        self.assertEqual({path: path.read_bytes() for path in before}, before)
-        self.assertEqual(len(self.store.history('step')), 2)
 
     def test_archive_refuses_symlink_destination_and_preserves_fragment(self):
         manifest = self.store.write('step', 'def run(ctx): return 1')

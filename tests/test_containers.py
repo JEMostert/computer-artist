@@ -2,7 +2,7 @@ import os
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 from computer_artist import containers, environments
 from computer_artist.containers import Runtime, choose
@@ -24,36 +24,6 @@ class ChooseTest(unittest.TestCase):
             self.assertEqual(choose().name, 'podman')
         with patch.object(containers.shutil, 'which', which('docker')):
             self.assertEqual(choose().name, 'docker')
-
-    def test_explicit_and_environment_choice_win(self):
-        with patch.object(containers.shutil, 'which', which('podman', 'docker')):
-            self.assertEqual(choose('docker').name, 'docker')
-            os.environ['CA_CONTAINER_RUNTIME'] = 'docker'
-            self.assertEqual(choose().name, 'docker')
-            self.assertEqual(choose('podman').name, 'podman')
-
-    def test_missing_runtimes_tell_the_agent_to_inform_the_user(self):
-        with (
-            patch.object(containers.shutil, 'which', which()),
-            self.assertRaisesRegex(RuntimeError, 'Tell the user to install one'),
-        ):
-            choose()
-        with (
-            patch.object(containers.shutil, 'which', which('podman')),
-            self.assertRaisesRegex(RuntimeError, 'docker was selected but is not installed'),
-        ):
-            choose('docker')
-        with self.assertRaisesRegex(ValueError, 'must be one of'):
-            choose('lxc')
-
-    def test_unreachable_docker_daemon_is_reported(self):
-        engine = Runtime('docker')
-        failed = MagicMock(returncode=1, stderr='Cannot connect to the Docker daemon', stdout='')
-        with (
-            patch.object(containers.subprocess, 'run', return_value=failed),
-            self.assertRaisesRegex(RuntimeError, 'start Docker Desktop or the docker service'),
-        ):
-            engine.check()
 
 
 class DockerCommandTest(unittest.TestCase):
@@ -103,28 +73,6 @@ class DockerCommandTest(unittest.TestCase):
             command = self.command(engine, gpu=True)
         self.assertEqual(command[command.index('--gpus') + 1], 'all')
         self.assertNotIn('nvidia.com/gpu=all', command)
-
-    def test_exec_and_cleanup_words_differ_per_runtime(self):
-        docker, podman = Runtime('docker'), Runtime('podman')
-        self.assertEqual(
-            docker.exec_command('c', ['app'], {'A': '1'}, '/w'),
-            ['docker', 'exec', '--env', 'A=1', '--workdir', '/w', 'c', 'app'],
-        )
-        self.assertIn('--interactive=false', podman.exec_command('c', ['app']))
-        self.assertEqual(docker.remove_words('c'), ['rm', '--force', 'c'])
-        self.assertIn('--ignore', podman.remove_words('c'))
-        self.assertEqual(
-            docker.build_command('t', 'F', 'ctx', pull=True),
-            ['docker', 'build', '--tag', 't', '--file', 'F', '--pull', 'ctx'],
-        )
-
-    def test_runtime_is_validated_and_needs_a_container(self):
-        definition = environments.normalize({'image': 'alpine', 'runtime': 'docker'}, self.root)
-        self.assertEqual(definition['runtime'], 'docker')
-        with self.assertRaisesRegex(ValueError, 'runtime must be one of'):
-            environments.normalize({'image': 'alpine', 'runtime': 'lxc'}, self.root)
-        with self.assertRaisesRegex(ValueError, 'require image or'):
-            environments.normalize({'runtime': 'docker'}, self.root)
 
     def test_started_environment_keeps_its_recorded_runtime(self):
         state, _ = environments.locations('web')

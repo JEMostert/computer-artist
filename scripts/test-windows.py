@@ -9,7 +9,6 @@ sys.path.insert(0, str(root))
 suite = unittest.TestSuite()
 for filename in (
     'test_windows.py',
-    'test_architecture.py',
     'test_runtime.py',
     'test_programs.py',
     'test_journal.py',

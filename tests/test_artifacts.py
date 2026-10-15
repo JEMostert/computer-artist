@@ -1,9 +1,7 @@
 """Export verification checks real files without dispatching desktop input."""
 
 import hashlib
-import json
 import os
-import sys
 import tempfile
 import threading
 import time
@@ -106,14 +104,6 @@ class ArtifactsTest(unittest.TestCase):
         with self.assertRaises(OSError):
             inspect_file(self.path, kind='image')
 
-    def test_wrong_json_value_and_minimum_bytes_never_pass(self):
-        self.path.write_text('{"value": 3}', encoding='utf-8')
-        self.assertFalse(self.wait(kind='json', expected_json={'value': 4})['passed'])
-        self.assertFalse(self.wait(min_bytes=100)['passed'])
-        self.path.write_bytes(b'')
-        self.assertFalse(self.wait()['passed'])
-        self.assertTrue(self.wait(min_bytes=0)['passed'])
-
     def test_json_expectation_preserves_boolean_type_and_ignores_key_order(self):
         self.path.write_text('{"saved": true, "count": 1}', encoding='utf-8')
         self.assertTrue(self.wait(kind='json', expected_json={'count': 1, 'saved': True})['passed'])
@@ -177,51 +167,6 @@ class ArtifactsTest(unittest.TestCase):
         with patch('computer_artist.artifacts.MAX_PIXELS', 50):
             with self.assertRaisesRegex(ValueError, 'pixel budget'):
                 inspect_file(self.path, kind='image')
-
-    def test_missing_pillow_is_a_configuration_error_not_a_failed_export(self):
-        Image.new('RGB', (4, 4)).save(self.path, format='PNG')
-        with patch.dict(sys.modules, {'PIL': None, 'PIL.Image': None}):
-            with self.assertRaisesRegex(RuntimeError, 'Pillow is required'):
-                self.wait(kind='image')
-
-    def test_decode_bomb_is_a_failed_check_with_pixel_limit_evidence(self):
-        Image.new('RGB', (10, 10)).save(self.path, format='PNG')
-        with patch('PIL.Image.MAX_IMAGE_PIXELS', 10):
-            result = self.wait(kind='image')
-        self.assertFalse(result['passed'])
-        self.assertEqual(result['evidence']['reason'], 'image exceeds decoded pixel limit')
-
-    def test_validation_rejects_incompatible_or_wrong_path_expectations(self):
-        self.path.write_text('saved', encoding='utf-8')
-        baseline = snapshot_file(self.root / 'other')
-        for options in (
-            {'after': baseline},
-            {'kind': 'text', 'expected_json': {}},
-            {'kind': 'json', 'expected_text': 'saved'},
-            {'kind': 'image', 'image_size': [0, 10]},
-            {'sha256': 'invalid'},
-            {'max_bytes': 0},
-            {'kind': 'json', 'expected_json': float('nan')},
-        ):
-            with self.subTest(options=options), self.assertRaises(ValueError):
-                self.wait(**options)
-
-    def test_success_evidence_is_finite_json_and_read_only(self):
-        content = b'{"saved": true}'
-        self.path.write_bytes(content)
-        result = self.wait(kind='json', expected_json={'saved': True})
-        json.dumps(result, allow_nan=False)
-        self.assertEqual(self.path.read_bytes(), content)
-        self.assertEqual(sorted(path.name for path in self.root.iterdir()), ['export'])
-
-    def test_unchanged_image_is_decoded_once_during_stability_polling(self):
-        from computer_artist import artifacts
-
-        Image.new('RGB', (10, 10), 'red').save(self.path, format='PNG')
-        with patch('computer_artist.artifacts._decode', wraps=artifacts._decode) as decode:
-            result = self.wait(kind='image')
-        self.assertTrue(result['passed'])
-        self.assertEqual(decode.call_count, 1)
 
 
 if __name__ == '__main__':

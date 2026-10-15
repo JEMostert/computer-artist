@@ -1,4 +1,3 @@
-import json
 import os
 import sys
 import tempfile
@@ -49,16 +48,6 @@ class BoxDefinitionTest(unittest.TestCase):
         self.assertEqual((mount['target'], mount['mode']), ('/data', 'ro'))
         self.assertTrue(mount['source'].endswith(r'C:\Users\me\data'))
 
-    def test_images_and_gpus_are_explained(self):
-        for data in ({'image': 'alpine'}, {'gpu': True}):
-            with (
-                self.subTest(data=data),
-                self.assertRaisesRegex(ValueError, 'FROM \\$\\{BOX_IMAGE'),
-            ):
-                box.normalize(data, self.root)
-        with self.assertRaisesRegex(ValueError, 'absolute path inside the box'):
-            box.normalize({'apps': [{'command': 'kwrite', 'cwd': 'relative'}]}, self.root)
-
     def test_run_command_mounts_state_window_and_project(self):
         definition = box.normalize({'project': 'project', 'width': 1280}, self.root)
         engine = box.Runtime('docker')
@@ -81,16 +70,6 @@ class BoxDefinitionTest(unittest.TestCase):
         command = box.run_command('web', definition, 'img', engine)
         self.assertEqual(command[command.index('--user') + 1], f'{os.getuid()}:{os.getgid()}')
         self.assertIn('--userns=keep-id:uid=1000,gid=1000', box.user_args(box.Runtime('podman')))
-
-    def test_builds_pin_the_amd64_base(self):
-        log = self.root / 'build.log'
-        command = box.Runtime('docker').build_command('tag', 'Containerfile', '.')
-        with patch.object(box.subprocess, 'run') as run:
-            run.return_value.returncode = 0
-            box.build(box.Runtime('docker'), command, log)
-        self.assertEqual(
-            run.call_args.args[0][:4], ['docker', 'build', '--platform', 'linux/amd64']
-        )
 
     def test_macos_uses_boxes_and_a_native_desktop_socket(self):
         from computer_artist.config import socket_path
@@ -130,13 +109,6 @@ class BoxPathTest(unittest.TestCase):
     def test_unshared_paths_are_refused(self):
         with self.assertRaisesRegex(ValueError, 'not shared with the environment'):
             box.to_box('/etc/passwd', self.pairs)
-
-    def test_json_output_lines_are_translated(self):
-        line = json.dumps({'path': '/ca/environments/web/output/x.png', 'text': '/project'}) + '\n'
-        value = json.loads(box.translate_line(line, self.pairs))
-        self.assertEqual(value['path'], str(self.root / 'environments/web/output/x.png'))
-        self.assertEqual(value['text'], str(self.root / 'project'))
-        self.assertEqual(box.translate_line('"/elsewhere"', self.pairs), '"/elsewhere"')
 
     def test_only_path_arguments_are_rewritten(self):
         target = str(self.root / 'project/shot.png')

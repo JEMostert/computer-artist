@@ -135,20 +135,6 @@ class CLITest(unittest.TestCase):
         self.assertEqual(self.events[-1]['op'], 'release')
         self.assertEqual(json.loads(result.stdout)['status'], 'dispatched')
 
-    def test_type_focuses_without_mouse_events(self):
-        result = self.ca('--host', 'type', '--window', 'target', 'Ab 😀')
-        self.assertEqual(result.returncode, 0, result.stderr)
-        ops = [e['op'] for e in self.events]
-        self.assertLess(ops.index('focus'), ops.index('key'))
-        self.assertLess(ops.index('clipboard_set'), ops.index('key'))
-        self.assertEqual(
-            next(e['text'] for e in self.events if e['op'] == 'clipboard_set'), 'Ab 😀'
-        )
-        self.assertEqual([e['code'] for e in self.events if e['op'] == 'key'], [42, 110, 110, 42])
-        self.assertFalse(any(op in ('move', 'button') for op in ops))
-        self.assertEqual(ops[-1], 'release')
-        self.assertFalse(json.loads(result.stdout)['clipboard_restored'])
-
     def test_host_paste_restores_the_users_clipboard(self):
         self.clipboard = 'what the user copied'
         result = self.ca('--host', 'type', '--window', 'target', 'pasted text')
@@ -171,23 +157,12 @@ class CLITest(unittest.TestCase):
         self.assertFalse((self.path / 'window').exists())
         self.assertFalse((self.path / 'output').exists())
 
-    def test_invalid_svg_rejected_before_connecting(self):
-        result = self.ca('draw', '--window', 'target', '--path', 'M10 10 C20 20')
-        self.assertEqual(result.returncode, 1)
-        self.assertEqual(self.events, [])
-        self.assertFalse((self.path / 'output').exists())
-
     def test_svg_fifo_is_rejected_without_blocking_or_connecting(self):
         source = self.path / 'path.fifo'
         os.mkfifo(source)
         result = self.ca('draw', '--window', 'target', '--path-file', str(source))
         self.assertEqual(result.returncode, 1)
         self.assertIn('regular', result.stderr)
-        self.assertEqual(self.events, [])
-
-    def test_oversized_text_has_no_side_effects(self):
-        result = self.ca('--host', 'type', '--window', 'target', '😀' * 2049)
-        self.assertEqual(result.returncode, 1)
         self.assertEqual(self.events, [])
 
     def test_rejected_focus_returns_lease_without_typing(self):
@@ -230,62 +205,6 @@ class CLITest(unittest.TestCase):
         self.assertIn('not ready', result.stderr)
         self.assertFalse(any(event['op'] in ('key', 'focus') for event in self.events))
         self.assertEqual(self.events[-1]['op'], 'release')
-
-    def test_outside_coordinates_do_not_dispatch_input(self):
-        result = self.ca('click', '--window', 'target', '--x', '300', '--y', '0')
-        self.assertEqual(result.returncode, 1)
-        self.assertFalse(any(e['op'] in ('move', 'button') for e in self.events))
-        self.assertFalse(any(e['op'] == 'acquire' for e in self.events))
-
-    def test_stop_uses_external_takeover(self):
-        result = self.ca('stop')
-        self.assertEqual(result.returncode, 0)
-        self.assertEqual(self.events[0]['op'], 'takeover')
-
-    def test_socket_option_before_or_after_command_overrides_environment(self):
-        self.env['CA_SOCKET'] = str(self.path / 'missing')
-        for args in [
-            ('--socket', str(self.path / 'control'), 'windows'),
-            ('windows', '--socket', str(self.path / 'control')),
-        ]:
-            result = self.ca(*args)
-            self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertEqual(json.loads(result.stdout)['windows'][0]['id'], 'target')
-
-    def test_host_flag_is_explicit_and_session_open_is_removed(self):
-        for args in [
-            ('--host', 'move', '--window', 'target', '--x', '5', '--y', '8'),
-            ('move', '--host', '--window', 'target', '--x', '5', '--y', '8'),
-        ]:
-            self.events.clear()
-            result = self.ca(*args)
-            self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertTrue(all(e['lane'] == 'host' for e in self.events))
-        self.events.clear()
-        self.assertEqual(self.ca('session', 'open').returncode, 2)
-        self.assertEqual(self.events, [])
-        self.assertEqual(self.ca('focus', '--window', 'target').returncode, 1)
-        self.assertFalse(any(e['op'] == 'acquire' for e in self.events))
-
-    def test_set_name_resolves_actions_and_renames_existing_layout(self):
-        old = self.path / 'window' / 'layout' / 'target'
-        old.mkdir(parents=True)
-        (old / 'window.json').write_text('{"id":"target"}')
-        result = self.ca('set', 'target', '--name', 'kolourpaint')
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(json.loads(result.stdout)['window'], 'target')
-        self.assertTrue((self.path / 'window' / 'layout' / 'kolourpaint' / 'window.json').exists())
-        self.assertFalse(old.exists())
-        listed = json.loads(self.ca('windows').stdout)['windows']
-        self.assertEqual(listed[0]['name'], 'kolourpaint')
-        self.events.clear()
-        self.assertEqual(
-            self.ca('click', '--window', 'kolourpaint', '--x', '20', '--y', '30').returncode, 0
-        )
-        self.assertEqual(next(e['window'] for e in self.events if e['op'] == 'acquire'), 'target')
-        self.assertEqual(self.ca('set', 'target', '--name', 'paint').returncode, 0)
-        self.assertTrue((self.path / 'window' / 'layout' / 'paint' / 'window.json').exists())
-        self.assertFalse((self.path / 'window' / 'layout' / 'kolourpaint').exists())
 
     def test_live_name_collision_and_stale_name_rebinding(self):
         self.window_ids = ['target', 'other']

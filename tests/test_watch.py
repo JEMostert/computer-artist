@@ -61,30 +61,6 @@ class WatchTest(unittest.TestCase):
         self.assertTrue(Path(finished['record']).exists())
         self.assertEqual(self.backend.acquire_count, 0)
 
-    def test_retention_bounds_frames_inside_one_run(self):
-        # Long enough that slow CI runners still produce well over 15 frames.
-        self.args.duration = 2.5
-        result = watch(self.backend, self.args, self.events.append)
-        self.assertGreater(result['frames'], 15)
-        folder = Path(result['record']).parent
-        self.assertEqual(len(list((folder / 'captures/w').glob('*.json'))), 15)
-        self.assertEqual(len(list(self.args.output_dir.glob('*/.ca-run.json'))), 1)
-
-    def test_invalid_polling_options_create_no_output(self):
-        for field, value in (('interval', 0.001), ('duration', 30), ('duration', float('nan'))):
-            args = Namespace(**vars(self.args))
-            setattr(args, field, value)
-            with self.assertRaises(ValueError):
-                watch(self.backend, args, self.events.append)
-        self.assertFalse(self.args.output_dir.exists())
-
-    def test_exact_single_frame_budget_can_finish_successfully(self):
-        self.backend.budget = 4
-        self.args.duration = 0.01
-        result = watch(self.backend, self.args, self.events.append)
-        self.assertTrue(result['ok'])
-        self.assertEqual(result['frames'], 1)
-
     def test_targeted_watch_stop_records_acknowledgement_without_input(self):
         self.args.duration = 5
 

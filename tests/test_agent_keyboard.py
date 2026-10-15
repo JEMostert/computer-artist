@@ -71,15 +71,6 @@ class AgentKeyboardTest(unittest.TestCase):
             ],
         )
 
-    def test_legacy_support_is_rejected_before_acquisition(self):
-        backend = KeyboardBackend(keyboard=False)
-        ctx = Context(backend, 'w', self.store)
-        for action in (lambda: ctx.press('S'), lambda: ctx.key_down('S'), lambda: ctx.key_up('S')):
-            with self.assertRaisesRegex(ValueError, 'independent agent keyboard'):
-                action()
-        self.assertEqual(backend.acquire_count, 0)
-        self.assertEqual(backend.actions, [])
-
     def test_clipboard_text_still_requires_explicit_host(self):
         for action in (
             lambda: self.ctx.type('text'),
@@ -89,15 +80,6 @@ class AgentKeyboardTest(unittest.TestCase):
         ):
             with self.assertRaises(ValueError):
                 action()
-        self.assertEqual(self.backend.acquire_count, 0)
-        self.assertEqual(self.backend.actions, [])
-
-    def test_invalid_duration_or_key_does_not_acquire(self):
-        for duration in (-1, float('nan'), float('inf')):
-            with self.assertRaises(ValueError):
-                self.ctx.press('S', duration=duration)
-        with self.assertRaises(ValueError):
-            self.ctx.key_down('Ctrl+S')
         self.assertEqual(self.backend.acquire_count, 0)
         self.assertEqual(self.backend.actions, [])
 

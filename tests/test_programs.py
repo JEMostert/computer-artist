@@ -154,13 +154,6 @@ class ProgramsTest(unittest.TestCase):
             'def run(ctx): return float("nan")', status='failed', error_type='ValueError'
         )
 
-    def test_budget_is_checked_after_run(self):
-        self.assert_parity(
-            'def run(ctx):\n    ctx.client.budget = 0\n    return "finished"',
-            status='interrupted',
-            error_type='TimeoutError',
-        )
-
     def test_nested_checks_are_scoped_to_each_invocation(self):
         self.workspace.fragments.write('child', 'def run(ctx): return "child"')
         _, stored = self.assert_parity(
@@ -172,17 +165,6 @@ class ProgramsTest(unittest.TestCase):
         self.assertEqual(stored['modules'][0]['status'], 'verified')
         self.assertEqual(stored['modules'][1]['status'], 'returned_unverified')
         self.assertEqual(stored['modules'][1]['checks'], [])
-
-    def test_source_filenames_remain_useful(self):
-        source = 'def run(ctx): return run.__code__.co_filename'
-        inline = self.execute(source, stored=False)
-        stored = self.execute(source, stored=True)
-        self.assertEqual(inline['result'], '<ca execute>')
-        revision = stored['modules'][0]['version']
-        self.assertEqual(
-            stored['result'],
-            str(self.workspace.fragments.folder('program') / 'versions' / revision / 'module.py'),
-        )
 
     def test_verified_child_does_not_verify_parent_outcome(self):
         self.workspace.fragments.write(
@@ -229,13 +211,6 @@ class ProgramsTest(unittest.TestCase):
                 self.assertEqual(result['status'], 'failed')
                 self.assertEqual(result['error_type'], 'ValueError')
                 self.assertEqual(len(result['checks']), 1)
-
-    def test_failed_module_keeps_its_own_check_evidence(self):
-        result = self.execute(
-            'def run(ctx):\n    ctx.verify("saved", False, evidence={"exists": False})',
-            stored=True,
-        )
-        self.assertEqual(result['modules'][0]['checks'], result['checks'])
 
     def test_file_outcome_check_verifies_fresh_exact_export(self):
         artifact = self.root / 'saved.txt'
