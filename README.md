@@ -17,8 +17,9 @@ focus. Canvases, drawing and apps that ignore UI Automation are refused there. S
 
 For development and testing, give each agent a private environment instead: its own
 KWin desktop, seat, clipboard and session bus, with apps from the host or a Podman
-or Docker container. On Windows each environment is a Linux box container instead
-(see [Windows](docs/WINDOWS.md)). Nothing in it touches your pointer, focus or browser:
+or Docker container. On Windows and macOS each environment is a Linux box container
+instead (see [Windows](docs/WINDOWS.md) and [macOS](docs/MACOS.md)); macOS supports
+only these environments. Nothing in it touches your pointer, focus or browser:
 
 ```bash
 ca env start web --image docker.io/library/node:22 --project .   # or --recipe ca-env.toml

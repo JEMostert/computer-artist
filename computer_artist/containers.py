@@ -13,7 +13,8 @@ RUNTIMES = ('podman', 'docker')
 MISSING = (
     'Container environments need Docker or Podman and neither was found. Tell the user to '
     'install one (Linux: rootless Podman recommended, or Docker; Windows: Docker Desktop '
-    'with the WSL 2 backend), or use an environment without --image/--containerfile.'
+    'with the WSL 2 backend; macOS: Docker Desktop or Podman), or use an environment '
+    'without --image/--containerfile.'
 )
 
 

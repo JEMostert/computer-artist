@@ -1,5 +1,6 @@
 import json
 import os
+import sys
 import tempfile
 import unittest
 from pathlib import Path, PurePosixPath
@@ -70,8 +71,9 @@ class BoxDefinitionTest(unittest.TestCase):
         self.assertIn(f'type=bind,source={self.root / "project"},target=/project', mounts)
         self.assertEqual(command[command.index('img') :], ['img', 'web', '--width', '1280',
                                                             '--height', '1000'])  # fmt: skip
-        if os.name == 'nt':
-            # Docker Desktop shares Windows folders with the image's own user.
+        self.assertEqual(command[command.index('--platform') + 1], 'linux/amd64')
+        if os.name == 'nt' or sys.platform == 'darwin':
+            # Docker Desktop shares Windows and macOS folders with the image's own user.
             self.assertNotIn('--user', command)
             return
         self.assertEqual(command[command.index('--user') + 1], '0:0')
@@ -79,6 +81,28 @@ class BoxDefinitionTest(unittest.TestCase):
         command = box.run_command('web', definition, 'img', engine)
         self.assertEqual(command[command.index('--user') + 1], f'{os.getuid()}:{os.getgid()}')
         self.assertIn('--userns=keep-id:uid=1000,gid=1000', box.user_args(box.Runtime('podman')))
+
+    def test_builds_pin_the_amd64_base(self):
+        log = self.root / 'build.log'
+        command = box.Runtime('docker').build_command('tag', 'Containerfile', '.')
+        with patch.object(box.subprocess, 'run') as run:
+            run.return_value.returncode = 0
+            box.build(box.Runtime('docker'), command, log)
+        self.assertEqual(
+            run.call_args.args[0][:4], ['docker', 'build', '--platform', 'linux/amd64']
+        )
+
+    def test_macos_uses_boxes_and_has_no_desktop_socket(self):
+        from computer_artist.config import socket_path
+
+        with patch.object(box.sys, 'platform', 'darwin'), patch.dict(os.environ, {}, clear=True):
+            self.assertTrue(box.enabled())
+            self.assertEqual(socket_path('/tmp/explicit'), '/tmp/explicit')
+            if os.name == 'nt':
+                return  # Windows has its own desktop backend.
+            self.assertEqual(box.user_args(box.Runtime('docker')), [])
+            with self.assertRaisesRegex(ValueError, 'ca env start NAME'):
+                socket_path()
 
 
 class BoxPathTest(unittest.TestCase):

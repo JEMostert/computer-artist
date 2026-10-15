@@ -26,7 +26,7 @@ class EnvironmentDefinitionTest(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
-        self.root = Path(self.tmp.name)
+        self.root = Path(self.tmp.name).resolve()  # macOS temp folders are symlinks.
         patcher = patch.dict(
             os.environ,
             CA_ENVIRONMENTS_DIR=str(self.root / 'environments'),
@@ -146,9 +146,9 @@ class EnvironmentDefinitionTest(unittest.TestCase):
 
     def test_remove_requires_confirmation_and_a_stopped_environment(self):
         environments.define('gone', flags())
-        with self.assertRaisesRegex(ValueError, '--yes'):
-            environments.remove('gone', False)
-        with patch.object(environments, 'run'):
+        with patch.object(environments, 'run'):  # No systemctl on every test host.
+            with self.assertRaisesRegex(ValueError, '--yes'):
+                environments.remove('gone', False)
             environments.remove('gone', True)
         self.assertIsNone(environments.stored('gone'))
 
@@ -279,6 +279,12 @@ class EnvironmentDefinitionTest(unittest.TestCase):
 
 
 class EnvironmentCommandTest(unittest.TestCase):
+    def setUp(self):
+        # These cover the Linux backend; macOS and Windows route to boxes (test_box).
+        patcher = patch('computer_artist.box.enabled', return_value=False)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
     def test_exec_keeps_application_options_after_the_separator(self):
         args = parser().parse_args(
             ['env', 'exec', 'web', '--name', 'term', '--', 'foot', '--title', 'x']

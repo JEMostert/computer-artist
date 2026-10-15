@@ -1,7 +1,8 @@
 # Installation
 
-For native Windows support, follow [Windows installation](WINDOWS.md). The KWin
-build and session instructions below apply to Linux only.
+For native Windows support, follow [Windows installation](WINDOWS.md); for macOS
+(private environments only), follow [macOS](MACOS.md). The KWin build and session
+instructions below apply to Linux only.
 
 Requires Python 3.12+, Pillow, jeepney, KDE Wayland and matching installed KWin
 development headers. Accessibility reading needs `at-spi2-core`. Installing Python

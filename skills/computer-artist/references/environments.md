@@ -5,14 +5,14 @@ with the matching plugin, a private D-Bus session bus and a small manager. With 
 image it also runs one container. The container receives only the desktop's
 Wayland/bus sockets, its HOME and browser profiles, and the declared mounts, all at
 their host paths. The CLI never routes a stopped or missing environment to the
-user's desktop. On Windows every environment is a Linux box instead; see
-[Windows](windows.md).
+user's desktop. On Windows and macOS every environment is a Linux box instead; see
+[Linux boxes](#linux-boxes-windows-and-macos).
 
 ## Container runtime
 
 Podman and Docker both work. The choice is `--runtime podman|docker` (stored with
 the definition), else `CA_CONTAINER_RUNTIME`, else Podman when installed, else
-Docker (on Windows: Docker first). Podman runs rootless with `--userns=keep-id`;
+Docker (on Windows and macOS: Docker first). Podman runs rootless with `--userns=keep-id`;
 rootless Docker maps container root to you; rootful Docker runs the container as
 your uid. Membership of the `docker` group is equivalent to root on the host;
 prefer rootless Podman or rootless Docker. `ca env doctor NAME` reports the runtime
@@ -86,3 +86,31 @@ microphone. XWayland windows display and capture but accept no input. Portals,
 notifications and secrets are bus-activated host services inside the private
 session. `ca env doctor NAME` checks tools, image, mounts, GPU, services and apps.
 `ca env remove NAME --yes` deletes a stopped environment's data and built image.
+
+## Linux boxes (Windows and macOS)
+
+There each environment is one Docker (or Podman) container running the private
+KWin desktop, its D-Bus session and the manager described above. The box image is
+built from this checkout on first start (several minutes once, then cached; rebuilt
+when the sources change). On Apple silicon it runs under amd64 emulation.
+
+```bash
+ca env start TASK --project .                 # project appears in the box at /project
+ca env exec TASK --name app --wait-window TITLE -- program args
+ca env exec TASK --wait -- npm test
+ca env browser TASK --family firefox --executable firefox --name web
+ca --environment TASK windows                  # every ca command takes --environment
+ca --environment TASK observe --window app
+ca --environment TASK type --window app 'Hello'
+ca env status TASK                             # "paths" maps box paths to host paths
+ca env stop TASK
+```
+
+Commands run inside the box. Paths in arguments (`capture OUTPUT`, `--trace`,
+`--path-file`, `files PATH`) must lie under the project, a mount or the
+environment folder; replies show host paths again. Inside `ca execute` programs
+use box paths (`/project/...`). The box contains KWrite, Konsole and Firefox;
+install extra apps with a recipe `containerfile` that starts with `ARG BOX_IMAGE`
+and `FROM ${BOX_IMAGE}`. Plain `--image`, `--gpu` and `exec --on-host` are not
+supported in a box. Default lane, names, layouts, fragments and evidence behave as
+above.

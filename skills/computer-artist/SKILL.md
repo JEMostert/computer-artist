@@ -1,6 +1,6 @@
 ---
 name: computer-artist
-description: Use the ca CLI to test and interact with GUI applications on Linux (KDE Wayland) or Windows, preferring private agent environments; control the user's actual desktop only when explicitly requested.
+description: Use the ca CLI to test and interact with GUI applications on Linux (KDE Wayland), Windows or macOS, preferring private agent environments; control the user's actual desktop only when explicitly requested.
 ---
 
 # Computer Artist
@@ -10,24 +10,24 @@ Use `ca` from PATH or this skill's checkout. The CLI is the interface; Python
 
 ## 1. Detect the operating system, then follow only its guide
 
-Determine where you run before any `ca` command: `uname -s` printing `Linux`, or a
-Windows shell (`$env:OS` is `Windows_NT`, or `ver`). Then read exactly one guide
-and follow its steps; never mix the two:
+Determine where you run before any `ca` command: `uname -s` printing `Linux` or
+`Darwin`, or a Windows shell (`$env:OS` is `Windows_NT`, or `ver`). Then read
+exactly one guide and follow its steps; never mix them:
 
 - Linux: [Linux (KDE Wayland)](references/linux.md)
 - Windows: [Windows](references/windows.md)
-- Anything else (for example macOS): Computer Artist does not support it yet. Tell
-  the user and stop.
+- macOS: [macOS](references/macos.md) (private environments only)
+- Anything else: Computer Artist does not support it yet. Tell the user and stop.
 
 ## 2. Rules on every platform
 
 - Prefer a private environment for development and testing (`ca env`). Use the
   user's actual desktop only when the user explicitly asks for it.
-- Container environments need Docker or Podman (on Windows every environment
-  does). When `ca env start` reports that neither is installed or usable, stop and
-  tell the user: "Private test environments need Docker or Podman; please install
-  one (Linux: Podman or Docker; Windows: Docker Desktop with WSL 2)". Never fall
-  back to the user's desktop instead.
+- Container environments need Docker or Podman (on Windows and macOS every
+  environment does). When `ca env start` reports that neither is installed or
+  usable, stop and tell the user: "Private test environments need Docker or Podman;
+  please install one (Linux: Podman or Docker; Windows: Docker Desktop with WSL 2;
+  macOS: Docker Desktop)". Never fall back to the user's desktop instead.
 - Never silently move the human's pointer or steal focus. The default agent lane
   never falls back to host input; do not use `--host` to work around a refusal.
   `--host` needs the user's authorization in the current task.

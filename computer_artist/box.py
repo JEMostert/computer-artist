@@ -1,7 +1,7 @@
 """Private environments on hosts without KWin: one Linux box container per environment.
 
-On Windows, `ca env` runs the same private KWin desktop as on Linux, but inside a
-Docker (or Podman) container built from containers/linux-box. Every
+On Windows and macOS, `ca env` runs the same private KWin desktop as on Linux, but
+inside a Docker (or Podman) container built from containers/linux-box. Every
 `ca --environment NAME ...` command runs inside that box through `exec`; paths in
 its arguments and JSON output are translated between the host and the box. The
 box never touches the user's own desktop, and a stopped box is an error, never a
@@ -41,10 +41,16 @@ DEFAULTS = {
 SOURCES = ('ca', 'pyproject.toml', 'containers/linux-box/Containerfile', '.dockerignore')
 # Arguments holding host paths; positional ones are named by their argparse dest.
 PATH_DESTS = ('trace', 'window_dir', 'output_dir', 'path_file', 'output', 'path')
+# The Arch base is published for amd64 only; arm64 hosts (Apple silicon) emulate it.
+PLATFORM = 'linux/amd64'
 
 
 def enabled():
-    return os.name == 'nt' or os.environ.get('CA_ENVIRONMENT_BACKEND') == 'box'
+    return (
+        os.name == 'nt'
+        or sys.platform == 'darwin'
+        or os.environ.get('CA_ENVIRONMENT_BACKEND') == 'box'
+    )
 
 
 def root():
@@ -279,6 +285,7 @@ def base_tag(source):
 
 
 def build(engine, command, log):
+    command[2:2] = ['--platform', PLATFORM]
     with log.open('ab') as stream:
         stream.write(('\n$ ' + ' '.join(command) + '\n').encode())
         stream.flush()
@@ -331,6 +338,7 @@ def mapping(name, definition):
 def run_command(name, definition, image, engine):
     root().mkdir(parents=True, exist_ok=True)
     command = engine.run_prefix(container(name)) + [
+        '--platform', PLATFORM,
         '--label', f'computer-artist.box={name}',
         '--hostname', 'ca-' + name.lower().replace('_', '-'),
         '--stop-timeout', '10',
@@ -360,10 +368,11 @@ def run_command(name, definition, image, engine):
 def user_args(engine):
     """Who runs the box so that it can write the host folders it mounts.
 
-    Docker Desktop and Podman on Windows share host folders with any container user,
-    so the image's own user stays. On Linux the box user must map to the invoking user.
+    Docker Desktop and Podman on Windows and macOS share host folders with any
+    container user, so the image's own user stays. On Linux the box user must map to
+    the invoking user.
     """
-    if os.name == 'nt':
+    if os.name == 'nt' or sys.platform == 'darwin':
         return []
     if engine.name == 'podman':
         return ['--userns=keep-id:uid=1000,gid=1000']
@@ -554,7 +563,7 @@ def doctor(name):
         engine.check()
         check('container_runtime', True, engine.name)
     except (RuntimeError, ValueError) as error:
-        check('container_runtime', False, str(error), 'Install Docker Desktop (WSL 2) or Podman')
+        check('container_runtime', False, str(error), 'Install Docker Desktop or Podman')
         engine = None
     try:
         source = checkout()

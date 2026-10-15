@@ -1,0 +1,29 @@
+{
+  "date": "2026-10-15",
+  "platform": "macOS 27.0.1 (arm64, Apple M1 Pro)",
+  "python": "3.13.16",
+  "container_runtime": "Docker Desktop 4.95.0, engine 29.8.2, linux/arm64 VM with amd64 emulation",
+  "unit_tests": {"ran": 362, "passed": 353, "skipped": 9, "command": "scripts/test.sh"},
+  "box_image": {"platform": "linux/amd64", "first_build_seconds": 180, "size_gb": 5.4},
+  "environment_live": {
+    "start_seconds_cached_image": 20.6,
+    "kwrite_window_wait": true,
+    "capture_translated_to_host_path": true,
+    "type_clipboard_paste_restored": true,
+    "ctrl_s_saved_and_verify_file_fresh_text": true,
+    "saved_file_owned_by_mac_user": true,
+    "recipe_derived_containerfile": true,
+    "recipe_startup_app": true,
+    "accessibility_tree": true,
+    "firefox_private_profile_renders_page": true,
+    "host_dev_server_all_interfaces_via_host_docker_internal": true,
+    "stop_and_remove": true
+  },
+  "not_verified": [
+    "Podman machine",
+    "dev servers bound only to the Mac loopback",
+    "network = host",
+    "several concurrent environments"
+  ],
+  "native_desktop": "not implemented"
+}

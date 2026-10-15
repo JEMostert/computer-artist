@@ -12,6 +12,9 @@ from computer_artist import storage
 from computer_artist.files import atomic_json
 from computer_artist.storage import MARKER, active_run, cleanup, inspect, managed_run, preserve
 
+# Linux lists open descriptors in /proc; macOS in /dev/fd.
+OPEN_FDS = '/proc/self/fd' if os.path.isdir('/proc/self/fd') else '/dev/fd'
+
 
 class StorageTest(unittest.TestCase):
     def setUp(self):
@@ -193,22 +196,22 @@ class StorageTest(unittest.TestCase):
         self.assertFalse(self.root.exists())
 
     def test_failed_run_initialization_releases_lease(self):
-        open_before = len(os.listdir('/proc/self/fd'))
+        open_before = len(os.listdir(OPEN_FDS))
         with patch.object(storage, 'atomic_json', side_effect=OSError('disk full')):
             with self.assertRaises(OSError):
                 with managed_run(self.root, 'failed'):
                     self.fail('Run started without a marker')
-        self.assertEqual(len(os.listdir('/proc/self/fd')), open_before)
+        self.assertEqual(len(os.listdir(OPEN_FDS)), open_before)
         self.assertFalse((self.root / 'failed').exists())
         self.assertEqual(inspect(self.root)['runs'], [])
 
     def test_cleanup_failure_before_work_still_completes_run_and_releases_lease(self):
-        open_before = len(os.listdir('/proc/self/fd'))
+        open_before = len(os.listdir(OPEN_FDS))
         with patch.object(storage, 'cleanup', side_effect=OSError('disk busy')):
             with self.assertRaises(OSError):
                 with managed_run(self.root, 'rotating'):
                     self.fail('Run body executed after cleanup failed')
-        self.assertEqual(len(os.listdir('/proc/self/fd')), open_before)
+        self.assertEqual(len(os.listdir(OPEN_FDS)), open_before)
         info = json.loads((self.root / 'rotating' / MARKER).read_text())
         self.assertTrue(info['completed'])
         self.assertEqual(inspect(self.root)['runs'][0]['status'], 'completed')

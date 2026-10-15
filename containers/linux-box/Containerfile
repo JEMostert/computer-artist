@@ -1,9 +1,12 @@
 # Linux box: one private KWin desktop per container, for hosts without KWin
-# (Windows with Docker Desktop or Podman). `ca env start` builds it from the
+# (Windows or macOS with Docker Desktop or Podman). `ca env start` builds it from the
 # checkout root; recipes may extend it with `ARG BOX_IMAGE` and `FROM ${BOX_IMAGE}`.
+# Arch publishes amd64 only; arm64 hosts build and run it under emulation.
 FROM docker.io/library/archlinux:latest
 
-RUN pacman -Syu --noconfirm --needed \
+# Emulators (Rosetta, QEMU) reject the download sandbox's seccomp filter; package
+# signatures are still verified.
+RUN pacman -Syu --noconfirm --needed --disable-sandbox-syscalls \
         kwin qt6-base qt6-tools qt6-wayland extra-cmake-modules cmake ninja gcc pkgconf \
         wayland wayland-protocols plasma-wayland-protocols vulkan-headers ripgrep \
         python python-pillow python-jeepney dbus at-spi2-core \

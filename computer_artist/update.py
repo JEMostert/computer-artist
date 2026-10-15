@@ -292,8 +292,9 @@ def update(args):
                 # losing the exit status and interleaving output; wait for it instead.
                 raise SystemExit(subprocess.run(command).returncode)
             os.execv(sys.executable, command)
-    if os.name == 'nt':
-        result['backend'] = 'win32'
+    if os.name == 'nt' or sys.platform == 'darwin':
+        # No KWin plugin on the host; boxes rebuild from changed sources on their next start.
+        result['backend'] = 'win32' if os.name == 'nt' else 'macos'
         result['plugin_actions'] = []
         if not args.check:
             from .diagnostics import diagnose

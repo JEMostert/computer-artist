@@ -15,9 +15,13 @@ JSON_LIMIT = 8 * 1024 * 1024
 
 
 def _read(path, limit, *, tail=False):
-    """Read a bounded regular file, refusing every symlink component."""
+    """Read a bounded regular file, refusing a symlinked file or run folder.
+
+    The storage root is checked by `locked`; its own ancestors belong to the system
+    (macOS /var and /tmp are symlinks) and are not evidence.
+    """
     path = Path(path)
-    if any(part.is_symlink() for part in (path, *path.parents)):
+    if path.is_symlink() or path.parent.is_symlink():
         raise ValueError('Symlink evidence is refused')
     fd = open_no_follow(path, os.O_RDONLY)
     try:

@@ -6,32 +6,12 @@ needs no KWin plugin. Use `ca` (or the checkout's `.venv\Scripts\ca.exe`).
 ## Private environments: Linux boxes
 
 For development and testing, default to a private environment. On Windows each one
-is a Linux box: a Docker (or Podman) container running its own KWin desktop, built
-from this checkout on first start (several minutes once, then cached). It tests
-Linux and web applications; Windows applications cannot run inside it. Docker
-Desktop with the WSL 2 backend is the expected runtime; if `ca env start` reports
-that no runtime is installed or that the daemon is not running, stop and tell the
-user (see SKILL.md). Never fall back to the user's desktop.
-
-```powershell
-ca env start TASK --project .                 # project appears in the box at /project
-ca env exec TASK --name app --wait-window TITLE -- program args
-ca env exec TASK --wait -- npm test
-ca env browser TASK --family firefox --executable firefox --name web
-ca --environment TASK windows                  # every ca command takes --environment
-ca --environment TASK observe --window app
-ca --environment TASK type --window app 'Hello'
-ca env status TASK                             # "paths" maps box paths to Windows paths
-ca env stop TASK
-```
-
-Commands run inside the box. Paths in arguments (`capture OUTPUT`, `--trace`,
-`--path-file`, `files PATH`) must lie under the project, a mount or the
-environment folder; replies show Windows paths again. Inside `ca execute`
-programs use box paths (`/project/...`). Install extra apps with a recipe
-`containerfile` that starts with `ARG BOX_IMAGE` and `FROM ${BOX_IMAGE}`; plain
-`--image` and `--gpu` are not supported in a box. Default lane, names, layouts,
-fragments and evidence behave as in [environments](environments.md).
+is a Linux box: a Docker (or Podman) container running its own KWin desktop. It
+tests Linux and web applications; Windows applications cannot run inside it.
+Docker Desktop with the WSL 2 backend is the expected runtime; if `ca env start`
+reports that no runtime is installed or that the daemon is not running, stop and
+tell the user (see SKILL.md). Never fall back to the user's desktop. Commands,
+paths and recipes are in [Linux boxes](environments.md#linux-boxes-windows-and-macos).
 
 ## The user's desktop (only when explicitly requested)
 

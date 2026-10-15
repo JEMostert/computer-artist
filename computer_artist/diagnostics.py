@@ -8,7 +8,7 @@ import sys
 from pathlib import Path
 
 from .client import Client
-from .config import checkout_root, skill_source, socket_path
+from .config import MACOS_DESKTOP, checkout_root, skill_source, socket_path
 from .workspace import Workspace
 
 
@@ -123,6 +123,8 @@ def diagnose(args):
         from .windows_diagnostics import diagnose_backend
 
         return diagnose_backend(args, store, checks, warnings, check)
+    if sys.platform == 'darwin' and not (args.socket or os.environ.get('CA_SOCKET')):
+        return diagnose_macos(lane, checks, warnings, check)
     try:
         socket = socket_path(args.socket)
         with Client(
@@ -335,4 +337,28 @@ def diagnose(args):
         'selected_window': selected,
         'build_tools': build,
         'note': 'Read-only diagnostics; candidates are not proof of application compatibility.',
+    }
+
+
+def diagnose_macos(lane, checks, warnings, check):
+    """macOS controls no desktop of its own; private environments need a container runtime."""
+    from .box import engine_for
+
+    try:
+        engine = engine_for()
+        engine.check()
+        check('container_runtime', True, engine.name)
+    except (RuntimeError, ValueError) as error:
+        check('container_runtime', False, str(error), 'Install Docker Desktop or Podman.')
+    warnings.append({'code': 'platform_limit', 'detail': MACOS_DESKTOP})
+    return {
+        'ok': all(c['passed'] for c in checks),
+        'command': 'doctor',
+        'lane': lane,
+        'checks': checks,
+        'warnings': warnings,
+        'backend': {'backend': 'macos', 'environments': 'linux_box'},
+        'windows': [],
+        'selected_window': None,
+        'note': 'Read-only diagnostics; check an environment with ca env doctor NAME.',
     }
