@@ -19,6 +19,7 @@ for filename in (
     'test_macos.py',
     'test_macos_activity.py',
     'test_containers.py',
+    'test_ink_cursor.py',
 ):
     suite.addTests(unittest.defaultTestLoader.discover(str(root / 'tests'), pattern=filename))
 raise SystemExit(not unittest.TextTestRunner(verbosity=2).run(suite).wasSuccessful())

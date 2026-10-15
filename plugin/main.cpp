@@ -40,6 +40,7 @@
 #include <QPointer>
 #include <QPainter>
 #include <QPainterPath>
+#include <QRandomGenerator>
 #include <QUuid>
 #include <QSet>
 #include <QTemporaryFile>
@@ -144,7 +145,14 @@ private:
     QPointer<ImageItem> m_cursor;
     QPointF m_position;
     QElapsedTimer m_clock;
-    QList<std::pair<qint64,QPointF>> m_trail;
+    // Ink cursor state; computer_artist/ink_cursor.py renders the same design elsewhere.
+    struct InkSample { qint64 time; QPointF point; bool pressed; };
+    struct InkDrop { qint64 born; QPointF origin, velocity; qreal radius; };
+    QList<InkSample> m_trail;
+    QList<InkDrop> m_drops;
+    QPointF m_clickPosition;
+    int m_clickLobes = 6;
+    qreal m_clickPhase = 0;
     qint64 m_lastMove = -1000, m_lastClick = -1000;
     qreal m_lean = 0;
     bool m_positionKnown = false;
@@ -427,17 +435,47 @@ bool Artist::move(const QPointF &p) {
         send([&](wl_resource *r) { wl_pointer_send_motion(r, uint32_t(m_clock.elapsed()), wl_fixed_from_double(local.x()), wl_fixed_from_double(local.y())); });
     }
     frame();
+    const qint64 now = m_clock.elapsed();
+    if (m_positionKnown) {
+        const QPointF step = p - m_position;
+        const qreal distance = std::hypot(step.x(), step.y());
+        auto *random = QRandomGenerator::global();
+        if (distance > 520) {
+            m_trail.clear(); // A warp is not a visible sweep across the desktop.
+        } else if (distance > 9 && random->generateDouble() <= std::min(.85, distance / 40)) {
+            // Fast strokes shed droplets sideways and slightly behind the nib.
+            const QPointF direction = step / distance;
+            const qreal side = random->bounded(2) ? 1 : -1, speed = 25 + random->generateDouble() * 45;
+            m_drops.append({now, p - direction * 6,
+                QPointF(-direction.y() * side - direction.x() * .4, direction.x() * side - direction.y() * .4) * speed,
+                .9 + random->generateDouble() * 1.6});
+        }
+    }
     m_positionKnown = true;
     m_position = p;
-    m_trail.append({m_clock.elapsed(),p});
-    m_lastMove = m_clock.elapsed();
+    m_trail.append({now, p, !m_buttons.isEmpty()});
+    m_lastMove = now;
     drawCursor();
     return true;
 }
 bool Artist::button(uint32_t code, bool down) {
     if (!valid() || !m_surface || pointers()!=m_resources || !pointerReady()
         || (code < 272 || code > 274) || m_buttons.contains(code)==down) return false;
-    if (down) { m_buttons.insert(code); m_lastClick=m_clock.elapsed(); } else m_buttons.remove(code);
+    const qint64 now = m_clock.elapsed();
+    if (down && m_buttons.isEmpty() && m_positionKnown) {
+        // An ink splash: a wobbling ring, a blot and droplets flung outward.
+        auto *random = QRandomGenerator::global();
+        m_lastClick = now;
+        m_clickPosition = m_position;
+        m_clickLobes = 5 + random->bounded(3);
+        m_clickPhase = random->generateDouble() * 6.3;
+        for (int i = 0; i < 6; ++i) {
+            const qreal angle = random->generateDouble() * 2 * std::numbers::pi, speed = 70 + random->generateDouble() * 90;
+            m_drops.append({now, m_position, QPointF(std::cos(angle), std::sin(angle)) * speed, 1.4 + random->generateDouble() * 1.8});
+        }
+    }
+    if (down) m_buttons.insert(code); else m_buttons.remove(code);
+    if (m_positionKnown) m_trail.append({now, m_position, !m_buttons.isEmpty()});
     auto serial = waylandServer()->display()->nextSerial();
     send([&](wl_resource *r) { wl_pointer_send_button(r, serial, uint32_t(m_clock.elapsed()), code, down ? WL_POINTER_BUTTON_STATE_PRESSED : WL_POINTER_BUTTON_STATE_RELEASED); });
     frame();
@@ -550,6 +588,7 @@ QJsonObject Artist::request(QLocalSocket *socket, const QJsonObject &o) {
         m_animation.stop();
         m_positionKnown = false;
         m_trail.clear();
+        m_drops.clear();
         m_lastMove = m_lastClick = -1000;
         m_lean = 0;
         if (m_cursor) m_cursor->setVisible(false);
@@ -823,24 +862,38 @@ void Artist::drawCursor()
         return;
     }
 
+    // The ink pen: palette, geometry and timings match computer_artist/ink_cursor.py.
+    const QColor ink(64, 88, 255), inkDeep(22, 20, 86), sheen(132, 210, 255), paper(252, 252, 255),
+        paperShade(214, 222, 250), band(200, 212, 240);
+    auto tint = [](QColor color, qreal alpha) { color.setAlpha(int(std::clamp(alpha, 0.0, 255.0))); return color; };
+    auto mix = [](const QColor &a, const QColor &b, qreal t) {
+        return QColor::fromRgbF(a.redF() + (b.redF() - a.redF()) * t, a.greenF() + (b.greenF() - a.greenF()) * t,
+            a.blueF() + (b.blueF() - a.blueF()) * t);
+    };
+    constexpr qreal trailMs = 450, brushMs = 1100, splashMs = 550, dropMs = 600, dripMs = 2600;
     const qint64 now = m_clock.elapsed();
-    constexpr qreal trailDuration = 180;
-    while (!m_trail.isEmpty() && now - m_trail.front().first > trailDuration) {
+    const bool pressed = !m_buttons.isEmpty();
+    while (!m_trail.isEmpty() && now - m_trail.front().time > (m_trail.front().pressed ? brushMs : trailMs)) {
         m_trail.removeFirst();
     }
-    const bool moving = now - m_lastMove < 160;
-    m_animation.setInterval(moving || now - m_lastClick < 500 ? 16 : 33);
-    const qreal breathe = .5 + .5 * std::sin(now / 1700.0 * 2 * std::numbers::pi);
-    const qreal energy = moving ? 1.0 : (m_target ? .65 : .4);
+    m_drops.removeIf([&](const InkDrop &drop) { return now - drop.born >= dropMs; });
+    const bool splashing = now - m_lastClick < splashMs;
+    m_animation.setInterval(now - m_lastMove < brushMs || splashing || !m_drops.isEmpty() || pressed ? 16 : 50);
+    auto dropAt = [&](const InkDrop &drop) {
+        const qreal age = (now - drop.born) / dropMs;
+        return std::pair{drop.origin + drop.velocity * ((1 - std::pow(1 - age, 2)) * .35), drop.radius * std::pow(1 - age, .6)};
+    };
 
-    QRectF bounds(m_position - QPointF(48, 48), QSizeF(112, 128));
-    for (const auto &[time, point] : std::as_const(m_trail)) {
-        bounds |= QRectF(point - QPointF(18, 18), QSizeF(36, 36));
-    }
+    QRectF bounds(m_position + QPointF(-24, -46), m_position + QPointF(46, 30));
+    for (const auto &sample : std::as_const(m_trail)) bounds |= QRectF(sample.point - QPointF(12, 12), QSizeF(24, 24));
+    if (splashing) bounds |= QRectF(m_clickPosition - QPointF(46, 46), QSizeF(92, 92));
+    for (const auto &drop : std::as_const(m_drops)) bounds |= QRectF(dropAt(drop).first - QPointF(12, 12), QSizeF(24, 24));
+    bounds.adjust(-12, -12, 12, 12);
     // Bound allocation for large warps. A warp is not a visual sweep across the desktop.
-    if (bounds.width() > 400 || bounds.height() > 400) {
+    if (bounds.width() > 520 || bounds.height() > 520) {
         m_trail.clear();
-        bounds = QRectF(m_position - QPointF(48, 48), QSizeF(112, 128));
+        m_drops.clear();
+        bounds = QRectF(m_position + QPointF(-36, -58), m_position + QPointF(58, 42));
     }
     bounds = bounds.toAlignedRect();
     const qreal scale = kwinApp()->devicePixelRatio();
@@ -851,87 +904,110 @@ void Artist::drawCursor()
     p.setRenderHint(QPainter::Antialiasing);
     p.translate(-bounds.topLeft());
 
-    // A short luminous wake, fading by sample age. It never leads actual input.
+    // A tapered ink stroke from the nib with a light core; its bloom keeps it readable on dark apps.
     for (qsizetype i = 1; i < m_trail.size(); ++i) {
-        const qreal age = (now - m_trail[i - 1].first) / trailDuration;
-        const qreal alpha = std::clamp(1.0 - age, 0.0, 1.0);
-        QLinearGradient gradient(m_trail[i - 1].second, m_trail[i].second);
-        gradient.setColorAt(0, QColor(151, 113, 255, int(95 * alpha)));
-        gradient.setColorAt(1, QColor(88, 221, 255, int(125 * alpha)));
-        p.setPen(QPen(QBrush(gradient), 8 * alpha + 1, Qt::SolidLine, Qt::RoundCap));
-        p.drawLine(m_trail[i - 1].second, m_trail[i].second);
-        p.setPen(QPen(QColor(189, 246, 255, int(125 * alpha)), 1.4 * alpha, Qt::SolidLine, Qt::RoundCap));
-        p.drawLine(m_trail[i - 1].second, m_trail[i].second);
+        const InkSample &a = m_trail[i - 1], &b = m_trail[i];
+        const qreal fade = std::max(0.0, 1.0 - (now - a.time) / (a.pressed ? brushMs : trailMs));
+        if (fade <= 0 || a.point == b.point) continue;
+        const qreal width = .7 + (a.pressed ? 8.5 : 6.5) * std::pow(fade, .8);
+        p.setPen(QPen(tint(ink, 22 * fade), width * 3.2, Qt::SolidLine, Qt::RoundCap));
+        p.drawLine(a.point, b.point);
+        p.setPen(QPen(tint(ink, 40 * fade), width * 2.1, Qt::SolidLine, Qt::RoundCap));
+        p.drawLine(a.point, b.point);
+        p.setPen(QPen(tint(ink, 225 * std::pow(fade, 1.2)), width, Qt::SolidLine, Qt::RoundCap));
+        p.drawLine(a.point, b.point);
+        p.setPen(QPen(tint(sheen, 200 * std::pow(fade, 1.5)), width * .28, Qt::SolidLine, Qt::RoundCap));
+        p.drawLine(a.point, b.point);
     }
-
-    p.translate(m_position);
-    QRadialGradient halo(QPointF(8, 12), 34 + 3 * breathe);
-    halo.setColorAt(0, QColor(112, 186, 255, int(75 * energy)));
-    halo.setColorAt(.45, QColor(123, 104, 255, int((30 + 15 * breathe) * energy)));
-    halo.setColorAt(1, Qt::transparent);
     p.setPen(Qt::NoPen);
-    p.setBrush(halo);
-    p.drawEllipse(QPointF(8, 12), 38, 38);
-
-    const qreal clickAge = (now - m_lastClick) / 450.0;
-    if (clickAge >= 0 && clickAge < 1) {
-        const qreal radius = 5 + 30 * (1 - std::pow(1 - clickAge, 3));
-        p.setBrush(Qt::NoBrush);
-        p.setPen(QPen(QColor(108, 226, 255, int(180 * std::pow(1 - clickAge, 2))), 1.5));
-        p.drawEllipse(QPointF(0, 0), radius, radius);
+    for (const auto &drop : std::as_const(m_drops)) {
+        const auto [center, radius] = dropAt(drop);
+        p.setBrush(tint(ink, 215));
+        p.drawEllipse(center, radius, radius);
+    }
+    if (splashing) {
+        const qreal q = (now - m_lastClick) / splashMs;
+        const qreal radius = 4 + 26 * (1 - std::pow(1 - q, 3)), wobble = .16 * (1 - q);
+        QPainterPath ring;
+        for (int i = 0; i <= 64; ++i) {
+            const qreal angle = i * 2 * std::numbers::pi / 64;
+            const qreal r = radius * (1 + wobble * std::sin(m_clickLobes * angle + m_clickPhase));
+            const QPointF point = m_clickPosition + QPointF(std::cos(angle) * r, std::sin(angle) * r);
+            i ? ring.lineTo(point) : ring.moveTo(point);
+        }
+        const qreal ringWidth = .8 + 2.6 * (1 - q);
+        p.strokePath(ring, QPen(tint(ink, 235 * std::pow(1 - q, 1.6)), ringWidth));
+        p.strokePath(ring, QPen(tint(sheen, 160 * std::pow(1 - q, 2)), ringWidth / 3));
+        const qreal blot = 5.5 * std::pow(1 - q, .7);
+        p.setPen(Qt::NoPen);
+        p.setBrush(tint(ink, 190 * (1 - q)));
+        p.drawEllipse(m_clickPosition, blot, blot);
+    }
+    // At rest a drop gathers on the nib, swells and falls.
+    if (now - m_lastMove >= 400 && !pressed) {
+        const qreal q = std::fmod(qreal(now - m_lastMove), dripMs) / dripMs;
+        const qreal swell = std::sin(std::min(q / .8, 1.0) * std::numbers::pi / 2), fall = std::max(0.0, (q - .8) / .2);
+        const qreal r = (1.2 + 1.8 * swell) * (1 - fall);
+        if (r > .1) {
+            const QPointF center = m_position + QPointF(0, 1.5 + 10 * fall * fall);
+            p.setBrush(tint(ink, 230 * (1 - fall)));
+            p.drawEllipse(QRectF(center.x() - r, center.y() - r * 1.15, 2 * r, 2.15 * r));
+        }
     }
 
     qreal targetLean = 0;
     if (m_trail.size() > 1) {
-        targetLean = std::clamp((m_position.x() - m_trail.front().second.x()) * .12, -7.0, 7.0);
+        targetLean = std::clamp((m_position.x() - m_trail.front().point.x()) * .1, -8.0, 8.0);
     }
-    m_lean += (targetLean - m_lean) * .2;
+    m_lean += (targetLean - m_lean) * .25;
+    // Pen parts as (along, across) the pen from the nib tip, which is the exact hotspot.
+    const QPolygonF nib({{0, 0}, {3, -1.2}, {6.5, -2.6}, {10, -3.8}, {12.5, -4.2}, {12.5, 4.2}, {10, 3.8}, {6.5, 2.6}, {3, 1.2}});
+    const QPolygonF nibShade({{0, 0}, {12.5, 0}, {12.5, 4.2}, {10, 3.8}, {6.5, 2.6}, {3, 1.2}});
+    const QPolygonF section({{12.5, -4.4}, {17, -4.7}, {17, 4.7}, {12.5, 4.4}});
+    const QPolygonF bandRing({{17, -5.1}, {18.6, -5.1}, {18.6, 5.1}, {17, 5.1}});
+    const QPolygonF barrel({{18.6, -5.2}, {36, -5.2}, {38, -3.9}, {38.8, 0}, {38, 3.9}, {36, 5.2}, {18.6, 5.2}});
+    const QPolygonF barrelShade({{18.6, .8}, {36.4, .8}, {38.3, 2.6}, {38, 3.9}, {36, 5.2}, {18.6, 5.2}});
+    const QPolygonF barrelSheen({{19.6, -3.7}, {34.6, -3.7}, {34.6, -2.2}, {19.6, -2.2}});
+    QPainterPath silhouette;
+    silhouette.addPolygon(QPolygonF({{0, 0}, {3, -1.2}, {6.5, -2.6}, {10, -3.8}, {12.5, -4.2}, {12.5, -4.4}, {17, -4.7},
+        {17, -5.1}, {18.6, -5.2}, {36, -5.2}, {38, -3.9}, {38.8, 0}, {38, 3.9}, {36, 5.2}, {18.6, 5.2}, {17, 5.1},
+        {17, 4.7}, {12.5, 4.4}, {12.5, 4.2}, {10, 3.8}, {6.5, 2.6}, {3, 1.2}}));
+    silhouette.closeSubpath();
+    const qreal size = 1.15 * (pressed ? .9 : 1); // The pen pushes into the page.
     p.save();
-    p.rotate(m_lean); // Rotate around the exact input hotspot, not the arrow center.
-    QPainterPath arrow;
-    arrow.moveTo(0, 0);
-    arrow.cubicTo(-.5, -.7, -1.3, -.3, -1.2, .8);
-    arrow.lineTo(.1, 26.8);
-    arrow.cubicTo(.2, 28, 1.1, 28.4, 2, 27.6);
-    arrow.lineTo(8.2, 21.7);
-    arrow.lineTo(13.8, 33.1);
-    arrow.quadTo(14.4, 34.3, 15.5, 33.7);
-    arrow.lineTo(19.1, 31.8);
-    arrow.quadTo(20.1, 31.3, 19.5, 30.1);
-    arrow.lineTo(13.9, 19.3);
-    arrow.lineTo(23, 18.8);
-    arrow.quadTo(24.7, 18.7, 23.4, 17.5);
-    arrow.closeSubpath();
-
-    // Layered outlines soften the glow without requiring a blur shader.
+    p.translate(m_position);
+    p.rotate(-50 + m_lean); // Rotate around the exact input hotspot, the nib tip.
+    p.scale(size, size);
+    const qreal energy = now - m_lastMove < 200 || pressed ? 1.0 : .7;
     p.setBrush(Qt::NoBrush);
     for (int width = 10; width >= 3; width -= 2) {
-        p.setPen(QPen(QColor(103, 179, 255, int((12 - width) * energy * 3)), width, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
-        p.drawPath(arrow);
+        p.setPen(QPen(tint(ink, (12 - width) * energy * 4), width / size, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+        p.drawPath(silhouette);
     }
-    QLinearGradient silver(-2, 0, 22, 32);
-    silver.setColorAt(0, QColor(255, 255, 255));
-    silver.setColorAt(.38, QColor(232, 239, 250));
-    silver.setColorAt(1, QColor(157, 172, 207));
-    p.setBrush(silver);
-    p.setPen(QPen(QColor(43, 53, 80, 225), 1.2, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
-    p.drawPath(arrow);
-    p.setPen(QPen(QColor(255, 255, 255, 220), .8, Qt::SolidLine, Qt::RoundCap));
-    p.drawLine(QPointF(1.1, 3), QPointF(2.1, 22));
-    p.restore();
-
-    // A small orbiting spark identifies the agent even when it is standing by.
-    const qreal phase = now / 2300.0 * 2 * std::numbers::pi;
-    const QPointF spark(8 + 19 * std::cos(phase), 13 + 19 * std::sin(phase));
-    QRadialGradient sparkGlow(spark, 6);
-    sparkGlow.setColorAt(0, QColor(156, 235, 255, 200));
-    sparkGlow.setColorAt(.3, QColor(113, 188, 255, 120));
-    sparkGlow.setColorAt(1, Qt::transparent);
     p.setPen(Qt::NoPen);
-    p.setBrush(sparkGlow);
-    p.drawEllipse(spark, 6, 6);
-    p.setBrush(QColor(219, 250, 255));
-    p.drawEllipse(spark, 1.3, 1.3);
+    p.setBrush(ink); p.drawPolygon(barrel);
+    p.setBrush(mix(ink, inkDeep, .45)); p.drawPolygon(barrelShade);
+    p.setBrush(mix(ink, Qt::white, .55)); p.drawPolygon(barrelSheen);
+    p.setBrush(inkDeep); p.drawPolygon(section);
+    p.setBrush(band); p.drawPolygon(bandRing);
+    p.setBrush(paper); p.drawPolygon(nib);
+    p.setBrush(paperShade); p.drawPolygon(nibShade);
+    p.setBrush(Qt::NoBrush);
+    const qreal line = 1.1 / size;
+    p.setPen(QPen(tint(inkDeep, 235), line, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+    p.drawPath(silhouette);
+    p.drawLine(QPointF(1.4, 0), QPointF(8.2, 0)); // The nib slit and its breather hole.
+    p.setPen(Qt::NoPen);
+    p.setBrush(tint(inkDeep, 230));
+    p.drawEllipse(QPointF(8.9, 0), .9, .9);
+    p.setPen(QPen(band, 1.6 / size, Qt::SolidLine, Qt::RoundCap));
+    p.drawLine(QPointF(22, -6.1), QPointF(33.5, -6.1)); // The clip.
+    p.setPen(Qt::NoPen);
+    p.setBrush(band);
+    p.drawEllipse(QPointF(33.5, -6.1), 1.2, 1.2);
+    p.setPen(QPen(mix(ink, sheen, .7), line, Qt::SolidLine, Qt::RoundCap));
+    p.drawLine(QPointF(19, -5.2), QPointF(36, -5.2));
+    p.restore();
     p.end();
     m_cursor->setImage(image);
     m_cursor->setSize(bounds.size());

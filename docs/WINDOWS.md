@@ -30,7 +30,7 @@ verified on Windows.
 
 | Feature | Windows scope | Status |
 | --- | --- | --- |
-| Agent pointer | Animated click-through overlay drawn by `ca`; never receives input, never activates a window | Verified 13 Oct (fixtures, Notepad) |
+| Agent pointer | Animated ink pen in a click-through, per-pixel-alpha overlay drawn by `ca`; never receives input, never activates a window | Overlay verified 13 Oct; ink pen (15 Oct) not yet run on Windows |
 | Independent text (standard controls) | Caret-position, undoable Unicode insertion into Edit/RichEdit by window messages; no SendInput, focus or clipboard | Verified 13 Oct |
 | Independent buttons (standard) | Push-button notification to the parent | Verified 13 Oct |
 | RichEdit caret by click | UI Automation text range at the pointer | Implemented |

@@ -28,7 +28,8 @@ large user results/evidence can exceed these byte limits.
 
 The package stays flat and acyclic. Core modules do not import CLI/process entry
 points. Storage/contracts do not depend on desktop input. Native ownership and the
-animated cursor stay in `plugin/main.cpp`; capture, clipboard and independent
-keyboard state have dedicated modules. Builds/tests do not update the host.
+KWin cursor stay in `plugin/main.cpp`; the Windows and macOS overlays draw the same
+ink pen with `ink_cursor`, so change both renderers together. Capture, clipboard and
+independent keyboard state have dedicated modules. Builds/tests do not update the host.
 `environment_service` runs inside each environment's systemd unit; the CLI talks
 to it over the private runtime's manager socket and never to the user's desktop.

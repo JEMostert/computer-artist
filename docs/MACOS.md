@@ -37,7 +37,7 @@ The same CLI supports window binding, observation, read-only accessibility,
 conditional programs, gestures, watch, handoff, outcome checks and reusable fragments.
 Agent pointer events use private SkyLight delivery; physical keyboard events go to
 the selected process, with text resolved against the live keyboard layout. The
-agent has its own click-through cyan arrow, drawn without moving the human pointer.
+agent has its own click-through ink pen, drawn without moving the human pointer.
 The approach is informed by [Cua's macOS window internals research](https://cua.ai/blog/inside-macos-window-internals);
 that research is not verification of this implementation.
 

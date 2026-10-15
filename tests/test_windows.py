@@ -47,7 +47,7 @@ class GeometryAndKeysTest(unittest.TestCase):
         )
         lane = MessageLane.__new__(MessageLane)
         lane.api, lane.position, sent = api, (10, 10), []
-        lane.element = lane.automation = None
+        lane.element = lane.automation = lane.pointer = None
         lane.class_name = lambda hwnd: 'button' if hwnd < 7 else 'richeditd2dpt'
         lane.message = lambda *values: sent.append(values) or 0
         self.assertEqual([hwnd for hwnd in range(1, 8) if lane.supported(hwnd)], [1, 2, 7])
@@ -77,7 +77,8 @@ class GeometryAndKeysTest(unittest.TestCase):
         )
         lane = MessageLane.__new__(MessageLane)
         lane.api = SimpleNamespace(identity=lambda hwnd: ('win-1-42', 42))
-        lane.hwnd, lane.modifiers, lane.pointer = 1, set(), SimpleNamespace(move=lambda x, y: None)
+        lane.hwnd, lane.modifiers = 1, set()
+        lane.pointer = SimpleNamespace(move=lambda x, y: None, press=lambda pressed: None)
         lane.automation = automation
         lane.child_at = lambda x, y: 99
         lane.supported = lambda hwnd: False

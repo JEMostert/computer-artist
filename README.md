@@ -1,6 +1,6 @@
 # Computer Artist
 
-`ca` gives an agent its own animated pointer and physical keyboard input in supported
+`ca` gives an agent its own animated ink-pen pointer and physical keyboard input in supported
 native Wayland applications on your KDE desktop. You can keep using your pointer
 and keyboard in another application. It is a local CLI backed by a KWin plugin.
 
@@ -8,6 +8,8 @@ On KDE, keep your pointer and keyboard focus outside the target application's co
 Returning to it revokes agent control. `--host` explicitly selects the real desktop
 pointer, focus and clipboard. The agent lane never falls back to host input.
 XWayland, independent clipboard/IME and popup grabs are unsupported.
+
+![The agent's ink pen: writing leaves a fading ink stroke, a click splashes, and at rest a drop gathers on the nib](docs/assets/agent-cursor.svg)
 
 On **Windows** the agent also gets its own drawn pointer, but it is not a second
 input device: it drives standard text fields and buttons with targeted window

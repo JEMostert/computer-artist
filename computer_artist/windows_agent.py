@@ -185,6 +185,8 @@ class MessageLane:
         """Left press activates the selected control; returns the action taken."""
         if code != 272 or type(pressed) is not bool or not (self.control or self.element):
             raise ValueError('Independent controls support a selected control and the left button')
+        if self.pointer:
+            self.pointer.press(pressed)
         if not pressed:
             return None
         if self.element is not None:

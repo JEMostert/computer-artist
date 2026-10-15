@@ -606,6 +606,8 @@ class MacOSBackend:
                 flags=self._flags(),
                 host=host,
             )
+            if not host and self.overlay:
+                self.overlay.press(pressed)
             if not pressed:
                 self.buttons.discard(code)
                 self.save_cleanup()
