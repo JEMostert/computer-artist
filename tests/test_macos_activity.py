@@ -149,6 +149,15 @@ class ActivityTests(unittest.TestCase):
         with self.assertRaisesRegex(PermissionError, 'drag'):
             self.activity.check()
 
+    def test_borrowed_drag_ignores_detached_motion_but_not_clicks(self):
+        self.activity.borrowed = True
+        self.deliver(Events.kCGEventLeftMouseDragged)
+        self.activity.check()
+        self.desktop.foreground = 200
+        self.deliver(Events.kCGEventLeftMouseDown, point=(300, 100))
+        with self.assertRaisesRegex(PermissionError, 'borrowed drag'):
+            self.activity.check()
+
     def test_occluding_app_claims_scroll_but_floating_overlay_does_not(self):
         self.desktop.ordered_windows.insert(0, window(3, 0, 0, 200, 200))
         self.deliver(Events.kCGEventScrollWheel)

@@ -68,6 +68,7 @@ def main(folder):
         action_budget=spec['budget'],
         lane=spec.get('lane', 'agent'),
         window_dir=spec['window_root'],
+        host_drags=spec.get('host_drags', False),
     ) as client:
         try:
             ctx = Context(

@@ -6,6 +6,9 @@ EVENT_TAG = 0x43414D41434F53
 
 
 class Activity:
+    # During a borrowed drag the physical mouse is detached; only its buttons conflict.
+    borrowed = False
+
     def __init__(self, api, pid, wid):
         self.api, self.pid, self.wid = api, int(pid), int(wid)
         self._conflict = threading.Event()
@@ -56,7 +59,19 @@ class Activity:
             elif not self._stop.is_set() and not self._conflict.is_set():
                 if q.CGEventGetIntegerValueField(event, q.kCGEventSourceUserData) == EVENT_TAG:
                     return event
-                if kind == q.kCGEventKeyDown:
+                if self.borrowed and kind in (
+                    q.kCGEventLeftMouseDown,
+                    q.kCGEventRightMouseDown,
+                    q.kCGEventOtherMouseDown,
+                ):
+                    self._fail('Human click during a borrowed drag')
+                elif self.borrowed and kind in (
+                    q.kCGEventLeftMouseDragged,
+                    q.kCGEventRightMouseDragged,
+                    q.kCGEventOtherMouseDragged,
+                ):
+                    pass
+                elif kind == q.kCGEventKeyDown:
                     if self.api.front_pid() == self.pid:
                         self._fail('Human keyboard input entered the target application')
                 elif kind in (

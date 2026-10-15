@@ -51,11 +51,21 @@ class ExecutionBudget:
 
 class Client:
     def __init__(
-        self, path, *, deadline=120, action_budget=20000, lane='agent', shared=None, window_dir=None
+        self,
+        path,
+        *,
+        deadline=120,
+        action_budget=20000,
+        lane='agent',
+        shared=None,
+        window_dir=None,
+        host_drags=False,
     ):
         if lane not in ('agent', 'host'):
             raise ValueError('lane must be agent or host')
-        self.lane, self.socket_path = lane, str(path)
+        if host_drags and str(path) != 'macos':
+            raise ValueError('--host-drags is only supported on the macOS desktop')
+        self.lane, self.socket_path, self.host_drags = lane, str(path), host_drags
         self.window_store = Workspace(window_dir)
         self.shared = shared or ExecutionBudget(deadline, action_budget)
         self.expires = self.shared.expires
@@ -68,7 +78,7 @@ class Client:
         elif str(path) == 'macos':
             from .macos import MacOSBackend
 
-            self.native_backend = MacOSBackend(lane)
+            self.native_backend = MacOSBackend(lane, host_drags)
         else:
             self.socket = socket.socket(socket.AF_UNIX)
             self.socket.settimeout(max(0.001, min(3, self.expires - time.monotonic())))

@@ -185,6 +185,7 @@ def run_program(args, extra, socket_path):
         'deadline': args.deadline,
         'budget': args.budget,
         'lane': args.lane,
+        'host_drags': args.host_drags,
     }
     if args.budget <= 0:
         raise ValueError('budget must be positive')

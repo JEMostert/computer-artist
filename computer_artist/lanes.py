@@ -26,6 +26,7 @@ class Execution:
                     parent.socket_path,
                     lane=lane,
                     shared=parent.shared,
+                    host_drags=parent.host_drags and lane == 'agent',
                     window_dir=self.root.store.root,
                 )
                 try:

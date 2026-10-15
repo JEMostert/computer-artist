@@ -75,6 +75,12 @@ def parser():
         const='agent',
         help='Control the independent agent pointer and supported physical keys (default)',
     )
+    shared.add_argument(
+        '--host-drags',
+        action='store_true',
+        help='macOS agent lane: borrow the desktop cursor for each drag, detaching your '
+        'mouse until release, so apps that read the shared button state see a held button',
+    )
     shared.add_argument('--window-dir', help='Window layouts and fragments root')
     shared.add_argument('--output-dir', help='Run output root')
     shared.add_argument('--budget', type=int, help='Execution request budget (default: 20000)')
@@ -456,6 +462,7 @@ def main(argv=None):
         ('output_dir', None),
         ('budget', 20000),
         ('lane', 'agent'),
+        ('host_drags', False),
     ):
         vars(args).setdefault(name, default)
     client = None
@@ -580,6 +587,7 @@ def main(argv=None):
                 action_budget=args.budget,
                 lane=args.lane,
                 window_dir=args.window_dir,
+                host_drags=args.host_drags,
             )
         except OSError as error:
             raise ConnectionError(

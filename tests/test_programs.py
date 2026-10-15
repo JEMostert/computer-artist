@@ -12,7 +12,9 @@ from computer_artist.workspace import Workspace
 
 
 class ReadOnlyClient:
-    def __init__(self, socket, *, deadline, action_budget, lane='agent', window_dir=None):
+    def __init__(
+        self, socket, *, deadline, action_budget, lane='agent', window_dir=None, host_drags=False
+    ):
         self.lane = lane
         self.expires = time.monotonic() + deadline
         self.budget = action_budget

@@ -1,4 +1,7 @@
-"""Native macOS event transport; background delivery never uses the HID event tap."""
+"""Native macOS event transport; background delivery never uses the HID event tap.
+
+Only the host lane and opt-in borrowed drags post through the shared HID tap.
+"""
 
 import ctypes
 import sys
@@ -176,6 +179,13 @@ class Native:
             application, 'GetProcessForPID', [ctypes.c_int, pointer], ctypes.c_int
         )
         self._record = _function(sky, 'SLPSPostEventRecordTo', [pointer, pointer], ctypes.c_int)
+        self._front = _function(sky, '_SLPSGetFrontProcess', [pointer], ctypes.c_int)
+        self._set_front = _function(
+            sky,
+            '_SLPSSetFrontProcessWithOptions',
+            [pointer, ctypes.c_uint32, ctypes.c_uint32],
+            ctypes.c_int,
+        )
         state = getattr(Quartz, 'kCGEventSourceStatePrivate', None)
         if state is None:
             raise ValueError(
@@ -198,6 +208,34 @@ class Native:
             raise ValueError('Cannot read the desktop cursor location')
         point = self.q.CGEventGetLocation(event)
         return float(point.x), float(point.y)
+
+    def front_process(self):
+        # Read WindowServer directly; NSWorkspace lags in a process without a run loop.
+        process = (ctypes.c_uint8 * 8)()
+        if self._front(process) != 0:
+            raise OSError('Cannot read the front macOS process')
+        return bytes(process)
+
+    def restore_front(self, process):
+        # 0x200 is a user-generated switch; NSRunningApplication activation is refused here.
+        if self._set_front((ctypes.c_uint8 * 8).from_buffer_copy(process), 0, 0x200) != 0:
+            raise OSError('macOS refused to return focus to the human application')
+
+    def warp(self, point):
+        if self.q.CGWarpMouseCursorPosition(point) != 0:
+            raise OSError('macOS refused to place the desktop cursor')
+
+    def associate(self, joined):
+        # Detached, the physical mouse cannot move the cursor; macOS rejoins it on exit.
+        if self.q.CGAssociateMouseAndMouseCursorPosition(joined) != 0:
+            raise OSError('macOS refused to change physical mouse association')
+
+    def buttons_held(self):
+        q = self.q
+        return any(
+            q.CGEventSourceButtonState(q.kCGEventSourceStateHIDSystemState, button)
+            for button in range(3)
+        )
 
     def session_ready(self):
         session = self.q.CGSessionCopyCurrentDictionary()

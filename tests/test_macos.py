@@ -126,6 +126,70 @@ class MacOSLeaseTest(unittest.TestCase):
                 successor.close()
                 path.unlink()
 
+    def borrowing(self):
+        backend = self.owned()
+        backend.host_drags, backend.keys, backend.buttons = True, set(), set()
+        self.transport.buttons_held.return_value = False
+        self.transport.cursor.return_value = (500, 500)
+        self.transport.front_pid.return_value = 99
+        self.transport.front_process.side_effect = [b'human', b'human', b'target']
+        self.transport.windows.return_value = [
+            {
+                'kCGWindowNumber': 3,
+                'kCGWindowBounds': {'X': 60, 'Y': 20, 'Width': 50, 'Height': 80},
+            },
+            {
+                'kCGWindowNumber': 7,
+                'kCGWindowBounds': {'X': 10, 'Y': 20, 'Width': 100, 'Height': 80},
+            },
+        ]
+        self.addCleanup(backend.close)
+        return backend
+
+    def kinds(self):
+        return [
+            (c.args[4], c.kwargs.get('host', False)) for c in self.transport.mouse.call_args_list
+        ]
+
+    def test_borrowed_drag_presses_on_motion_and_returns_cursor_on_release(self):
+        backend = self.borrowing()
+        lease = {'lease': backend.lease}
+        backend.request('button', code=272, pressed=True, **lease)
+        self.transport.mouse.assert_not_called()
+        backend.request('move', x=40, y=50, **lease)
+        backend.request('button', code=272, pressed=False, **lease)
+        self.assertEqual(self.kinds(), [('down', True), ('drag', True), ('up', True)])
+        self.assertEqual(
+            [c.args[0] for c in self.transport.associate.call_args_list], [False, True]
+        )
+        self.assertEqual(self.transport.warp.call_args.args[0], (500, 500))
+        self.transport.restore_front.assert_called_once_with(b'human')
+        self.assertIsNone(backend.borrow)
+
+    def test_click_with_host_drags_stays_on_agent_lane(self):
+        backend = self.borrowing()
+        lease = {'lease': backend.lease}
+        backend.request('button', code=272, pressed=True, **lease)
+        backend.request('button', code=272, pressed=False, **lease)
+        self.assertEqual(self.kinds(), [('down', False), ('up', False)])
+        self.transport.associate.assert_not_called()
+        self.transport.warp.assert_not_called()
+
+    def test_covered_drag_point_releases_and_rejoins_the_mouse(self):
+        backend = self.borrowing()
+        lease = {'lease': backend.lease}
+        backend.request('button', code=272, pressed=True, **lease)
+        with self.assertRaisesRegex(PermissionError, 'covers'):
+            backend.request('move', x=70, y=50, **lease)
+        backend.request('cancel')
+        self.assertEqual(self.kinds(), [('down', True), ('up', True)])
+        self.assertEqual(self.transport.associate.call_args.args[0], True)
+        self.assertEqual(self.transport.warp.call_args.args[0], (500, 500))
+
+    def test_host_drags_require_the_agent_lane(self):
+        with self.assertRaisesRegex(ValueError, 'agent lane'):
+            MacOSBackend('host', host_drags=True)
+
 
 class MacOSNativeSafetyTest(unittest.TestCase):
     def test_agent_mouse_scroll_and_keys_never_use_global_host_posting(self):

@@ -1,7 +1,9 @@
 """Native macOS lanes: process-targeted agent events and explicit shared host input.
 
 Coordinates are logical desktop points, including the window decoration. No agent
-operation uses the global event tap, raises windows, or defocuses the human app.
+operation raises windows or defocuses the human app. Only opt-in borrowed drags use the
+global event tap: macOS keeps one session-wide button state, which apps such as Chrome
+and GTK read during a drag, so process-targeted drags reach them as button-up motion.
 """
 
 import hashlib
@@ -18,11 +20,16 @@ from .platform_io import open_no_follow
 
 
 class MacOSBackend:
-    def __init__(self, lane):
+    def __init__(self, lane, host_drags=False):
         from .macos_accessibility import Accessibility
         from .macos_native import Native
 
+        if host_drags and lane != 'agent':
+            raise ValueError('Borrowed host drags apply only to the agent lane')
         self.api, self.ax, self.lane = Native(), Accessibility(), lane
+        self.host_drags = host_drags
+        # A press waits for its next action: release clicks on the agent lane, motion borrows.
+        self.pending = self.borrow = None
         self.lease, self.reason = '', None
         self.target = self.pid = self.identity = self.baseline = None
         self.keys, self.buttons = set(), set()
@@ -87,6 +94,7 @@ class MacOSBackend:
                     'physical_keyboard': True,
                     'drawn_pointer': True,
                     'delivery': ['skylight', 'process_keyboard'],
+                    'host_drags': self.host_drags,
                 },
                 'host': {'pointer': True, 'keyboard': True},
             },
@@ -100,6 +108,9 @@ class MacOSBackend:
                 'Window captures include decoration; Retina pixel size differs from input points.',
                 'An application may activate itself. ca does not restore or change human focus; '
                 'keyboard input still requires the exact selected window.',
+                'Agent-lane drags reach apps that read the session button state (Chrome, GTK) '
+                'as button-up motion. --host-drags borrows the desktop cursor for each drag, '
+                'detaching the physical mouse until release; clicks stay on the agent lane.',
             ],
         }
 
@@ -214,12 +225,12 @@ class MacOSBackend:
                 from .macos_native import KEYCODES
 
                 q = self.api.q
-                if any(
-                    q.CGEventSourceKeyState(q.kCGEventSourceStateHIDSystemState, key)
-                    for key in set(KEYCODES.values())
-                ) or any(
-                    q.CGEventSourceButtonState(q.kCGEventSourceStateHIDSystemState, button)
-                    for button in range(3)
+                if (
+                    any(
+                        q.CGEventSourceKeyState(q.kCGEventSourceStateHIDSystemState, key)
+                        for key in set(KEYCODES.values())
+                    )
+                    or self.api.buttons_held()
                 ):
                     raise PermissionError(
                         'Release human keys and mouse buttons before host acquisition'
@@ -334,6 +345,86 @@ class MacOSBackend:
             flags |= MODIFIERS.get(code, 0)
         return flags
 
+    def _flush(self):
+        # The deferred press did not become a drag; deliver it on the agent lane.
+        code, self.pending = self.pending, None
+        self.api.mouse(
+            self.pid,
+            self.target,
+            self.baseline[:2],
+            self.pointer,
+            'down',
+            button=code - 272,
+            clicks=self.click_count,
+            flags=self._flags(),
+        )
+
+    def _borrow(self):
+        if self.api.buttons_held():
+            raise PermissionError('Release human mouse buttons before a borrowed drag')
+        above = []
+        for info in self.api.windows():
+            if int(info['kCGWindowNumber']) == self.target:
+                break
+            if float(info.get('kCGWindowAlpha', 1)) > 0 and (
+                info.get('kCGWindowName') != 'Computer Artist pen'
+            ):
+                above.append(self._geometry(info))
+        code, self.pending = self.pending, None
+        self.borrow = {
+            'cursor': self.api.cursor(),
+            'front': self.api.front_process(),
+            'above': above,
+        }
+        self.borrow['lock'] = self._lock('host-input.lock')
+        if self.activity:
+            self.activity.borrowed = True
+        self.api.associate(False)
+        self.save_cleanup()
+        self._host_mouse('down', code)
+
+    def _host_mouse(self, kind, code):
+        x, y = self.pointer
+        if kind != 'up' and any(
+            left <= x < left + width and top <= y < top + height
+            for left, top, width, height in self.borrow['above']
+        ):
+            raise PermissionError('Another window covers the borrowed drag point')
+        self.api.warp(self.pointer)
+        self.api.mouse(
+            self.pid,
+            self.target,
+            self.baseline[:2],
+            self.pointer,
+            kind,
+            button=code - 272,
+            clicks=self.click_count if kind != 'drag' else 1,
+            flags=self._flags(),
+            host=True,
+        )
+
+    def _return(self):
+        borrow, self.borrow = self.borrow, None
+        try:
+            if borrow.get('cursor'):
+                self.api.warp(borrow['cursor'])
+        finally:
+            self.api.associate(True)
+            if self.activity:
+                self.activity.borrowed = False
+            if borrow.get('lock') is not None:
+                self.locks.remove(borrow['lock'])
+                os.close(borrow['lock'])
+            self.save_cleanup()
+            if borrow.get('front'):
+                # A real click activates the target shortly after release; undo it.
+                deadline = time.monotonic() + 0.25
+                while time.monotonic() < deadline:
+                    if self.api.front_process() != borrow['front']:
+                        self.api.restore_front(borrow['front'])
+                        break
+                    time.sleep(0.01)
+
     def save_cleanup(self):
         if self.cleanup_file:
             atomic_json(
@@ -348,6 +439,7 @@ class MacOSBackend:
                     'pointer': self.pointer,
                     'keys': sorted(self.keys),
                     'buttons': sorted(self.buttons),
+                    'borrowed': self.borrow['cursor'] if self.borrow else None,
                 },
             )
 
@@ -363,6 +455,30 @@ class MacOSBackend:
             except ValueError:
                 pass
         key_target = live and self.ax.focused_window(self.pid) == self.target
+        if self.pending is not None:
+            self.buttons.discard(self.pending)
+            self.pending = None
+        if self.borrow:
+            try:
+                for code in list(self.buttons):
+                    # A stuck session-wide button is worse than an up outside the target.
+                    if self.pointer:
+                        self.api.warp(tuple(self.pointer))
+                    self.api.mouse(
+                        self.pid,
+                        self.target,
+                        self.baseline[:2],
+                        self.api.cursor(),
+                        'up',
+                        button=code - 272,
+                        clicks=1,
+                        host=True,
+                    )
+                    self.buttons.discard(code)
+            except Exception as error:
+                errors.append(str(error))
+            finally:
+                self._return()
         for code in list(self.keys):
             if key_target or self.lane == 'host':
                 try:
@@ -540,6 +656,8 @@ class MacOSBackend:
             return self._clipboard(op, values)
         self.guard(values)
         host = self.lane == 'host'
+        if self.pending is not None and op not in ('move', 'button'):
+            self._flush()
         if op == 'focus':
             self.require_host()
             if values['window'] != self.identity:
@@ -572,19 +690,24 @@ class MacOSBackend:
             if not host and self.overlay and not self.buttons:
                 # A new action's pen travels there visibly; the input follows on arrival.
                 self.overlay.glide_to(x, y)
+            if self.pending is not None:
+                self._borrow()
             self.pointer = (x, y)
             self.save_cleanup()
-            self.api.mouse(
-                self.pid,
-                self.target,
-                self.baseline[:2],
-                self.pointer,
-                'drag' if self.buttons else 'move',
-                button=next(iter(self.buttons), 272) - 272,
-                clicks=1 if self.buttons else 0,
-                flags=self._flags(),
-                host=host,
-            )
+            if self.borrow:
+                self._host_mouse('drag', next(iter(self.buttons)))
+            else:
+                self.api.mouse(
+                    self.pid,
+                    self.target,
+                    self.baseline[:2],
+                    self.pointer,
+                    'drag' if self.buttons else 'move',
+                    button=next(iter(self.buttons), 272) - 272,
+                    clicks=1 if self.buttons else 0,
+                    flags=self._flags(),
+                    host=host,
+                )
             if host:
                 self.host_pointer = self.api.cursor()
             elif self.overlay:
@@ -609,21 +732,30 @@ class MacOSBackend:
                 self.last_click = (now, self.pointer)
                 self.buttons.add(code)
                 self.save_cleanup()
-            self.api.mouse(
-                self.pid,
-                self.target,
-                self.baseline[:2],
-                self.pointer,
-                'down' if pressed else 'up',
-                button=code - 272,
-                clicks=self.click_count,
-                flags=self._flags(),
-                host=host,
-            )
+            if pressed and self.host_drags:
+                self.pending = code
+            elif self.borrow:
+                self._host_mouse('up', code)
+            else:
+                if self.pending is not None:
+                    self._flush()
+                self.api.mouse(
+                    self.pid,
+                    self.target,
+                    self.baseline[:2],
+                    self.pointer,
+                    'down' if pressed else 'up',
+                    button=code - 272,
+                    clicks=self.click_count,
+                    flags=self._flags(),
+                    host=host,
+                )
             if not host and self.overlay:
                 self.overlay.press(pressed)
             if not pressed:
                 self.buttons.discard(code)
+                if self.borrow:
+                    self._return()
                 self.save_cleanup()
             time.sleep(0.016 if pressed else 0.05)
         elif op == 'scroll':
@@ -680,7 +812,7 @@ def _cleanup_input(path):
         backend.cleanup_file = None
         # Never let an old worker's key-up interrupt a newer owner's held chord.
         names = [f'app-{saved["pid"]}.lock']
-        if saved['lane'] == 'host':
+        if saved['lane'] == 'host' or saved.get('borrowed'):
             names.append('host-input.lock')
         for name in names:
             fd = backend._lock(name, claim=False)
@@ -690,7 +822,10 @@ def _cleanup_input(path):
                     'Input ownership changed before crash cleanup; stale releases refused'
                 )
         backend.identity = saved['identity']
-        if backend.lane == 'agent':
+        if saved.get('borrowed'):
+            # The session-wide button must not stay down even if the target has gone.
+            backend.borrow = {'cursor': tuple(saved['borrowed'])}
+        elif backend.lane == 'agent':
             backend.resolve(backend.identity)
         backend.pid, backend.target = saved['pid'], saved['window']
         backend.baseline, backend.pointer = saved['geometry'], saved['pointer']
