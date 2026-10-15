@@ -38,6 +38,11 @@ conditional programs, gestures, watch, handoff, outcome checks and reusable frag
 Agent pointer events use private SkyLight delivery; physical keyboard events go to
 the selected process, with text resolved against the live keyboard layout. The
 agent has its own click-through ink pen, drawn without moving the human pointer.
+The first agent action starts a desktop visual session. Its pen stays at the last
+position between commands; releasing input, cancellation or takeover releases held
+input but keeps the pen. `ca session status` reads that shared visual session, and
+`ca session close` removes it. When the next action starts elsewhere, the pen glides
+there visibly before the input is sent. Input leases remain per action/application.
 The approach is informed by [Cua's macOS window internals research](https://cua.ai/blog/inside-macos-window-internals);
 that research is not verification of this implementation.
 

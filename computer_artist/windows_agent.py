@@ -147,7 +147,7 @@ class MessageLane:
             from .windows_pointer import AgentPointer
 
             self.pointer = AgentPointer()
-        self.pointer.move(round(x), round(y))
+        self.pointer.glide_to(round(x), round(y))
         return 'ui_automation' if self.element is not None else 'control_messages'
 
     def edit(self, *, editable=False):

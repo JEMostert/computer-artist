@@ -7,6 +7,10 @@ click, scroll and middle drag on macOS 27.0.1 (Apple M1 Pro). Other apps/OS vers
 remain unverified. It uses private SkyLight pointer delivery and per-process
 physical keys, with text resolved from the live keyboard layout. It draws its own click-through
 ink pen. No agent operation falls back to the human pointer, focus or clipboard.
+The pen stays at its last position between actions until `ca session close`, and
+glides to the next action's position before its input is sent.
+Action completion still releases held buttons/keys. `ca session status` reports
+the shared visual session without starting one.
 This is not a security sandbox or a claim of KWin parity.
 
 ```bash

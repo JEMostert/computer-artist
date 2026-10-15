@@ -79,6 +79,7 @@ class MacOSBackend:
             'clipboard': self.lane == 'host',
             'paste_shortcut': [125, 47],
             'coordinate_space': 'desktop_logical_points',
+            'automatic_sessions': True,
             'lanes': {
                 'agent': {
                     'pointer': True,
@@ -479,16 +480,26 @@ class MacOSBackend:
             if op in ('session_close', 'takeover'):
                 self.root.mkdir(parents=True, exist_ok=True)
                 atomic_json(self.stop_file, {'id': uuid.uuid4().hex})
-            self.revoke('explicit_stop' if op in ('session_close', 'takeover') else None)
+            try:
+                self.revoke('explicit_stop' if op in ('session_close', 'takeover') else None)
+            finally:
+                if op == 'session_close':
+                    from .macos_pointer import close_session
+
+                    close_session()
             return {'ok': True}
         if op == 'ping':
             if self.lease:
                 self.guard({'lease': self.lease})
             return {'ok': True, 'lease': self.lease, 'keyboard_ready': bool(self.lease)}
         if op == 'session_status':
+            from .macos_pointer import session_status
+
+            pointer = session_status()
             return {
-                'ok': True,
-                'scope': 'connection',
+                **pointer,
+                'scope': 'desktop_visual_session',
+                'lanes_scope': 'connection',
                 'lanes': {
                     lane: {
                         'busy': bool(self.lease and self.lane == lane),
@@ -558,6 +569,9 @@ class MacOSBackend:
                 left <= x < left + width and top <= y < top + height
             ):
                 raise ValueError('Point is outside the acquired window')
+            if not host and self.overlay and not self.buttons:
+                # A new action's pen travels there visibly; the input follows on arrival.
+                self.overlay.glide_to(x, y)
             self.pointer = (x, y)
             self.save_cleanup()
             self.api.mouse(

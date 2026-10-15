@@ -67,7 +67,9 @@ class GeometryAndKeysTest(unittest.TestCase):
         lane = MessageLane.__new__(MessageLane)
         lane.api = SimpleNamespace(identity=lambda hwnd: ('win-1-42', 42))
         lane.hwnd, lane.modifiers = 1, set()
-        lane.pointer = SimpleNamespace(move=lambda x, y: None, press=lambda pressed: None)
+        lane.pointer = SimpleNamespace(
+            move=lambda x, y: None, glide_to=lambda x, y: None, press=lambda pressed: None
+        )
         lane.automation = automation
         lane.child_at = lambda x, y: 99
         lane.supported = lambda hwnd: False

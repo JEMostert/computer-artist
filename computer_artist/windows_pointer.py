@@ -43,7 +43,7 @@ def premultiplied_bgra(image):
 class AgentPointer:
     def __init__(self):
         self.events, self.lock = [], threading.Lock()
-        self.hwnd, self.error = None, None
+        self.hwnd, self.error, self.position = None, None, None
         self.ready = threading.Event()
         self.stopped = threading.Event()
         self.thread = threading.Thread(target=self._run, name='ca-agent-pointer', daemon=True)
@@ -177,6 +177,17 @@ class AgentPointer:
 
     def move(self, x, y):
         self._post('move', (x, y))
+        self.position = (x, y)
+
+    def glide_to(self, x, y):
+        """Let the pen travel visibly to a new action's position; returns when it arrives."""
+        from .ink_cursor import glide
+
+        points, delay = glide(self.position, (x, y))
+        for point in points:
+            self.move(*point)
+            time.sleep(delay)
+        self.move(x, y)
 
     def press(self, pressed):
         self._post('press', bool(pressed))

@@ -5,7 +5,7 @@ import unittest
 from PIL import Image
 
 from computer_artist import ink_cursor
-from computer_artist.ink_cursor import InkCursor
+from computer_artist.ink_cursor import InkCursor, glide
 from computer_artist.windows_pointer import premultiplied_bgra
 
 
@@ -67,3 +67,13 @@ class InkCursorTest(unittest.TestCase):
     def test_windows_pixels_are_premultiplied_bgra(self):
         pixel = Image.new('RGBA', (1, 1), (200, 100, 50, 128))
         self.assertEqual(premultiplied_bgra(pixel), bytes((25, 50, 100, 128)))
+
+    def test_new_actions_glide_instead_of_jumping(self):
+        points, delay = glide((0, 0), (400, 300))
+        self.assertGreater(len(points), 3)
+        self.assertLessEqual(len(points) * delay, 0.28)
+        steps = [b[0] - a[0] for a, b in zip([(0, 0)] + points, points)]
+        self.assertGreater(steps[0], steps[-1])  # Fast start, eased arrival.
+        self.assertTrue(all(0 < x < 400 for x, _ in points))  # The caller lands on the target.
+        self.assertEqual(glide((0, 0), (10, 10)), ([], 0.0))
+        self.assertEqual(glide(None, (400, 300)), ([], 0.0))

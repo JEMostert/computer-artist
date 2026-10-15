@@ -47,6 +47,29 @@ DROP_SECONDS = 0.6
 DRIP_SECONDS = 2.6
 MAX_EXTENT = 520  # Logical pixels; a longer warp drops the old trail.
 SUPERSAMPLE = 2
+GLIDE_FROM = 24  # Input units; nearer moves are already continuous.
+GLIDE_STEP = 0.016
+
+
+def glide(start, end):
+    """Visible travel between two actions: eased points and the delay between them.
+
+    The pen glides quickly to a new position instead of jumping, so the human can
+    follow it; callers send the real input once it has arrived.
+    """
+    if start is None:
+        return [], 0.0
+    (sx, sy), (ex, ey) = start, end
+    distance = math.hypot(ex - sx, ey - sy)
+    if distance < GLIDE_FROM:
+        return [], 0.0
+    duration = min(0.28, 0.08 + distance * 0.00035)
+    steps = max(2, round(duration / GLIDE_STEP))
+    points = []
+    for i in range(1, steps):
+        eased = 1 - (1 - i / steps) ** 3
+        points.append((sx + (ex - sx) * eased, sy + (ey - sy) * eased))
+    return points, duration / steps
 
 
 class InkCursor:
