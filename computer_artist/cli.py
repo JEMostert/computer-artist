@@ -560,7 +560,7 @@ def main(argv=None):
             return 0
         from .commands import local_command, run_program
 
-        reply = local_command(args, extra)
+        reply = local_command(args)
         if reply is not None:
             print(json.dumps(reply, indent=2))
             return 0

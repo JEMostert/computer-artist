@@ -50,11 +50,7 @@ def docker_only():
 
 
 def enabled():
-    return (
-        os.name == 'nt'
-        or sys.platform == 'darwin'
-        or os.environ.get('CA_ENVIRONMENT_BACKEND') == 'box'
-    )
+    return docker_only() or os.environ.get('CA_ENVIRONMENT_BACKEND') == 'box'
 
 
 def root():
@@ -296,7 +292,7 @@ def base_tag(source):
     return 'localhost/computer-artist-box:' + digest.hexdigest()[:16]
 
 
-def build(engine, command, log):
+def build(command, log):
     command[2:2] = ['--platform', PLATFORM]
     with log.open('ab') as stream:
         stream.write(('\n$ ' + ' '.join(command) + '\n').encode())
@@ -317,7 +313,6 @@ def ensure_image(name, definition, engine, log, pull=False):
     tag = base_tag(source)
     if pull or not engine.image_exists(tag):
         build(
-            engine,
             engine.build_command(
                 tag, str(source / 'containers/linux-box/Containerfile'), str(source), pull=pull
             ),
@@ -328,7 +323,7 @@ def ensure_image(name, definition, engine, log, pull=False):
     derived = f'localhost/computer-artist-box-{name.lower()}:latest'
     command = engine.build_command(derived, definition['containerfile'], definition['context'])
     command[2:2] = ['--build-arg', f'BOX_IMAGE={tag}']
-    build(engine, command, log)
+    build(command, log)
     return derived
 
 
@@ -340,7 +335,7 @@ def window_root():
     return path.resolve()
 
 
-def mapping(name, definition):
+def mapping(definition):
     """Host path ↔ box path pairs, most specific first."""
     pairs = [(root().resolve(), BOX_STATE), (window_root(), BOX_WINDOW)]
     pairs += [(Path(m['source']), PurePosixPath(m['target'])) for m in definition['mounts']]
@@ -412,7 +407,7 @@ def inside(name, engine, argv, timeout=60):
     if not isinstance(reply, dict):
         detail = (result.stderr or result.stdout).strip()[-1500:]
         raise RuntimeError(f'Box command ca {" ".join(argv)} failed: {detail}')
-    return translate_value(reply, mapping(name, stored(name) or DEFAULTS))
+    return translate_value(reply, mapping(stored(name) or DEFAULTS))
 
 
 # Lifecycle
@@ -464,7 +459,7 @@ def start(args):
     if not getattr(args, 'no_apps', False):
         try:
             for app in definition['apps']:
-                launched.append(launch(name, app['command'], app))
+                launched.append(launch(name, app))
                 if not launched[-1].get('ok'):
                     raise RuntimeError(f'Startup app {app["command"]} failed: {launched[-1]}')
         except BaseException:
@@ -478,7 +473,7 @@ def start(args):
     }
 
 
-def launch(name, command, app):
+def launch(name, app):
     argv = ['env', 'exec', name]
     if app.get('cwd'):
         argv += ['--cwd', app['cwd']]
@@ -488,7 +483,7 @@ def launch(name, command, app):
         argv += ['--name', app['name']]
     elif app.get('wait_window') is not None:
         argv += ['--wait-window', app['wait_window']]
-    argv += ['--timeout', str(app.get('timeout', 60)), '--', *command]
+    argv += ['--timeout', str(app.get('timeout', 60)), '--', *app['command']]
     return inside(name, engine_for(stored(name)), argv, timeout=app.get('timeout', 60) + 30)
 
 
@@ -537,7 +532,7 @@ def status(name):
         except (RuntimeError, subprocess.TimeoutExpired) as error:
             info.update(running=None, error=str(error))
     if definition:
-        info['paths'] = {str(b): str(h) for h, b in mapping(name, definition)}
+        info['paths'] = {str(b): str(h) for h, b in mapping(definition)}
     return info
 
 
@@ -681,7 +676,7 @@ def proxy(name, raw, args):
     engine = engine_for(definition)
     if not running(name, engine):
         raise ValueError(f'Environment {name!r} is not running; use ca env start {name}')
-    pairs = mapping(name, definition)
+    pairs = mapping(definition)
     argv = translate_args(raw, args, pairs)
     piped = not sys.stdin.isatty() if sys.stdin else False
     command = engine.exec_command(container(name), ['ca', *argv], interactive=piped)

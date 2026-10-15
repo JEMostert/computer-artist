@@ -7,13 +7,6 @@ from pathlib import Path
 from .environments import DEFAULTS, exchange, kind, locations, route, status, stored, tail
 
 
-def windows(socket_path):
-    from .client import Client
-
-    with Client(socket_path, lane='host', deadline=5, action_budget=4) as client:
-        return client.request('windows')['windows']
-
-
 def launch(name, command, *, on_host=False, cwd=None, env=None, wait_window=None,
            window_name=None, timeout=60, wait_exit=False, settle=1.0):  # fmt: skip
     """Start an application and report whether it is alive, exited or showed a window."""

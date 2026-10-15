@@ -320,10 +320,7 @@ def flag_values(args):
                 if k in ('containerfile', 'context', 'project')
                 else getattr(args, k)
             )
-    for k in ('width', 'height', 'network', 'runtime'):
-        if getattr(args, k, None) is not None:
-            values[k] = getattr(args, k)
-    for k in ('xwayland', 'gpu'):
+    for k in ('width', 'height', 'network', 'runtime', 'xwayland', 'gpu'):
         if getattr(args, k, None) is not None:
             values[k] = getattr(args, k)
     if getattr(args, 'mount', None):

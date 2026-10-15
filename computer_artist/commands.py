@@ -111,7 +111,7 @@ def arguments(manifest, encoded, extra):
     return bind(manifest, values)
 
 
-def local_command(args, extra):
+def local_command(args):
     """Return None for commands requiring a desktop connection."""
     store = Workspace(args.window_dir, args.output_dir)
     if args.command == 'storage':

@@ -154,10 +154,6 @@ class Win32:
             function = getattr(self.user, name)
             function.argtypes, function.restype = args, result
         for name, args, result in (
-            ('CreateMutexW', [ctypes.c_void_p, wintypes.BOOL, wintypes.LPCWSTR], wintypes.HANDLE),
-            ('WaitForSingleObject', [wintypes.HANDLE, wintypes.DWORD], wintypes.DWORD),
-            ('ReleaseMutex', [wintypes.HANDLE], wintypes.BOOL),
-            ('CloseHandle', [wintypes.HANDLE], wintypes.BOOL),
             ('GlobalAlloc', [wintypes.UINT, ctypes.c_size_t], wintypes.HANDLE),
             ('GlobalLock', [wintypes.HANDLE], ctypes.c_void_p),
             ('GlobalUnlock', [wintypes.HANDLE], wintypes.BOOL),
@@ -215,7 +211,7 @@ class WindowsBackend:
     def __init__(self, lane):
         self.api, self.lane = Win32(), lane
         self.lease, self.target, self.identity, self.baseline = '', None, None, None
-        self.reason, self.mutex = None, None
+        self.reason, self.host_lock = None, None
         self.keys, self.buttons = set(), set()
         self.pointer = None
         self.cleanup_file = os.environ.get('CA_WIN32_CLEANUP_FILE')
@@ -237,9 +233,14 @@ class WindowsBackend:
                 )
 
     def capabilities(self):
-        operations = ['windows', 'capture', 'capabilities', 'ping', 'session_status', 'read_text']
-        operations.append('accessible')
-        operations += [
+        operations = [
+            'windows',
+            'capture',
+            'capabilities',
+            'ping',
+            'session_status',
+            'read_text',
+            'accessible',
             'acquire',
             'release',
             'cancel',
@@ -247,29 +248,20 @@ class WindowsBackend:
             'button',
             'key',
             'keymap',
-            'focus',
             'scroll',
-            'clipboard_get',
-            'clipboard_set',
-            'clipboard_save',
-            'clipboard_restore',
             'session_close',
             'takeover',
         ]
         if self.lane == 'agent':
-            operations = [
-                op
-                for op in operations
-                if op
-                not in (
-                    'focus',
-                    'clipboard_get',
-                    'clipboard_set',
-                    'clipboard_save',
-                    'clipboard_restore',
-                )
+            operations.append('write_text')
+        else:
+            operations += [
+                'focus',
+                'clipboard_get',
+                'clipboard_set',
+                'clipboard_save',
+                'clipboard_restore',
             ]
-            operations += ['write_text']
         return {
             'ok': True,
             'backend': 'win32',
@@ -341,9 +333,7 @@ class WindowsBackend:
                     'observable': True,
                     'agent': bool(self.lane == 'agent' and self.lease and hwnd == self.target),
                     'host': bool(self.lane == 'host' and self.lease and hwnd == self.target),
-                    'acquirable': self.lane == 'host',
                     'backend': 'win32',
-                    'agent_restrictions': ['independent_input_unsupported'],
                 }
             )
             return True
@@ -433,6 +423,15 @@ class WindowsBackend:
                 self.revoke('human_pointer_moved')
                 raise PermissionError('Human pointer moved; input stopped')
 
+    def client_point(self, values):
+        x, y = values['x'], values['y']
+        left, top, width, height = self.baseline
+        if any(isinstance(v, bool) or not math.isfinite(v) for v in (x, y)) or not (
+            left <= x < left + width and top <= y < top + height
+        ):
+            raise ValueError('Point is outside the acquired client region')
+        return x, y
+
     def save_cleanup(self):
         if self.cleanup_file:
             atomic_json(
@@ -470,9 +469,9 @@ class WindowsBackend:
         finally:
             self.lease, self.target, self.pointer = '', None, None
             self.reason = reason
-            if self.mutex:
-                os.close(self.mutex)
-                self.mutex = None
+            if self.host_lock is not None:
+                os.close(self.host_lock)
+                self.host_lock = None
             if self.app_lease is not None:
                 os.close(self.app_lease)
                 self.app_lease = None
@@ -497,13 +496,13 @@ class WindowsBackend:
         self.control_root.mkdir(parents=True, exist_ok=True)
         if self.lane == 'host':
             # One real pointer and keyboard: one host lane at a time.
-            mutex = open_no_follow(self.control_root / 'host-input.lock', os.O_CREAT | os.O_RDWR)
+            lock = open_no_follow(self.control_root / 'host-input.lock', os.O_CREAT | os.O_RDWR)
             try:
-                locking.flock(mutex, locking.LOCK_EX | locking.LOCK_NB)
+                locking.flock(lock, locking.LOCK_EX | locking.LOCK_NB)
             except BlockingIOError:
-                os.close(mutex)
+                os.close(lock)
                 raise PermissionError('The Windows host input lane is already busy') from None
-            self.mutex = mutex
+            self.host_lock = lock
         try:
             self.app_lease = open_no_follow(
                 self.control_root / f'app-{window["pid"]}.lock', os.O_CREAT | os.O_RDWR
@@ -760,12 +759,7 @@ class WindowsBackend:
             if values['window'] != self.identity:
                 raise PermissionError('Focus requires the acquired target')
         elif op == 'move':
-            x, y = values['x'], values['y']
-            left, top, width, height = self.baseline
-            if any(isinstance(v, bool) or not math.isfinite(v) for v in (x, y)) or not (
-                left <= x < left + width and top <= y < top + height
-            ):
-                raise ValueError('Pointer position is outside the acquired client region')
+            x, y = self.client_point(values)
             vx, vy = self.api.user.GetSystemMetrics(76), self.api.user.GetSystemMetrics(77)
             vw, vh = self.api.user.GetSystemMetrics(78), self.api.user.GetSystemMetrics(79)
             if not (vx <= x < vx + vw and vy <= y < vy + vh):
@@ -833,13 +827,7 @@ class WindowsBackend:
     def agent_operation(self, op, values):
         lane = self.message_lane
         if op == 'move':
-            x, y = values['x'], values['y']
-            left, top, width, height = self.baseline
-            if any(isinstance(v, bool) or not math.isfinite(v) for v in (x, y)) or not (
-                left <= x < left + width and top <= y < top + height
-            ):
-                raise ValueError('Point is outside the acquired client region')
-            return {'delivery': lane.pick(x, y)}
+            return {'delivery': lane.pick(*self.client_point(values))}
         if op == 'button':
             return {'action': lane.button(values['code'], values['pressed'])}
         if op == 'key':
@@ -900,8 +888,6 @@ def cleanup_input(path):
     path = Path(path)
     if not path.is_file() or path.is_symlink():
         return
-    from .platform_io import open_no_follow
-
     fd = open_no_follow(path, os.O_RDONLY)
     with os.fdopen(fd, 'rb') as stream:
         encoded = stream.read(4097)
