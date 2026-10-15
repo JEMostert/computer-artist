@@ -2,7 +2,7 @@
 
 Read this only on macOS. The rules in SKILL.md apply as well.
 
-The native backend was verified for Chrome canvas drawing, physical text, right
+The native backend was verified for Excalidraw drawing in Chrome, physical text, right
 click, scroll and middle drag on macOS 27.0.1 (Apple M1 Pro). Other apps/OS versions
 remain unverified. It uses private SkyLight pointer delivery and per-process
 physical keys, with text resolved from the live keyboard layout. It draws its own click-through
@@ -47,10 +47,38 @@ Input coordinates are logical window-frame points, including decoration. Capture
 are pixels; Retina images need scaling to the reported window dimensions before
 input. Inspect the capture first. Read-only AX trees use the same frame origin.
 Left/right/middle buttons, multi-clicks, paths, drags and scrolling are implemented;
-verified compatibility is limited to the Chrome workflows above.
+verified compatibility is limited to the Chrome workflows above. Agent-lane drags
+fail in apps that read the shared button state; see `--host-drags` below.
 IME, dead keys and app data drag-and-drop are unsupported. Only explicit `--host`
-uses shared pointer/focus/clipboard; host paste uses Cmd+V. Host activation/paste
-and Retina scaling remain live-unverified. Programs, gestures, watch, checks,
+uses shared pointer/focus/clipboard; host paste uses Cmd+V. On macOS 27.0.1 host
+activation of a background app was refused ("Host target did not become focused");
+host paste and Retina scaling remain live-unverified.
+
+### Drags that become dots: `--host-drags`
+
+macOS has one session-wide mouse button state. Agent-lane drags reach the app, but
+apps that read that shared state during motion (Kleki and other Chrome canvases,
+GTK apps such as Pinta) see the button as up, so each stroke ends at once and
+leaves a dot. Apps that track the stroke themselves, such as Excalidraw, still draw.
+No agent-lane setting fixes this.
+
+When a stroke leaves only a dot, ask the user before adding `--host-drags`; it
+needs their authorization in the current task:
+
+```bash
+ca drag --host-drags --window app --from 900 740 --to 1400 1020
+ca draw --host-drags --window app --path-file shape.svg
+```
+
+Clicks stay on the agent lane. Each drag borrows the real cursor: it refuses while
+a human button is held, detaches the user's physical mouse, moves the cursor to
+every point, and on release returns the cursor, rejoins the mouse and returns
+focus to the user's app. The target is frontmost for a few milliseconds after
+release, so keys typed then can land in it. The drag path must be visible: a
+covering window stops the drag. A human click during the drag stops it; mouse
+motion is ignored while detached. Verified live with Pinta 3.1.1 on macOS 27.0.1;
+other apps are unverified. Tell the user their mouse is locked out during each
+stroke. Programs, gestures, watch, checks,
 fragments and handoff use the shared CLI workflow.
 
 Private Linux boxes remain available through **Docker Desktop** (not Podman).

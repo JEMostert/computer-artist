@@ -69,6 +69,13 @@ reported image and window dimensions before sending input.
 
 Left/right/middle buttons, multi-clicks, pointer paths, drags and scrolling are
 implemented. The Chrome workflows below establish a narrower compatibility claim.
+macOS keeps one session-wide button state, and apps that read it during motion
+(Kleki in Chrome, GTK apps such as Pinta) see agent-lane drags as button-up motion,
+so strokes become dots. Excalidraw tracks the stroke itself and is unaffected.
+Opt-in `--host-drags` keeps clicks on the agent lane but borrows the real cursor for
+each drag: it detaches the physical mouse, warps the cursor to each point, posts
+through the HID tap, then returns the cursor, rejoins the mouse and returns focus
+through SkyLight.
 IME, dead-key composition and application data drag-and-drop are unsupported. The
 agent lane has no clipboard. Explicit `--host` selects the human pointer,
 activation and clipboard; host paste uses Cmd+V. Host activation/paste and Retina
@@ -121,7 +128,8 @@ The container results below are separate from native application evidence.
 | Container runtime | Docker Desktop only, as on Windows; selecting Podman is refused | Implemented |
 | Native Mac desktop | Pointer drawing, physical text, right-click, scroll, middle drag, capture/AX and deadline cleanup | Verified 15 Oct in Chrome, macOS 27.0.1, Apple M1 Pro; see workflows above |
 | Native takeover | Event-time input attribution, foreground watching and same-app keyboard-window refusal | Implemented; portable regressions; live human takeover unverified |
-| Native host input and Retina | Explicit host activation/Cmd+V; capture pixel-to-point scaling | Implemented; live unverified |
+| Native borrowed drags | `--host-drags`: continuous strokes in apps that read the shared button state; cursor and front app returned | Verified 15 Oct with Pinta 3.1.1 for `ca drag` and a `ca draw` Bézier (front app back about 6 ms after release); Chrome canvases unverified |
+| Native host input and Retina | Explicit host activation/Cmd+V; capture pixel-to-point scaling | Implemented; activation of a background app refused on 15 Oct (macOS 27.0.1); paste and Retina live unverified |
 
 The box image is about 5 GB. Docker Desktop's default memory limit is enough for
 one or two environments; raise it in Docker Desktop's settings for more. `network

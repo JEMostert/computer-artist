@@ -34,7 +34,8 @@ exactly one guide and follow its steps; never mix them:
   captures exclude them, unless the reply says `may_include_overlapping_windows: true`.
 - Never silently move the human's pointer or steal focus. The default agent lane
   never falls back to host input; do not use `--host` to work around a refusal.
-  `--host` needs the user's authorization in the current task.
+  `--host` needs the user's authorization in the current task, and so does the
+  macOS `--host-drags`, which borrows the real cursor for each drag.
 - For text use `ca type` / `ctx.type`. With `--host` and inside environments it
   pastes the whole text at once and then restores the previous clipboard; on the
   Windows agent lane it inserts the whole text into the control; only the Linux
