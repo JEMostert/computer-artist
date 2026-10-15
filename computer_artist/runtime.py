@@ -248,7 +248,7 @@ class Context:
         center still goes through the usual guards. Verify outcomes as usual.
         """
         if 'accessible' in self.capabilities.get('operations', []):
-            # Windows: UI Automation through the backend, same element shape as AT-SPI.
+            # Native Windows/macOS readers return the same element shape as AT-SPI.
             self.refresh()
             self.check_budget()
             return self.client.request(
@@ -479,10 +479,10 @@ class Context:
         self.check_budget()
         return self.client.clipboard_set(text)
 
-    def paste(self, text, *, shortcut='Shift+Insert'):
+    def paste(self, text, *, shortcut=None):
         from .input import parse_chord
 
-        codes = parse_chord(shortcut)
+        codes = parse_chord(shortcut) if shortcut is not None else None
         self._host_operations('focus', 'key', 'clipboard_set')
         self.client.validate_text(text)
         self._own()

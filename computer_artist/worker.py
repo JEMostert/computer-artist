@@ -57,6 +57,8 @@ def main(folder):
     spec = json.loads((folder / 'request.json').read_text())
     if spec.get('socket') == 'win32':
         os.environ['CA_WIN32_CLEANUP_FILE'] = str(folder / 'windows-input.json')
+    elif spec.get('socket') == 'macos':
+        os.environ['CA_MACOS_CLEANUP_FILE'] = str(folder / 'macos-input.json')
     result = {'ok': False, 'status': 'failed'}
     ctx = None
     journal = None

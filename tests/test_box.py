@@ -92,7 +92,7 @@ class BoxDefinitionTest(unittest.TestCase):
             run.call_args.args[0][:4], ['docker', 'build', '--platform', 'linux/amd64']
         )
 
-    def test_macos_uses_boxes_and_has_no_desktop_socket(self):
+    def test_macos_uses_boxes_and_a_native_desktop_socket(self):
         from computer_artist.config import socket_path
 
         with patch.object(box.sys, 'platform', 'darwin'), patch.dict(os.environ, {}, clear=True):
@@ -106,8 +106,7 @@ class BoxDefinitionTest(unittest.TestCase):
             if os.name == 'nt':
                 return  # Windows has its own desktop backend.
             self.assertEqual(box.user_args(box.Runtime('docker')), [])
-            with self.assertRaisesRegex(ValueError, 'ca env start NAME'):
-                socket_path()
+            self.assertEqual(socket_path(), 'macos')
 
 
 class BoxPathTest(unittest.TestCase):

@@ -65,6 +65,10 @@ class Client:
             from .windows import WindowsBackend
 
             self.native_backend = WindowsBackend(lane)
+        elif str(path) == 'macos':
+            from .macos import MacOSBackend
+
+            self.native_backend = MacOSBackend(lane)
         else:
             self.socket = socket.socket(socket.AF_UNIX)
             self.socket.settimeout(max(0.001, min(3, self.expires - time.monotonic())))
@@ -402,8 +406,8 @@ class Client:
             raise ValueError('Clipboard access requires explicit host access')
         return self.request('clipboard_set', text=text)
 
-    def paste(self, text, *, shortcut=(42, 110), restore=True, settle=0.5):
-        """Paste into the already focused, leased host target (Shift+Insert).
+    def paste(self, text, *, shortcut=None, restore=True, settle=0.5):
+        """Paste into the already focused, leased host target using its native shortcut.
 
         The whole text arrives at once. The user's clipboard is saved first and put
         back after `settle` seconds, unless someone copied something else meanwhile.
@@ -415,6 +419,8 @@ class Client:
             raise ValueError('Release held keys before pasting')
         if not self.request('ping').get('keyboard_ready'):
             raise ValueError('Paste requires keyboard focus on the host target')
+        if shortcut is None:
+            shortcut = self.request('capabilities').get('paste_shortcut', [42, 110])
         saved = self._save_clipboard() if restore else None
         try:
             self.clipboard_set(text)

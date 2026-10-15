@@ -3,8 +3,17 @@
   "platform": "macOS 27.0.1 (arm64, Apple M1 Pro)",
   "python": "3.13.16",
   "container_runtime": "Docker Desktop 4.95.0, engine 29.8.2, linux/arm64 VM with amd64 emulation",
-  "unit_tests": {"ran": 362, "passed": 353, "skipped": 9, "command": "scripts/test.sh"},
-  "box_image": {"platform": "linux/amd64", "first_build_seconds": 180, "size_gb": 5.4},
+  "unit_tests": {
+    "ran": 379,
+    "passed": 370,
+    "skipped": 9,
+    "command": "source .venv/bin/activate && python -m unittest discover -s tests -q"
+  },
+  "box_image": {
+    "platform": "linux/amd64",
+    "first_build_seconds": 180,
+    "size_gb": 5.4
+  },
   "environment_live": {
     "start_seconds_cached_image": 20.6,
     "kwrite_window_wait": true,
@@ -24,5 +33,52 @@
     "network = host",
     "several concurrent environments"
   ],
-  "native_desktop": "not implemented"
+  "native_desktop": {
+    "browser": "Google Chrome 155.0.8059.79",
+    "site": "https://excalidraw.com",
+    "agent_delivery": [
+      "SkyLight pointer events",
+      "CGEventPostToPid physical keys"
+    ],
+    "window_capture_and_ax_id_frame": true,
+    "left_click_selects_rectangle_tool": true,
+    "rectangle_drag_points": 119,
+    "physical_text_visible": "Computer Artist on macOS",
+    "bezier_points": 159,
+    "bezier_visible_and_pixel_change_check": true,
+    "right_click_context_menu": true,
+    "scroll_160_pixel_change_and_reverse": true,
+    "middle_drag_pixel_change_and_reverse": true,
+    "hard_deadline_held_shift_cleanup": {
+      "deadline_seconds": 1.5,
+      "remaining_owned_keys": [],
+      "remaining_owned_buttons": []
+    },
+    "foreground_unchanged_during_actions": true,
+    "cursor_unchanged_checks": [
+      "left click",
+      "rectangle drag",
+      "physical text",
+      "Bezier",
+      "right click",
+      "scroll"
+    ],
+    "concurrent_human_pointer_movement_observed": true,
+    "takeover": {
+      "status": "implemented; portable regression coverage",
+      "method": "listen-only event-time type/location and foreground PID; no key values or text read or logged",
+      "foreground_watching": "allowed; live human-driven journey not verified"
+    },
+    "not_live_verified": [
+      "human-driven foreground watching and takeover",
+      "host activation and clipboard paste",
+      "Retina pixel-to-point scaling",
+      "other native apps and macOS versions",
+      "multiple native application leases followed by hard termination"
+    ],
+    "automated_browser_tests": "not created or run",
+    "proof": "native CLI and supervised programs; visible Chrome AX/screenshot confirmation",
+    "temporary_artwork_removed_and_owned_tab_closed": true,
+    "cmd_shortcut_select_all_delete_own_shapes": true
+  }
 }

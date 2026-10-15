@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "computer-artist"
 version = "0.5.0"
-description = "Independent agent input on KDE Wayland and Windows desktops, private Linux environments (also on macOS) and verified CLI programs"
+description = "Independent agent input on KDE Wayland, Windows and macOS desktops, private Linux environments and verified CLI programs"
 readme = "README.md"
 requires-python = ">=3.12"
 license = "GPL-2.0-or-later"
@@ -13,6 +13,9 @@ dependencies = [
     "Pillow==12.3.0",
     "jeepney==0.9.0; sys_platform != 'win32'",
     "comtypes==1.4.17; sys_platform == 'win32'",
+    "pyobjc-framework-ApplicationServices==12.2.2; sys_platform == 'darwin'",
+    "pyobjc-framework-Cocoa==12.2.2; sys_platform == 'darwin'",
+    "pyobjc-framework-Quartz==12.2.2; sys_platform == 'darwin'",
 ]
 
 [project.optional-dependencies]

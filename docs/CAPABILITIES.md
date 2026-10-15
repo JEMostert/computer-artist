@@ -3,8 +3,16 @@
 The table and validation below describe the Linux (KWin) backend. Windows has a
 separate backend whose agent lane uses window messages and UI Automation instead
 of a second input device; see [Windows](WINDOWS.md). It is narrower than the KWin
-lane: no drawing, drags or canvas input. macOS has no desktop backend; it runs
-private environments only, in Linux boxes; see [macOS](MACOS.md).
+lane: no drawing, drags or canvas input. macOS has an implemented native backend
+using private SkyLight pointer delivery and per-process physical keys, with its own
+arrow, capture and AX reader. Drawing, physical text, right-click, scrolling,
+middle drag and deadline cleanup were verified in Chrome on macOS 27.0.1 (Apple
+M1 Pro). Foreground watching is allowed; event-time input takeover and same-app
+keyboard-window refusal have portable regressions. Live human takeover, other
+apps/OS versions, host input and Retina scaling remain unverified. The shared
+program, observation, gesture, handoff, checks and fragment workflows apply. See [macOS](MACOS.md) for permission,
+Space, app-wide ownership and Retina coordinate limits. Both platforms also retain
+private Linux boxes. The Linux evidence below does not verify either native backend.
 
 The goal is independent agent input in existing applications on the user's actual
 desktop while the human works elsewhere. Private desktops and Xvfb do not fulfill

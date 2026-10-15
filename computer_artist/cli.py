@@ -250,8 +250,8 @@ def parser():
             command.add_argument(
                 '--shortcut',
                 type=chord,
-                default=chord('Shift+Insert'),
-                help='Host paste shortcut (default: Shift+Insert); use Ctrl+Shift+V for apps that require it',
+                default=None,
+                help='Host paste shortcut (default: Cmd+V on macOS, Shift+Insert elsewhere)',
             )
         elif name == 'key':
             command.add_argument('chord', type=chord, help='Key or chord, e.g. End or Ctrl+Shift+S')
@@ -272,7 +272,7 @@ def parser():
     a11y = commands.add_parser(
         'a11y',
         parents=[shared],
-        help="Read a window's accessibility tree (AT-SPI on Linux, UI Automation on Windows)",
+        help="Read a window's accessibility tree (AT-SPI, Windows UI Automation or macOS AX)",
     )
     a11y.add_argument('--window', help='Window ID or saved name')
     a11y.add_argument('--role', help='Exact role name, e.g. "push button"')
@@ -507,6 +507,25 @@ def main(argv=None):
             print(json.dumps(reply, indent=2))
             return 0 if reply['ok'] else 1
         if args.command == 'a11y' and (args.status or args.enable or not args.window):
+            if sys.platform == 'darwin' and socket_path(args.socket) == 'macos':
+                import ApplicationServices as AS
+
+                if not (args.status or args.enable):
+                    raise ValueError('Provide --window, --status or --enable')
+                trusted = bool(AS.AXIsProcessTrusted())
+                print(
+                    json.dumps(
+                        {
+                            'ok': trusted,
+                            'backend': 'macos_accessibility',
+                            'reachable': trusted,
+                            'note': 'Grant Accessibility permission to the terminal running ca in '
+                            'System Settings > Privacy & Security; ca does not prompt automatically.',
+                        },
+                        indent=2,
+                    )
+                )
+                return 0 if trusted else 1
             if os.name == 'nt':
                 if args.enable or not args.status:
                     raise ValueError(

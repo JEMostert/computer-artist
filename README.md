@@ -4,7 +4,7 @@
 native Wayland applications on your KDE desktop. You can keep using your pointer
 and keyboard in another application. It is a local CLI backed by a KWin plugin.
 
-Keep your pointer and keyboard focus outside the target application's connection.
+On KDE, keep your pointer and keyboard focus outside the target application's connection.
 Returning to it revokes agent control. `--host` explicitly selects the real desktop
 pointer, focus and clipboard. The agent lane never falls back to host input.
 XWayland, independent clipboard/IME and popup grabs are unsupported.
@@ -15,11 +15,19 @@ messages and other controls through UI Automation, without moving your pointer o
 focus. Canvases, drawing and apps that ignore UI Automation are refused there. See
 [Windows](docs/WINDOWS.md) for what is implemented and what is verified.
 
+On **macOS** a native backend is implemented using private SkyLight pointer
+posting and per-process physical keys, with its own click-through arrow. Drawing,
+text, right-click, scroll and middle drag were verified in Chrome on macOS 27.0.1
+(Apple M1 Pro). Foreground watching is allowed; real input in the target stops
+agent control. This takeover behavior has portable regressions; a live human
+takeover journey, other apps, host paste and Retina scaling remain unverified.
+See [macOS](docs/MACOS.md) for permissions and current restrictions.
+
 For development and testing, give each agent a private environment instead: its own
 KWin desktop, seat, clipboard and session bus, with apps from the host or a Podman
 or Docker container. On Windows and macOS each environment is a Linux box container
-instead (see [Windows](docs/WINDOWS.md) and [macOS](docs/MACOS.md)); macOS supports
-only these environments. Nothing in it touches your pointer, focus or browser:
+instead (see [Windows](docs/WINDOWS.md) and [macOS](docs/MACOS.md)). Nothing in a
+private environment touches your pointer, focus or browser:
 
 ```bash
 ca env start web --image docker.io/library/node:22 --project .   # or --recipe ca-env.toml
@@ -32,7 +40,8 @@ ca env stop web
 See [private environments](skills/computer-artist/references/environments.md) for
 recipes, browsers, private profiles and limits.
 
-Install the CLI and build/load the matching plugin using [installation](docs/INSTALL.md):
+Install using [installation](docs/INSTALL.md). Linux needs the matching KWin
+plugin; Windows and macOS use their native backends:
 
 ```bash
 python -m venv .venv
@@ -50,7 +59,9 @@ ca watch --window paint --duration 10 --changes-only
 ca session close
 ```
 
-Coordinates are logical pixels relative to window content. Inspect the captured
+Coordinates are logical pixels relative to window content on Linux and Windows.
+On macOS they are logical window-frame points including decoration; Retina capture
+pixels can have a different scale. Inspect the captured
 image before input. A cursor session starts on acquisition and stays visible
 between commands until closed. The agent cursor is separate from your own cursor.
 

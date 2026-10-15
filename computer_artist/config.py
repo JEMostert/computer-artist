@@ -4,11 +4,6 @@ import os
 import sys
 from pathlib import Path
 
-MACOS_DESKTOP = (
-    'macOS has no native desktop backend. Use a private environment instead: '
-    'ca env start NAME, then ca --environment NAME COMMAND'
-)
-
 
 def checkout_root():
     root = Path(__file__).resolve().parents[1]
@@ -69,7 +64,7 @@ def socket_path(explicit=None):
     if os.name == 'nt':
         return 'win32'
     if sys.platform == 'darwin':
-        raise ValueError(MACOS_DESKTOP)
+        return 'macos'
     runtime = os.environ.get('XDG_RUNTIME_DIR')
     if not runtime:
         raise ValueError('Set CA_SOCKET or pass --socket; XDG_RUNTIME_DIR is unavailable')

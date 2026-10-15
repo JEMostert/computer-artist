@@ -16,7 +16,7 @@ exactly one guide and follow its steps; never mix them:
 
 - Linux: [Linux (KDE Wayland)](references/linux.md)
 - Windows: [Windows](references/windows.md)
-- macOS: [macOS](references/macos.md) (private environments only)
+- macOS: [macOS](references/macos.md) (native desktop and Docker environments)
 - Anything else: Computer Artist does not support it yet. Tell the user and stop.
 
 ## 2. Rules on every platform

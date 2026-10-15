@@ -8,7 +8,7 @@ import sys
 from pathlib import Path
 
 from .client import Client
-from .config import MACOS_DESKTOP, checkout_root, skill_source, socket_path
+from .config import checkout_root, skill_source, socket_path
 from .workspace import Workspace
 
 
@@ -123,8 +123,8 @@ def diagnose(args):
         from .windows_diagnostics import diagnose_backend
 
         return diagnose_backend(args, store, checks, warnings, check)
-    if sys.platform == 'darwin' and not (args.socket or os.environ.get('CA_SOCKET')):
-        return diagnose_macos(lane, checks, warnings, check)
+    if sys.platform == 'darwin' and socket_path(args.socket) == 'macos':
+        return diagnose_macos(args, store, checks, warnings, check)
     try:
         socket = socket_path(args.socket)
         with Client(
@@ -340,25 +340,68 @@ def diagnose(args):
     }
 
 
-def diagnose_macos(lane, checks, warnings, check):
-    """macOS controls no desktop of its own; private environments need a container runtime."""
-    from .box import engine_for
-
+def diagnose_macos(args, store, checks, warnings, check):
+    """Inspect native permissions and APIs without requiring a container runtime."""
+    lane = getattr(args, 'lane', 'agent')
+    backend, windows, selected = {}, [], None
     try:
-        engine = engine_for()
-        engine.check()
-        check('container_runtime', True, engine.name)
-    except (RuntimeError, ValueError) as error:
-        check('container_runtime', False, str(error), 'Install and start Docker Desktop.')
-    warnings.append({'code': 'platform_limit', 'detail': MACOS_DESKTOP})
+        import ApplicationServices as AS
+        import Quartz
+
+        check(
+            'accessibility',
+            AS.AXIsProcessTrusted(),
+            'macOS Accessibility permission',
+            'Grant Accessibility permission to the terminal running ca in System Settings.',
+        )
+        check(
+            'screen_recording',
+            Quartz.CGPreflightScreenCaptureAccess(),
+            'macOS Screen Recording permission',
+            'Grant Screen Recording permission to the terminal running ca in System Settings.',
+        )
+        if lane == 'agent':
+            check(
+                'input_monitoring',
+                Quartz.CGPreflightListenEventAccess(),
+                'macOS Input Monitoring permission for takeover detection',
+                'Grant Input Monitoring permission to the terminal running ca in System Settings.',
+            )
+        with Client(
+            'macos', lane=lane, deadline=min(args.deadline, 5), window_dir=store.root
+        ) as client:
+            backend = client.request('capabilities')
+            client.native_backend.api.session_ready()
+            # Only enumerate application titles when explicitly selecting a window.
+            if args.window:
+                windows = client.windows()
+                identity = store.resolve_window(args.window.strip('{}'))
+                selected = next((w for w in windows if w['id'] == identity), None)
+                check(
+                    'selected_window',
+                    selected is not None and selected['acquirable'],
+                    selected,
+                    'Observe the target on this Space; keep human input elsewhere.',
+                )
+        check('macos_backend', True, {'backend': 'macos', 'protocol': backend['protocol']})
+        warnings.extend(
+            {'code': 'platform_limit', 'detail': text} for text in backend['limitations']
+        )
+    except Exception as error:
+        check(
+            'macos_backend',
+            False,
+            str(error),
+            'Use an unlocked macOS console session with the required permissions.',
+        )
     return {
         'ok': all(c['passed'] for c in checks),
         'command': 'doctor',
         'lane': lane,
         'checks': checks,
         'warnings': warnings,
-        'backend': {'backend': 'macos', 'environments': 'linux_box'},
-        'windows': [],
-        'selected_window': None,
-        'note': 'Read-only diagnostics; check an environment with ca env doctor NAME.',
+        'backend': backend,
+        'windows': windows,
+        'selected_window': selected,
+        'note': 'Read-only native diagnostics; check Docker separately with ca env doctor NAME.',
     }

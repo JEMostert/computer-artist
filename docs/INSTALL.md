@@ -1,7 +1,10 @@
 # Installation
 
-For native Windows support, follow [Windows installation](WINDOWS.md); for macOS
-(private environments only), follow [macOS](MACOS.md). The KWin build and session
+For native Windows support, follow [Windows installation](WINDOWS.md); for native
+macOS and optional Docker Desktop Linux boxes, follow [macOS](MACOS.md). macOS
+needs Accessibility, Screen Recording and Input Monitoring for the invoking
+terminal or application; `ca doctor` checks native support without requiring Docker.
+`ca env doctor NAME` diagnoses a box. The KWin build and session
 instructions below apply to Linux only.
 
 Requires Python 3.12+, Pillow, jeepney, KDE Wayland and matching installed KWin

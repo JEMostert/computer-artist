@@ -16,6 +16,8 @@ for filename in (
     'test_gestures.py',
     'test_agent_keyboard.py',
     'test_box.py',
+    'test_macos.py',
+    'test_macos_activity.py',
     'test_containers.py',
 ):
     suite.addTests(unittest.defaultTestLoader.discover(str(root / 'tests'), pattern=filename))

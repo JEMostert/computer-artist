@@ -100,6 +100,14 @@ def _supervise(spec, folder, *, trace):
                 except ProcessLookupError:
                     pass
                 process.wait()
+                if spec.get('socket') == 'macos':
+                    from .macos import cleanup_input
+
+                    try:
+                        cleanup_input(folder / 'macos-input.json')
+                    except (OSError, ValueError) as error:
+                        failure = f'macOS input cleanup failed: {error}'
+                        interruption = {'code': 'cleanup_failed', 'reason': failure, 'details': {}}
     result = partial_result(folder)
     if (folder / 'result.json').is_file():
         try:
