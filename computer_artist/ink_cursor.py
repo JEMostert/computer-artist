@@ -63,13 +63,28 @@ def glide(start, end):
     distance = math.hypot(ex - sx, ey - sy)
     if distance < GLIDE_FROM:
         return [], 0.0
-    duration = min(0.28, 0.08 + distance * 0.00035)
+    duration = min(0.22, 0.06 + distance * 0.0003)
     steps = max(2, round(duration / GLIDE_STEP))
     points = []
     for i in range(1, steps):
         eased = 1 - (1 - i / steps) ** 3
         points.append((sx + (ex - sx) * eased, sy + (ey - sy) * eased))
     return points, duration / steps
+
+
+def travel(move, start, end):
+    """Glide with `move(x, y)` from start to end on an absolute clock, landing on end.
+
+    Sleeping a fixed delay per step overshoots on a busy machine; scheduling each step
+    against its due time keeps the glide as short as planned.
+    """
+    points, delay = glide(start, end)
+    due = time.monotonic()
+    for point in points:
+        move(*point)
+        due += delay
+        time.sleep(max(0.0, due - time.monotonic()))
+    move(*end)
 
 
 class InkCursor:
@@ -177,7 +192,9 @@ class InkCursor:
             self.drops.clear()
             left, top, right, bottom = x0 - 36, y0 - 58, x0 + 58, y0 + 42
         pixels = self.scale * self.size  # Image pixels per design unit.
-        factor = pixels * SUPERSAMPLE
+        # High-density displays are smooth enough without supersampling, which would
+        # quadruple the per-frame work and drop the overlay below 60 fps.
+        factor = pixels * (SUPERSAMPLE if pixels < 2 else 1)
         size = (max(1, round((right - left) * factor)), max(1, round((bottom - top) * factor)))
 
         def device(px, py):
@@ -204,13 +221,16 @@ class InkCursor:
 
         energy = 1.0 if now - self.last_move < 0.2 or self.pressed else 0.7
         glow_draw.polygon(pen(PEN), fill=INK + (int(150 * energy),))
-        glow = glow.filter(ImageFilter.GaussianBlur(4 * factor))
+        # The bloom is soft anyway: blur it at a quarter of the resolution.
+        small = (max(1, size[0] // 4), max(1, size[1] // 4))
+        glow = glow.resize(small, Image.BILINEAR).filter(ImageFilter.GaussianBlur(factor))
+        glow = glow.resize(size, Image.BILINEAR)
         frame = Image.alpha_composite(glow, ink)
         frame = Image.alpha_composite(frame, self._pen_body(size, pen, factor))
-        return frame.resize(
-            (max(1, round((right - left) * pixels)), max(1, round((bottom - top) * pixels))),
-            Image.LANCZOS,
-        ), (left * self.size, top * self.size)
+        output = (max(1, round((right - left) * pixels)), max(1, round((bottom - top) * pixels)))
+        if frame.size != output:
+            frame = frame.resize(output, Image.LANCZOS)
+        return frame, (left * self.size, top * self.size)
 
     def _drop_at(self, drop, now):
         born, x, y, vx, vy, radius = drop

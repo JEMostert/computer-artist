@@ -126,7 +126,8 @@ class AgentPointer:
                 now = time.monotonic()
                 if now < next_frame and not events:
                     continue
-                next_frame = now + (0.016 if cursor.busy(now) else 0.05)
+                # Draw on every 8 ms wake while animating; a 16 ms deadline skips frames.
+                next_frame = now + (0.012 if cursor.busy(now) else 0.05)
                 frame = cursor.render(now)
                 if frame is None:
                     continue
@@ -181,13 +182,9 @@ class AgentPointer:
 
     def glide_to(self, x, y):
         """Let the pen travel visibly to a new action's position; returns when it arrives."""
-        from .ink_cursor import glide
+        from .ink_cursor import travel
 
-        points, delay = glide(self.position, (x, y))
-        for point in points:
-            self.move(*point)
-            time.sleep(delay)
-        self.move(x, y)
+        travel(self.move, self.position, (x, y))
 
     def press(self, pressed):
         self._post('press', bool(pressed))

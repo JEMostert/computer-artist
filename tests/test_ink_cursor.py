@@ -71,7 +71,7 @@ class InkCursorTest(unittest.TestCase):
     def test_new_actions_glide_instead_of_jumping(self):
         points, delay = glide((0, 0), (400, 300))
         self.assertGreater(len(points), 3)
-        self.assertLessEqual(len(points) * delay, 0.28)
+        self.assertLessEqual(len(points) * delay, 0.22)
         steps = [b[0] - a[0] for a, b in zip([(0, 0)] + points, points)]
         self.assertGreater(steps[0], steps[-1])  # Fast start, eased arrival.
         self.assertTrue(all(0 < x < 400 for x, _ in points))  # The caller lands on the target.

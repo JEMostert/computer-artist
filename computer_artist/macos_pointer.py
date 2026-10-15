@@ -140,13 +140,9 @@ class AgentPointer:
 
     def glide_to(self, x, y):
         """Let the pen travel visibly to a new action's position; returns when it arrives."""
-        from .ink_cursor import glide
+        from .ink_cursor import travel
 
-        points, delay = glide(self.position, (x, y))
-        for point in points:
-            self.move(*point)
-            time.sleep(delay)
-        self.move(x, y)
+        travel(self.move, self.position, (x, y))
 
     def press(self, pressed):
         self._send({'pressed': bool(pressed)})
@@ -169,13 +165,19 @@ class AgentPointer:
 
 
 def _run(root, lifetime_lock):
-    import io
     import uuid
 
     import AppKit as a
     import objc
     import Quartz as q
-    from Foundation import NSData, NSObject, NSTimer
+    from Foundation import (
+        NSActivityLatencyCritical,
+        NSActivityUserInitiated,
+        NSData,
+        NSObject,
+        NSProcessInfo,
+        NSTimer,
+    )
 
     from .ink_cursor import InkCursor
 
@@ -197,6 +199,7 @@ def _run(root, lifetime_lock):
         @objc.python_method
         def setup(self, panel, view, app):
             self.panel, self.view, self.app = panel, view, app
+            self.colors = q.CGColorSpaceCreateWithName(q.kCGColorSpaceSRGB)
             self.clients, self.controllers = {}, set()
             self.owner = None
             self.session = uuid.uuid4().hex
@@ -260,7 +263,9 @@ def _run(root, lifetime_lock):
             now = time.monotonic()
             if now >= self.next_frame:
                 self.draw(now)
-                self.next_frame = now + (0.016 if self.cursor.busy(now) else 0.05)
+                # While animating, draw on every tick: a 16 ms deadline against a 16 ms
+                # timer skipped every other frame. At rest 20 fps is enough for the drip.
+                self.next_frame = now if self.cursor.busy(now) else now + 0.05
 
         @objc.python_method
         def apply(self, connection, line):
@@ -309,12 +314,18 @@ def _run(root, lifetime_lock):
             if frame is None:
                 return
             image, (left, top) = frame
-            encoded = io.BytesIO()
-            image.save(encoded, 'PNG', compress_level=1)
-            data = encoded.getvalue()
-            picture = a.NSImage.alloc().initWithData_(NSData.dataWithBytes_length_(data, len(data)))
+            # Raw pixels straight into a CGImage: no per-frame PNG encode and decode.
+            data = image.tobytes()
+            provider = q.CGDataProviderCreateWithCFData(
+                NSData.dataWithBytes_length_(data, len(data))
+            )
+            bitmap = q.CGImageCreate(
+                image.width, image.height, 8, 32, image.width * 4, self.colors,
+                q.kCGImageAlphaLast | q.kCGBitmapByteOrderDefault, provider, None, False,
+                q.kCGRenderingIntentDefault,
+            )  # fmt: skip
             width, height = image.width / self.cursor.scale, image.height / self.cursor.scale
-            picture.setSize_((width, height))
+            picture = a.NSImage.alloc().initWithCGImage_size_(bitmap, (width, height))
             screens = a.NSScreen.screens()
             if not screens or not any(
                 q.CGRectContainsPoint(q.CGDisplayBounds(display), self.cursor.position)
@@ -355,12 +366,18 @@ def _run(root, lifetime_lock):
     reader = Reader.alloc().init()
     reader.setup(panel, view, app)
     timer = NSTimer.scheduledTimerWithTimeInterval_target_selector_userInfo_repeats_(
-        0.016, reader, 'tick:', None, True
+        1 / 60, reader, 'tick:', None, True
+    )
+    timer.setTolerance_(0)
+    # A background accessory app is otherwise throttled by App Nap, which makes the pen stutter.
+    activity = NSProcessInfo.processInfo().beginActivityWithOptions_reason_(
+        NSActivityUserInitiated | NSActivityLatencyCritical, 'Agent pen animation'
     )
     try:
         app.run()
     finally:
         timer.invalidate()
+        NSProcessInfo.processInfo().endActivity_(activity)
         for connection in list(reader.clients):
             reader.disconnect(connection)
         panel.close()
