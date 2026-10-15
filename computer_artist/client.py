@@ -138,63 +138,52 @@ class Client:
                     if isinstance(error, OSError):
                         self.failure = self.failure or error
                     raise
-                self.trace.append(
-                    {
-                        'time': time.monotonic(),
-                        'lane': self.lane,
-                        'operation': op,
-                        'ok': reply.get('ok'),
-                        'error': reply.get('error'),
-                    }
-                )
-                if not reply.get('ok'):
-                    raise ActionError(op, reply)
-                return reply
-            try:
-                # Cleanup gets a short independent allowance after expiry. All
-                # other exchanges share the execution's remaining wall time.
-                end = (
-                    time.monotonic() + 0.5
-                    if op in ('release', 'cancel')
-                    else min(self.expires, time.monotonic() + 3)
-                )
-
-                def remaining():
-                    timeout = end - time.monotonic()
-                    if timeout <= 0:
-                        raise TimeoutError('Compositor exchange deadline exceeded')
-                    self.socket.settimeout(timeout)
-
-                remaining()
-                self.socket.sendall(
-                    (json.dumps({**values, 'op': op, 'lane': self.lane}) + '\n').encode()
-                )
-                line = bytearray()
-                while b'\n' not in line and len(line) <= 65536:
-                    remaining()
-                    chunk = self.reader.read1(65537 - len(line))
-                    if not chunk:
-                        break
-                    line.extend(chunk)
-                if not line or len(line) > 65536:
-                    raise ConnectionError('Compositor disconnected or sent an oversized reply')
-                reply = json.loads(line)
-                if (
-                    not line.endswith(b'\n')
-                    or not isinstance(reply, dict)
-                    or type(reply.get('ok')) is not bool
-                ):
-                    raise ConnectionError('Compositor sent an invalid protocol reply')
-            except BaseException as error:
-                # An interrupted exchange has no reliable reply boundary. Close
-                # the transport so KWin returns ownership and a heartbeat cannot
-                # consume the abandoned reply or block cleanup on the reader.
+            else:
                 try:
-                    self.socket.shutdown(socket.SHUT_RDWR)
-                except OSError:
-                    pass
-                self.failure = self.failure or error
-                raise
+                    # Cleanup gets a short independent allowance after expiry. All
+                    # other exchanges share the execution's remaining wall time.
+                    end = (
+                        time.monotonic() + 0.5
+                        if op in ('release', 'cancel')
+                        else min(self.expires, time.monotonic() + 3)
+                    )
+
+                    def remaining():
+                        timeout = end - time.monotonic()
+                        if timeout <= 0:
+                            raise TimeoutError('Compositor exchange deadline exceeded')
+                        self.socket.settimeout(timeout)
+
+                    remaining()
+                    self.socket.sendall(
+                        (json.dumps({**values, 'op': op, 'lane': self.lane}) + '\n').encode()
+                    )
+                    line = bytearray()
+                    while b'\n' not in line and len(line) <= 65536:
+                        remaining()
+                        chunk = self.reader.read1(65537 - len(line))
+                        if not chunk:
+                            break
+                        line.extend(chunk)
+                    if not line or len(line) > 65536:
+                        raise ConnectionError('Compositor disconnected or sent an oversized reply')
+                    reply = json.loads(line)
+                    if (
+                        not line.endswith(b'\n')
+                        or not isinstance(reply, dict)
+                        or type(reply.get('ok')) is not bool
+                    ):
+                        raise ConnectionError('Compositor sent an invalid protocol reply')
+                except BaseException as error:
+                    # An interrupted exchange has no reliable reply boundary. Close
+                    # the transport so KWin returns ownership and a heartbeat cannot
+                    # consume the abandoned reply or block cleanup on the reader.
+                    try:
+                        self.socket.shutdown(socket.SHUT_RDWR)
+                    except OSError:
+                        pass
+                    self.failure = self.failure or error
+                    raise
             self.trace.append(
                 {
                     'time': time.monotonic(),
@@ -365,8 +354,6 @@ class Client:
         self.held_keys.clear()
 
     def chord(self, *codes, duration=0):
-        import math
-
         if not math.isfinite(duration) or duration < 0:
             raise ValueError('Key duration must be finite and nonnegative')
         if (

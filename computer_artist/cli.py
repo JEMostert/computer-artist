@@ -11,6 +11,7 @@ from pathlib import Path
 from .client import Client
 from .config import socket_path
 from .input import BUTTONS, parse_chord
+from .observations import Observations
 from .workspace import Workspace
 
 
@@ -74,19 +75,15 @@ def parser():
         const='agent',
         help='Control the independent agent pointer and supported physical keys (default)',
     )
+    shared.add_argument('--window-dir', help='Window layouts and fragments root')
+    shared.add_argument('--output-dir', help='Run output root')
+    shared.add_argument('--budget', type=int, help='Execution request budget (default: 20000)')
     result = argparse.ArgumentParser(
         prog='ca',
         parents=[shared],
         description='Computer Artist: independent agent input on your desktop',
     )
     result.add_argument('--version', action='version', version='Computer Artist 0.5.0')
-    # Shared options are declared before child parsers copy them.
-    shared.add_argument('--window-dir', help='Window layouts and fragments root')
-    shared.add_argument('--output-dir', help='Run output root')
-    result.add_argument('--output-dir', default=argparse.SUPPRESS)
-    shared.add_argument('--budget', type=int, help='Execution request budget (default: 20000)')
-    result.add_argument('--window-dir', default=argparse.SUPPRESS)
-    result.add_argument('--budget', type=int, default=argparse.SUPPRESS)
     commands = result.add_subparsers(dest='command', required=True)
     commands.add_parser(
         'monitors', parents=[shared], help='List Windows displays and physical bounds'
@@ -316,11 +313,21 @@ def parser():
 
 
 def execute(client, args):
-    from .commands import connected_command
-
-    reply = connected_command(client, args)
-    if reply is not None:
-        return reply
+    if args.command in ('observe', 'target'):
+        observer = Observations(Workspace(args.window_dir, args.output_dir), client)
+        if args.command == 'observe':
+            return {
+                'ok': True,
+                'observation': observer.capture(
+                    args.window.strip('{}'), since=args.since, region=args.region
+                ),
+            }
+        target = (
+            observer.revalidate(args.window, args.name, args.observation)
+            if args.revalidate
+            else observer.target(args.window, args.name, args.observation, args.rect)
+        )
+        return {'ok': True, 'target': target}
     if args.command == 'read':
         return client.request('read_text', window=client.window_store.resolve_window(args.window))
     if args.command == 'session':

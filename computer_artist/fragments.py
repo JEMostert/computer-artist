@@ -44,15 +44,14 @@ class FragmentStore:
                 if pointer.is_symlink() or not pointer.is_file():
                     raise ValueError('Current revision must be a library revision pointer')
                 version = key(json.loads(pointer.read_text())['version'])
-                return self._load(name, version)
-            current = folder / 'current'
-            if not current.is_symlink():
-                raise ValueError('Current revision must be a library revision link')
-            link = os.readlink(current)
-            parts = link.split('/')
-            if len(parts) != 2 or parts[0] != 'versions' or key(parts[1]) != parts[1]:
-                raise ValueError('Current revision points outside the fragment library')
-            version = parts[1]
+            else:
+                current = folder / 'current'
+                if not current.is_symlink():
+                    raise ValueError('Current revision must be a library revision link')
+                parts = os.readlink(current).split('/')
+                if len(parts) != 2 or parts[0] != 'versions' or key(parts[1]) != parts[1]:
+                    raise ValueError('Current revision points outside the fragment library')
+                version = parts[1]
         version = key(version)
         revision = folder / 'versions' / version
         if revision.is_symlink():
@@ -88,6 +87,23 @@ class FragmentStore:
                 raise ValueError(f'Module manifest contract differs from source: {field}')
         return manifest, source
 
+    def _publish(self, folder, version):
+        """Select an already written revision; callers hold the library lock."""
+        if os.name == 'nt':
+            atomic_json(folder / 'current-version.json', {'version': version})
+            return
+        temporary = folder / ('.current-' + version)
+        try:
+            temporary.symlink_to('versions/' + version)
+            for filename in ('module.py', 'manifest.json'):
+                alias = folder / filename
+                if not alias.is_symlink():
+                    alias.symlink_to('current/' + filename)
+            # Last step: once current points at the revision it must be kept.
+            os.replace(temporary, folder / 'current')
+        finally:
+            temporary.unlink(missing_ok=True)
+
     def restore(self, name, version):
         """Select a validated historical revision without deleting newer work."""
         with self.locked():
@@ -98,37 +114,25 @@ class FragmentStore:
                 if pointer.is_symlink():
                     raise ValueError('Current revision pointer cannot be a link')
                 previous = json.loads(pointer.read_text())['version'] if pointer.exists() else None
-                atomic_json(pointer, {'version': manifest['version']})
-                return {
-                    'name': key(name),
-                    'version': manifest['version'],
-                    'previous_version': previous,
-                }
-            current = folder / 'current'
-            previous = os.readlink(current) if current.is_symlink() else None
-            if current.exists() and not current.is_symlink():
-                raise ValueError('Refusing to replace a non-link current revision')
-            for filename in ('module.py', 'manifest.json'):
-                alias = folder / filename
-                if alias.is_symlink() and os.readlink(alias) == 'current/' + filename:
-                    continue
-                if alias.exists() or alias.is_symlink():
-                    raise ValueError(f'Refusing to replace unexpected module alias: {alias}')
-            temporary = folder / ('.restore-' + uuid.uuid4().hex)
-            try:
-                temporary.symlink_to('versions/' + manifest['version'])
+            else:
+                current = folder / 'current'
+                previous = (
+                    os.readlink(current).removeprefix('versions/') if current.is_symlink() else None
+                )
+                if current.exists() and not current.is_symlink():
+                    raise ValueError('Refusing to replace a non-link current revision')
                 for filename in ('module.py', 'manifest.json'):
                     alias = folder / filename
-                    if not alias.is_symlink():
-                        alias.symlink_to('current/' + filename)
-                os.replace(temporary, current)
-                sync_directory(folder)
-            finally:
-                temporary.unlink(missing_ok=True)
+                    if alias.is_symlink() and os.readlink(alias) == 'current/' + filename:
+                        continue
+                    if alias.exists() or alias.is_symlink():
+                        raise ValueError(f'Refusing to replace unexpected module alias: {alias}')
+            self._publish(folder, manifest['version'])
+            sync_directory(folder)
             return {
                 'name': key(name),
                 'version': manifest['version'],
-                'previous_version': previous.removeprefix('versions/') if previous else None,
+                'previous_version': previous,
             }
 
     def write(self, name, source, *, description='', update=False):
@@ -165,24 +169,14 @@ class FragmentStore:
                 compatibility='unverified',
             )
             revision = folder / 'versions' / version
-            temporary = folder / ('.current-' + version)
             revision.mkdir(parents=True)
             try:
                 atomic_text(revision / 'module.py', source)
                 atomic_json(revision / 'manifest.json', manifest)
                 sync_directory(revision.parent)
-                if os.name == 'nt':
-                    atomic_json(folder / 'current-version.json', {'version': version})
-                else:
-                    temporary.symlink_to('versions/' + version)
-                    for filename in ('module.py', 'manifest.json'):
-                        if not (folder / filename).is_symlink():
-                            (folder / filename).symlink_to('current/' + filename)
-                    # Last step: once current points at the new revision it must be kept.
-                    os.replace(temporary, folder / 'current')
+                self._publish(folder, version)
             except BaseException:
                 shutil.rmtree(revision, ignore_errors=True)
-                temporary.unlink(missing_ok=True)
                 raise
             sync_directory(folder)
             sync_directory(folder.parent)

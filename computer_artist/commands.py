@@ -6,7 +6,6 @@ import stat
 import sys
 
 from .contracts import bind, contract
-from .observations import Observations
 from .supervisor import run_supervised
 from .workspace import Workspace
 
@@ -226,22 +225,3 @@ def run_program(args, extra, socket_path):
         bind(info, {})
         spec.update(source=source, arguments={})
     return run_supervised(spec, trace=args.trace)
-
-
-def connected_command(client, args):
-    if args.command == 'target':
-        observer = Observations(Workspace(args.window_dir, args.output_dir), client)
-        result = (
-            observer.revalidate(args.window, args.name, args.observation)
-            if args.revalidate
-            else observer.target(args.window, args.name, args.observation, args.rect)
-        )
-        return {'ok': True, 'target': result}
-    if args.command == 'observe':
-        return {
-            'ok': True,
-            'observation': Observations(
-                Workspace(args.window_dir, args.output_dir), client
-            ).capture(args.window.strip('{}'), since=args.since, region=args.region),
-        }
-    return None

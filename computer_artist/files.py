@@ -14,7 +14,7 @@ from .platform_io import open_no_follow
 
 def key(value):
     value = str(value).strip('{}')
-    if not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_.-]{0,127}', value) or value in ('.', '..'):
+    if not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_.-]{0,127}', value):
         raise ValueError(f'Invalid window/fragment identifier: {value!r}')
     return value
 

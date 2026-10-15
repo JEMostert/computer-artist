@@ -1,8 +1,9 @@
 # Code structure
 
-The public interface is `ca`. Simple input commands call the same `Context`
-actions as programs. `execute`, `draw` and `fragments run` use one supervised worker
-path. There is no web interface or legacy `main(client)` runner.
+The public interface is `ca`. The CLI routes connected commands directly; `commands`
+handles program/fragment arguments and offline operations. Simple input commands call
+the same `Context` actions as programs. `execute`, `draw` and `fragments run` use one
+supervised worker path. There is no web interface or legacy `main(client)` runner.
 
 | Responsibility | Modules |
 | --- | --- |
@@ -20,6 +21,9 @@ path. There is no web interface or legacy `main(client)` runner.
 `Context` owns coordinates, preflight, takeover/geometry guards and invocation
 verification. `Client` owns transport and low-level dispatch. Nested calls and lane
 contexts share a deadline/budget; the plugin arbitrates ownership.
+Native and socket replies share trace recording and rejection handling. Fragment
+write and restore share atomic revision selection: JSON pointers on Windows and
+relative symlinks elsewhere, with immutable versions under `window/api-fragmants`.
 
 Recent module/check lists cap at 200; merged traces cap at 512. Checkpoints poll
 at 250 ms and write only changed evidence. They are best effort, not a complete

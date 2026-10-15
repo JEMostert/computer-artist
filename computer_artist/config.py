@@ -50,8 +50,6 @@ def skill_source():
                 return Path(package.locate_file(entry)).resolve().parent
     except PackageNotFoundError:
         pass
-    import sys
-
     return Path(sys.prefix) / 'share/computer-artist/skills/computer-artist'
 
 
