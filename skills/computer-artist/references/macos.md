@@ -6,7 +6,7 @@ The native backend was verified for Chrome canvas drawing, physical text, right
 click, scroll and middle drag on macOS 27.0.1 (Apple M1 Pro). Other apps/OS versions
 remain unverified. It uses private SkyLight pointer delivery and per-process
 physical keys, with text resolved from the live keyboard layout. It draws its own click-through
-arrow. No agent operation falls back to the human pointer, focus or clipboard.
+ink pen. No agent operation falls back to the human pointer, focus or clipboard.
 This is not a security sandbox or a claim of KWin parity.
 
 ```bash

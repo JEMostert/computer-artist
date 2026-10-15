@@ -29,6 +29,9 @@ exactly one guide and follow its steps; never mix them:
   is missing or not running, stop and tell the user: "Private test environments
   need Docker Desktop (Windows: with WSL 2)" or, on Linux, "need Podman or Docker".
   Never fall back to the user's desktop instead.
+- The agent pointer is an animated ink pen; its nib tip is the click point. The pen
+  and its ink trail are drawn only on screen and never reach the application. Window
+  captures exclude them, unless the reply says `may_include_overlapping_windows: true`.
 - Never silently move the human's pointer or steal focus. The default agent lane
   never falls back to host input; do not use `--host` to work around a refusal.
   `--host` needs the user's authorization in the current task.

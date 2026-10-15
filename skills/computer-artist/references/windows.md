@@ -24,7 +24,7 @@ or EDID ID from `ca monitors` with `--monitor` on every command (or set
 
 ### Independent agent lane (default)
 
-The agent has its own animated, click-through pointer drawn on screen. It never
+The agent has its own animated, click-through ink-pen pointer drawn on screen. It never
 calls SendInput, never changes the foreground window and never touches the shared
 clipboard. Keep the human's focus in another application; focus entering any
 window of the target process stops the lease. Different processes may be
