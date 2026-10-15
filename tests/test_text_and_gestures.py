@@ -77,12 +77,6 @@ class WriteTest(RuntimeCase):
 
 
 class PointerTest(RuntimeCase):
-    def test_click_count_two_dispatches_two_clicks_at_one_position(self):
-        backend, ctx = self.build()
-        result = ctx.click(relative=(0.5, 0.5), count=2, interval=0)
-        self.assertEqual(result, {'status': 'dispatched', 'clicks': 2})
-        self.assertEqual(backend.actions, [(150, 240, 272), (150, 240, 272)])
-
     def test_drag_uses_evenly_spaced_points_from_start_to_end(self):
         backend, ctx = self.build()
         ctx.drag((10, 10), (30, 10), spacing=5, interval=0)

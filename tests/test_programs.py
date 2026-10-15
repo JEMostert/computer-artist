@@ -149,23 +149,6 @@ class ProgramsTest(unittest.TestCase):
             error_type='ValueError',
         )
 
-    def test_nonfinite_json_results_fail(self):
-        self.assert_parity(
-            'def run(ctx): return float("nan")', status='failed', error_type='ValueError'
-        )
-
-    def test_nested_checks_are_scoped_to_each_invocation(self):
-        self.workspace.fragments.write('child', 'def run(ctx): return "child"')
-        _, stored = self.assert_parity(
-            'def run(ctx):\n'
-            '    ctx.verify("parent", True, evidence="before child")\n'
-            '    return ctx.fragments.call("child")',
-            status='verified',
-        )
-        self.assertEqual(stored['modules'][0]['status'], 'verified')
-        self.assertEqual(stored['modules'][1]['status'], 'returned_unverified')
-        self.assertEqual(stored['modules'][1]['checks'], [])
-
     def test_verified_child_does_not_verify_parent_outcome(self):
         self.workspace.fragments.write(
             'child', 'def run(ctx):\n    ctx.verify("child only", True)\n    return "child"'

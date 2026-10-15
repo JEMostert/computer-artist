@@ -179,23 +179,3 @@ class StorageTest(unittest.TestCase):
         info = json.loads((self.root / 'rotating' / MARKER).read_text())
         self.assertTrue(info['completed'])
         self.assertEqual(inspect(self.root)['runs'][0]['status'], 'completed')
-
-    def test_oversized_and_huge_timestamp_markers_never_hide_or_adopt_user_data(self):
-        self.run_folder('old', 1)
-        self.run_folder('new', 2)
-        invalid = []
-        for name, content in (
-            ('huge-time', json.dumps({'format': 1, 'created': 10**1000})),
-            ('oversized', json.dumps({'format': 1, 'created': 1}) + ' ' * 20000),
-        ):
-            folder = self.root / name
-            folder.mkdir()
-            marker = folder / MARKER
-            marker.write_text(content)
-            (folder / 'user-file').write_text('Keep this data')
-            invalid.append((marker, marker.read_bytes()))
-        self.assertEqual({item['id'] for item in inspect(self.root)['runs']}, {'old', 'new'})
-        cleanup(self.root, count=1)
-        for marker, before in invalid:
-            self.assertEqual(marker.read_bytes(), before)
-            self.assertEqual((marker.parent / 'user-file').read_text(), 'Keep this data')

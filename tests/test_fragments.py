@@ -1,6 +1,4 @@
-import fcntl
 import json
-import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -75,26 +73,6 @@ class FragmentStoreTest(unittest.TestCase):
         self.assertEqual(self.memory.load('step')[0]['version'], original['version'])
         self.assertEqual(alias.read_text(), 'user maintained file')
         self.assertEqual(len(self.memory.history('step')), 1)
-
-    def test_load_holds_archive_lock_until_source_is_read(self):
-        self.memory.write('step', 'def run(ctx): return 1')
-        read_text = Path.read_text
-        checked = []
-
-        def read_under_lock(path, *args, **kwargs):
-            if path.name == 'module.py':
-                fd = os.open(self.memory.root / '.lock', os.O_RDWR)
-                try:
-                    with self.assertRaises(BlockingIOError):
-                        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-                    checked.append(True)
-                finally:
-                    os.close(fd)
-            return read_text(path, *args, **kwargs)
-
-        with patch.object(Path, 'read_text', read_under_lock):
-            self.memory.load('step')
-        self.assertEqual(checked, [True])
 
     def test_revision_manifest_cannot_redirect_source_outside_library(self):
         original = self.memory.write('step', 'def run(ctx): return 1')

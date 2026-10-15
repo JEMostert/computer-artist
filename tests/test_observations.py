@@ -61,29 +61,6 @@ class ObservationsTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.observations.load('w', first['id'])
 
-    def test_diff_uses_decoded_snapshot_after_concurrent_capture_prunes_source(self):
-        from unittest.mock import patch
-
-        from computer_artist.storage import managed_run
-
-        with managed_run(self.memory.output) as folder:
-            store = Workspace(self.memory.root, self.memory.output, folder)
-            observer = Observations(store, self.backend)
-            concurrent = Observations(store, self.backend)
-            observer.limit = concurrent.limit = 1
-            first = observer.capture('w')
-            snapshot = observer._snapshot
-
-            def snapshot_then_prune(window, identity):
-                record, image = snapshot(window, identity)
-                concurrent.capture(window)
-                self.assertFalse(Path(first['full_image']).exists())
-                return record, image
-
-            with patch.object(observer, '_snapshot', snapshot_then_prune):
-                result = observer.capture('w', since=first['id'])
-            self.assertFalse(result['changes']['pixels_changed'])
-
     def test_missing_snapshot_image_reports_expired_evidence(self):
         first = self.observations.capture('w')
         Path(first['full_image']).unlink()

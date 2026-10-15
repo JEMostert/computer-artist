@@ -97,13 +97,6 @@ class SupervisorTest(unittest.TestCase):
         self.assertLess(result['duration'], 2)
         self.assertEqual(set(self.operations), {'capabilities', 'windows', 'capture'})
 
-    def test_returned_unverified_final_record_is_distinct_from_checkpoint(self):
-        result = self.execute('def run(ctx):\n    return {"returned": True}', deadline=2)
-        self.assertTrue(result['ok'])
-        self.assertEqual(result['status'], 'returned_unverified')
-        self.assertFalse(result['final_outcome_known'])
-        self.assertEqual(result['result'], {'returned': True})
-
     def test_verified_worker_record_supersedes_in_progress_checkpoint(self):
         result = self.execute(
             'def run(ctx):\n    ctx.verify("specific outcome", True)\n    return "checked"',

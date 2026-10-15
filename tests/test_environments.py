@@ -285,16 +285,6 @@ class AccessibilityTest(unittest.TestCase):
         ):
             return Manager(self.config), popen
 
-    def test_registry_starts_with_the_application_environment(self):
-        manager, popen = self.start((str(self.binary),))
-        popen.assert_called_once()
-        self.assertEqual(popen.call_args.args[0], [str(self.binary)])
-        self.assertIs(popen.call_args.kwargs['env'], manager.env)
-        self.assertEqual(manager.env['QT_LINUX_ACCESSIBILITY_ALWAYS_ON'], '1')
-        self.assertIs(manager.registry, popen.return_value)
-        self.assertTrue(manager.info['accessibility'])
-        self.assertTrue((self.root / 'state/logs/at-spi-registryd.log').exists())
-
     def test_close_terminates_the_registry_and_kills_it_if_it_ignores_terminate(self):
         manager, popen = self.start((str(self.binary),))
         process = popen.return_value

@@ -86,17 +86,6 @@ class FragmentIntegrityTest(unittest.TestCase):
         self.assertEqual(self.store.load('step')[0]['version'], good['version'])
         self.assertEqual(path.read_text(), 'tampered source')
 
-    def test_archive_refuses_symlink_destination_and_preserves_fragment(self):
-        manifest = self.store.write('step', 'def run(ctx): return 1')
-        outside = self.root / 'outside'
-        outside.mkdir()
-        trash = self.store.root / 'api-fragmants' / 'trash'
-        trash.symlink_to(outside, target_is_directory=True)
-        with self.assertRaises(ValueError):
-            self.store.remove('step')
-        self.assertEqual(self.store.load('step')[0]['version'], manifest['version'])
-        self.assertEqual(list(outside.iterdir()), [])
-
 
 if __name__ == '__main__':
     unittest.main()

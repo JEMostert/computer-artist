@@ -1,6 +1,5 @@
 """Managed, targeted cancellation refuses stale work and unsafe request files."""
 
-import json
 import os
 import tempfile
 import unittest
@@ -59,16 +58,3 @@ class ControlTest(unittest.TestCase):
         os.mkfifo(stop)
         with self.assertRaises(ValueError):
             read_stop(self.root)
-
-    def test_invalid_json_fields_never_become_cancellation(self):
-        self.root.mkdir()
-        for value in (
-            {},
-            {'format': True, 'requested_at': 1, 'reason': 'stop'},
-            {'format': 1, 'requested_at': float('nan'), 'reason': 'stop'},
-            {'format': 1, 'requested_at': 1, 'reason': ''},
-            {'format': 1, 'requested_at': 1, 'reason': 'x' * 513},
-        ):
-            (self.root / '.cancel.json').write_text(json.dumps(value))
-            with self.assertRaises(ValueError):
-                check_stop(self.root)

@@ -35,6 +35,37 @@ macOS activity, Windows and supervisor suites, plus every live integration
 harness, remain unchanged by this reduction. Existing compatibility exports
 remain production API even though their import-shape test was removed.
 
+## Second pass (15 October 2026, from `0d415a2`)
+
+A second independent review of the retained suite deletes 19 more methods:
+**228 -> 209 discovered, 200 passed and 9 native Windows skips**. The portable
+Windows runner selection goes from **90 to 84 tests** (same 9 skips); no runner
+module was dropped. No production code or assertion in a retained test changed.
+Where this table and the one above disagree, this one is current.
+
+| File (`test_*.py`) | Removed | Why it did not earn its cost |
+| --- | --- | --- |
+| client | exhausted budget while idle | Same heartbeat branch (`deadline or budget`) as the idle-deadline test; dispatch-time budget refusal stays. |
+| supervisor | returned-unverified final record | `returned_unverified` is computed by the worker and covered by programs; the verified record superseding the checkpoint stays. |
+| programs | non-finite result; nested checks scoped | Non-finite evidence still fails readably; child/parent check scoping is covered by runtime and by the verified-child-does-not-verify-parent test. |
+| control | invalid cancel-file fields | Field-validation permutations; a malformed file still raises, never succeeds. Bounded, non-regular file refusal stays. |
+| storage | oversized/huge-timestamp markers | Another invalid-marker variant; the malformed-marker and symlinked-lock test still proves invalid folders are never adopted or deleted. |
+| records | invalid result with valid checkpoint | Combination of the retained checkpoint and malformed-result tests; the risk is a display issue, not false success. |
+| fragments, fragment_integrity | archive lock held during load; symlinked trash on removal | The first patches `Path.read_text` to inspect lock state, so it tests how the code is written. The second is a fourth symlink-tampering case. Containment, tampering, contract and recovery tests stay. |
+| observations | diff after concurrent pruning | Patches a private method. A regression fails safe (`expired`), which the retained expired-evidence test covers. |
+| text_and_gestures | double-click count | Low impact and obvious in use; button release, drag and preflight stay. |
+| accessibility | defunct subtree; missing `jeepney` message | A regression would raise an error (fail safe) or change a message; selection, bounds, deadline and bus cleanup stay. |
+| environments | registry launch arguments | Mock-pinned `Popen` arguments; the live accessibility harness covers the real behavior. Registry termination/kill cleanup stays. |
+| containers | Podman preference; Podman `--replace`; Docker GPU flag | Selection order and feature flags fail visibly on first use. Docker user mapping and the recorded runtime stay. |
+| windows | session-status lane report | Status representation for stop-reason display only; the Windows/KWin update busy checks do not depend on it. |
+| diagnostics | doctor host lane inside a private environment | Report wording/lane selection only; restriction reporting and stale/mismatched plugin detection stay. |
+
+The 209 remaining tests each guard a distinct consequential failure in the
+categories above: unwanted or unreleased input, missing host gates or fallbacks,
+deadlines/cancellation, false success, lost or corrupt work, wrong targets, and
+platform/box boundaries. Further cuts would remove the only check of such a
+failure, so the second pass stops here rather than chasing a count.
+
 ## Deliberately reduced coverage
 
 Dedicated checks no longer cover every key alias, text newline normalization,
@@ -43,7 +74,10 @@ prototype migration, diagnostic string, update-plan permutation or output
 translation format. Some lock internals and rare recovery/reporting branches
 also lose individual tests; representative race, corruption, cleanup and
 false-success scenarios remain. This accepts later discovery of lower-consequence
-edge regressions in exchange for a smaller suite.
+edge regressions in exchange for a smaller suite. After the second pass, nothing
+specifically checks the fragment archive-lock timing, diffs racing concurrent
+observation pruning, tolerance of defunct AT-SPI nodes, container runtime
+preference, Podman `--replace` or the Docker GPU flag.
 
 ## Running
 

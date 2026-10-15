@@ -86,13 +86,6 @@ class ControllerTest(unittest.TestCase):
             self.assertTrue(self.released.is_set())
         self.assertFalse(any(e['op'] == 'move' for e in self.events))
 
-    def test_exhausted_budget_returns_app_while_program_is_idle(self):
-        with Client(self.path, action_budget=1) as client:
-            client.acquire('existing-window')
-            self.assertTrue(self.released.wait(2))
-            client.heartbeat.join(0.5)
-            self.assertIsInstance(client.failure, TimeoutError)
-
     def support_agent_keyboard(self):
         self.replies['capabilities'] = {
             'ok': True,

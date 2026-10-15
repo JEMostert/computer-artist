@@ -122,19 +122,3 @@ class RecordsTest(unittest.TestCase):
         entries = {entry['id']: entry for entry in list_runs(self.root)['runs']}
         self.assertEqual(entries['healthy']['status'], 'dispatched')
         self.assertEqual(len(entries), len(values) + 1)
-
-    def test_invalid_result_falls_back_to_valid_partial_checkpoint(self):
-        folder = self.run_folder()
-        (folder / 'result.json').write_text('{"checks": true}')
-        checkpoint = {'checks': [{'passed': True}], 'trace': [{'operation': 'button', 'ok': True}]}
-        atomic_json(folder / 'checkpoint.json', checkpoint)
-        review = inspect_run(self.root, 'run')
-        self.assertIsNone(review['result'])
-        self.assertEqual(review['checkpoint'], checkpoint)
-        self.assertTrue(review['incomplete'])
-        self.assertEqual(review['trace_summary']['successful_input_replies'], 1)
-        self.assertEqual(review['status'], 'incomplete')
-        (folder / 'checkpoint.json').write_text('{"checks": [{"passed": 1}]}')
-        review = inspect_run(self.root, 'run')
-        self.assertIsNone(review['checkpoint'])
-        self.assertTrue(any(issue['file'] == 'checkpoint.json' for issue in review['issues']))

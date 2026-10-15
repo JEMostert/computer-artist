@@ -87,57 +87,6 @@ class DiagnosticsTest(unittest.TestCase):
             self.assertIn('human_pointer_in_application', window['restriction_codes'])
             self.assertFalse((root / 'window').exists())
 
-    def test_private_environment_judges_the_host_lane_it_will_use(self):
-        with tempfile.TemporaryDirectory() as folder:
-            root = Path(folder)
-            args = Namespace(
-                window_dir=root / 'window',
-                output_dir=root / 'output',
-                socket=str(root / 'control'),
-                deadline=2,
-                window='app',
-                build=False,
-                lane='host',
-                environment_info={'name': 'web', 'kind': 'container', 'lane': 'host'},
-            )
-            client = MagicMock()
-            client.__enter__.return_value = client
-            client.request.side_effect = [
-                {
-                    'protocol': 3,
-                    'operations': ['capture'],
-                    'environment': 'web',
-                    'build': {
-                        'source_sha256': 'loaded',
-                        'kwin_headers': '6.4.0',
-                        'kwin_running': '6.4.0',
-                    },
-                },
-                {
-                    'windows': [
-                        {
-                            'id': 'app',
-                            'title': 'App',
-                            'native': True,
-                            'visible': True,
-                            'human_active': True,
-                            'acquirable': False,
-                            'agent_restrictions': ['human_keyboard_in_application'],
-                            'host_acquirable': True,
-                            'host_restrictions': [],
-                        }
-                    ]
-                },
-                {'clipboard': True},
-            ]
-            with (
-                patch('computer_artist.diagnostics.Client', return_value=client),
-                patch('computer_artist.diagnostics.checkout_root', return_value=None),
-            ):
-                report = diagnose(args)
-            self.assertTrue(report['ok'])
-            self.assertEqual((report['lane'], report['environment']['name']), ('host', 'web'))
-
     def test_plugin_build_detects_a_stale_loaded_plugin(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)

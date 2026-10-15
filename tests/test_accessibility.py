@@ -1,4 +1,3 @@
-import sys
 import time
 import unittest
 from unittest.mock import patch
@@ -8,8 +7,6 @@ from computer_artist.accessibility import (
     ACCESSIBLE,
     COMPONENT,
     TEXT,
-    AccessibilityUnavailable,
-    Bus,
     BusError,
 )
 
@@ -32,7 +29,6 @@ class FakeBus:
         self.unreachable = unreachable
         self.closed = False
         self.calls = 0
-        self.defunct = set()
 
     def status(self):
         if self.unreachable:
@@ -58,7 +54,7 @@ class FakeBus:
         return self.node(path)['name']
 
     def node(self, path):
-        if path in self.defunct or path not in self.nodes:
+        if path not in self.nodes:
             raise BusError(f'no such object {path}')
         return self.nodes[path]
 
@@ -167,13 +163,6 @@ class ElementsTest(unittest.TestCase):
                 (None,) * 5,
             )
 
-    def test_defunct_node_skips_subtree_but_not_walk(self):
-        bus = FakeBus(tree())
-        bus.defunct.add('/group')
-        result = accessibility.elements(4242, 'Notes', bus=bus)
-        self.assertEqual([e['path'] for e in result['elements']], ['/button', '/entry'])
-        self.assertFalse(result['truncated'])
-
     def test_max_nodes_truncates(self):
         _, result = self.run_elements(max_nodes=2)
         self.assertEqual([e['path'] for e in result['elements']], ['/button', '/group'])
@@ -200,13 +189,6 @@ class ElementsTest(unittest.TestCase):
         factory.assert_called_once_with('unix:path=/x')
         self.assertTrue(bus.closed)
         self.assertEqual(len(result['elements']), 4)
-
-
-class MissingJeepneyTest(unittest.TestCase):
-    def test_missing_module_is_reported_without_connecting(self):
-        with patch.dict(sys.modules, {'jeepney': None}):
-            with self.assertRaisesRegex(AccessibilityUnavailable, 'Install jeepney'):
-                Bus().status()
 
 
 if __name__ == '__main__':
