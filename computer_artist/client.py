@@ -301,7 +301,13 @@ class Client:
             self.release()
 
     def move(self, x, y):
-        return self.request('move', x=x, y=y)
+        reply = self.request('move', x=x, y=y)
+        # KWin draws the pen gliding to a new action's position; send the next input
+        # once it has arrived, as the macOS overlay does.
+        glide = reply.get('glide_ms')
+        if type(glide) in (int, float) and 0 < glide <= 1000:
+            time.sleep(min(glide / 1000, max(0, self.expires - time.monotonic())))
+        return reply
 
     def focus(self, window_id):
         """Focus a leased host window without moving the pointer."""

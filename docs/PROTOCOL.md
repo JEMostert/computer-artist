@@ -10,7 +10,7 @@ Host negotiation requires `protocol >= 3`, `lane: host`, `host_pointer: true`.
 | `keymap` | `characters`: printable character → physical modifier/key codes on the current `layout`/`layout_name`, from a clean state with at most Shift and right Alt |
 | `session_status`, `session_close` | Inspect or release both lanes and hide cursor |
 | `acquire`, `release` | Exact `window` to acquire; owning `lease` to release |
-| `move` | Absolute logical desktop `x`, `y` within unobscured target content |
+| `move` | Absolute logical desktop `x`, `y` within unobscured target content; an agent reply may add `glide_ms`, the time the drawn pen takes to glide there (clients send the next input after it) |
 | `button`, `scroll` | Evdev `code` 272–274/boolean `pressed`; `axis`/signed `delta`, optional `v120` (default `delta × 8`); agent scroll sends a complete wheel frame |
 | `focus` | Exact leased host `window`; real desktop focus |
 | `keyboard_begin`, `key` | Agent initialization; physical Linux `code` 1–247/boolean `pressed` |

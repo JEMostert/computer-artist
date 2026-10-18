@@ -125,6 +125,7 @@ private:
     void release(bool revoke = false, const QString &reason = QStringLiteral("released"));
     QString invalidReason() const;
     void drawCursor();
+    QPointF shownPosition(qint64 now) const;
     void observe(Window *);
     bool valid() const;
     QLocalServer m_server;
@@ -156,6 +157,9 @@ private:
     qint64 m_lastMove = -1000, m_lastClick = -1000;
     qreal m_lean = 0;
     bool m_positionKnown = false;
+    // The drawn pen glides from m_glideFrom to the input position; see ink_cursor.glide.
+    QPointF m_glideFrom;
+    qint64 m_glideStart = 0, m_glideMs = 0;
 };
 
 Artist::Artist() {
@@ -436,11 +440,19 @@ bool Artist::move(const QPointF &p) {
     }
     frame();
     const qint64 now = m_clock.elapsed();
+    const QPointF shown = m_positionKnown ? shownPosition(now) : p;
+    m_glideMs = 0;
     if (m_positionKnown) {
         const QPointF step = p - m_position;
         const qreal distance = std::hypot(step.x(), step.y());
+        const qreal travel = std::hypot(p.x() - shown.x(), p.y() - shown.y());
         auto *random = QRandomGenerator::global();
-        if (distance > 520) {
+        if (m_buttons.isEmpty() && travel >= 24) {
+            // A new action's pen travels there visibly; the client sends its next input on arrival.
+            m_glideFrom = shown;
+            m_glideStart = now;
+            m_glideMs = qint64(std::min(220.0, 60 + travel * .3));
+        } else if (distance > 520) {
             m_trail.clear(); // A warp is not a visible sweep across the desktop.
         } else if (distance > 9 && random->generateDouble() <= std::min(.85, distance / 40)) {
             // Fast strokes shed droplets sideways and slightly behind the nib.
@@ -453,15 +465,21 @@ bool Artist::move(const QPointF &p) {
     }
     m_positionKnown = true;
     m_position = p;
-    m_trail.append({now, p, !m_buttons.isEmpty()});
+    m_trail.append({now, m_glideMs ? shown : p, !m_buttons.isEmpty()});
     m_lastMove = now;
     drawCursor();
     return true;
+}
+QPointF Artist::shownPosition(qint64 now) const {
+    if (now - m_glideStart >= m_glideMs) return m_position;
+    const qreal eased = 1 - std::pow(1 - qreal(now - m_glideStart) / m_glideMs, 3);
+    return m_glideFrom + (m_position - m_glideFrom) * eased;
 }
 bool Artist::button(uint32_t code, bool down) {
     if (!valid() || !m_surface || pointers()!=m_resources || !pointerReady()
         || (code < 272 || code > 274) || m_buttons.contains(code)==down) return false;
     const qint64 now = m_clock.elapsed();
+    m_glideMs = 0;
     if (down && m_buttons.isEmpty() && m_positionKnown) {
         // An ink splash: a wobbling ring, a blot and droplets flung outward.
         auto *random = QRandomGenerator::global();
@@ -587,6 +605,7 @@ QJsonObject Artist::request(QLocalSocket *socket, const QJsonObject &o) {
         m_session.clear();
         m_animation.stop();
         m_positionKnown = false;
+        m_glideMs = 0;
         m_trail.clear();
         m_drops.clear();
         m_lastMove = m_lastClick = -1000;
@@ -637,7 +656,10 @@ QJsonObject Artist::request(QLocalSocket *socket, const QJsonObject &o) {
                 && (m_agentKeyboard.initialized() || (pressed && m_agentKeyboard.begin(m_target->surface()))))
                 ok=m_agentKeyboard.key(uint32_t(code),pressed,uint32_t(m_clock.elapsed()));
         }
-        else if(op=="move" && o.value("x").isDouble() && o.value("y").isDouble()) ok=move({o.value("x").toDouble(),o.value("y").toDouble()});
+        else if(op=="move" && o.value("x").isDouble() && o.value("y").isDouble()) {
+            ok=move({o.value("x").toDouble(),o.value("y").toDouble()});
+            if(ok && m_glideMs) reply.insert("glide_ms",m_glideMs);
+        }
         else if(op=="button" && o.value("code").isDouble() && o.value("pressed").isBool()) {
             const auto code=o.value("code").toDouble();
             if(code>=272 && code<=274 && code==std::floor(code)) ok=button(uint32_t(code),o.value("pressed").toBool());
@@ -877,6 +899,8 @@ void Artist::drawCursor()
     constexpr qreal trailMs = 450, brushMs = 1100, splashMs = 550, dropMs = 600, dripMs = 2600;
     const qint64 now = m_clock.elapsed();
     const bool pressed = !m_buttons.isEmpty();
+    const QPointF shown = shownPosition(now);
+    if (now - m_glideStart < m_glideMs + 16) m_trail.append({now, shown, pressed});
     while (!m_trail.isEmpty() && now - m_trail.front().time > (m_trail.front().pressed ? brushMs : trailMs)) {
         m_trail.removeFirst();
     }
@@ -888,7 +912,7 @@ void Artist::drawCursor()
         return std::pair{drop.origin + drop.velocity * ((1 - std::pow(1 - age, 2)) * .35), drop.radius * std::pow(1 - age, .6)};
     };
 
-    QRectF bounds(m_position + QPointF(-24, -46), m_position + QPointF(46, 30));
+    QRectF bounds(shown + QPointF(-24, -46), shown + QPointF(46, 30));
     for (const auto &sample : std::as_const(m_trail)) bounds |= QRectF(sample.point - QPointF(12, 12), QSizeF(24, 24));
     if (splashing) bounds |= QRectF(m_clickPosition - QPointF(46, 46), QSizeF(92, 92));
     for (const auto &drop : std::as_const(m_drops)) bounds |= QRectF(dropAt(drop).first - QPointF(12, 12), QSizeF(24, 24));
@@ -897,7 +921,7 @@ void Artist::drawCursor()
     if (bounds.width() > 520 || bounds.height() > 520) {
         m_trail.clear();
         m_drops.clear();
-        bounds = QRectF(m_position + QPointF(-36, -58), m_position + QPointF(58, 42));
+        bounds = QRectF(shown + QPointF(-36, -58), shown + QPointF(58, 42));
     }
     bounds = bounds.toAlignedRect();
     const qreal scale = kwinApp()->devicePixelRatio();
@@ -953,7 +977,7 @@ void Artist::drawCursor()
         const qreal swell = std::sin(std::min(q / .8, 1.0) * std::numbers::pi / 2), fall = std::max(0.0, (q - .8) / .2);
         const qreal r = (1.2 + 1.8 * swell) * (1 - fall);
         if (r > .1) {
-            const QPointF center = m_position + QPointF(0, 1.5 + 10 * fall * fall);
+            const QPointF center = shown + QPointF(0, 1.5 + 10 * fall * fall);
             p.setBrush(tint(ink, 230 * (1 - fall)));
             p.drawEllipse(QRectF(center.x() - r, center.y() - r * 1.15, 2 * r, 2.15 * r));
         }
@@ -961,7 +985,7 @@ void Artist::drawCursor()
 
     qreal targetLean = 0;
     if (m_trail.size() > 1) {
-        targetLean = std::clamp((m_position.x() - m_trail.front().point.x()) * .1, -8.0, 8.0);
+        targetLean = std::clamp((shown.x() - m_trail.front().point.x()) * .1, -8.0, 8.0);
     }
     m_lean += (targetLean - m_lean) * .25;
     // Pen parts as (along, across) the pen from the nib tip, which is the exact hotspot.
@@ -979,7 +1003,7 @@ void Artist::drawCursor()
     silhouette.closeSubpath();
     const qreal size = 1.15 * (pressed ? .9 : 1); // The pen pushes into the page.
     p.save();
-    p.translate(m_position);
+    p.translate(shown);
     p.rotate(-50 + m_lean); // Rotate around the exact input hotspot, the nib tip.
     p.scale(size, size);
     const qreal energy = now - m_lastMove < 200 || pressed ? 1.0 : .7;

@@ -135,6 +135,15 @@ class ControllerTest(unittest.TestCase):
                 client.click(1, 2)
         self.assertTrue(any(e['op'] == 'cancel' for e in self.events))
 
+    def test_click_waits_for_the_pen_to_glide_before_pressing(self):
+        self.replies['move'] = {'ok': True, 'glide_ms': 120}
+        with Client(self.path) as client:
+            client.acquire('existing-window')
+            started = time.monotonic()
+            client.click(400, 300)
+            self.assertGreaterEqual(time.monotonic() - started, 0.12)
+        self.assertEqual([e['op'] for e in self.events][1:4], ['move', 'button', 'button'])
+
     def test_path_keyboard_interrupt_cancels_held_button(self):
         with Client(self.path) as client:
             client.acquire('existing-window')
