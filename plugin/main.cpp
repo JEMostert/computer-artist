@@ -826,7 +826,11 @@ QJsonObject Artist::requestHost(QLocalSocket *socket,const QJsonObject &o) {
             double delta=o.value("delta").toDouble();
             if(std::isfinite(delta) && std::abs(delta)<1000000) {
                 input()->pointer()->processAxis(o.value("axis")=="vertical"?PointerAxis::Vertical:PointerAxis::Horizontal,
-                    delta,0,PointerAxisSource::Continuous,false,hostTime(),&m_hostDevice);
+                    delta,0,PointerAxisSource::Continuous,false,
+#ifdef CA_KWIN_68
+                    false,
+#endif
+                    hostTime(),&m_hostDevice);
                 input()->pointer()->processFrame(&m_hostDevice); ok=true;
             }
         }

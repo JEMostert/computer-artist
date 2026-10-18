@@ -13,6 +13,10 @@
 #include <opengl/eglcontext.h>
 #include <opengl/glframebuffer.h>
 #include <opengl/gltexture.h>
+#ifdef CA_KWIN_68
+#include <compositor.h>
+#include <core/renderdevice.h>
+#endif
 
 namespace KWin {
 // Render the client rectangle, including subsurfaces and GPU-backed content.
@@ -20,8 +24,16 @@ namespace KWin {
 QImage captureClient(Window *window)
 {
     auto scene = kwinApp()->scene();
+#ifdef CA_KWIN_68
+    auto device = Compositor::self()->primaryDevice();
+    auto contextRef = device ? device->eglContext() : nullptr;
+    auto context = contextRef.get();
+    auto renderer = scene ? scene->renderer(device) : nullptr;
+#else
     auto context = scene ? scene->openglContext() : nullptr;
-    if (!scene || !scene->renderer() || !window->windowItem()) return {};
+    auto renderer = scene ? scene->renderer() : nullptr;
+#endif
+    if (!scene || !renderer || !window->windowItem()) return {};
     QList<Window *> layers{window};
     // Keep the client coordinate system stable. Transients extending outside it
     // remain independently capturable by their IDs in windows().
@@ -44,7 +56,6 @@ QImage captureClient(Window *window)
         image.fill(Qt::transparent);
         RenderTarget target(&image);
         RenderViewport viewport(rect, window->targetScale(), target, QPoint());
-        auto renderer = scene->renderer();
         renderer->beginFrame(target, viewport);
         for (auto layer : layers) renderer->renderItem(target, viewport, layer->windowItem(), Scene::PAINT_WINDOW_TRANSFORMED,
                              Region::infinite(), WindowPaintData{}, {}, {});
@@ -62,7 +73,6 @@ QImage captureClient(Window *window)
             if (framebuffer.valid()) {
                 RenderTarget target(&framebuffer);
                 RenderViewport viewport(rect, window->targetScale(), target, QPoint());
-                auto renderer = scene->renderer();
                 renderer->beginFrame(target, viewport);
                 glClearColor(0, 0, 0, 0);
                 glClear(GL_COLOR_BUFFER_BIT);
