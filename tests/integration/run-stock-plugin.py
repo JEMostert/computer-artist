@@ -176,6 +176,15 @@ try:
     (output / 'session.json').write_text(json.dumps(state, indent=2) + '\n')
     (root / 'build/stock-plugin-session.json').write_text(json.dumps(state, indent=2) + '\n')
     print(json.dumps(state), flush=True)
+    if '--check-popup-lifetime' in sys.argv:
+        subprocess.run(
+            [
+                sys.executable,
+                str(root / 'tests/integration/check-popup-lifetime.py'),
+                str(output / 'session.json'),
+            ],
+            check=True,
+        )
     if '--check-compatibility' in sys.argv:
         subprocess.run(
             [
@@ -248,7 +257,12 @@ try:
         )
     elif not any(
         flag in sys.argv
-        for flag in ('--check-independent', '--check-compatibility', '--check-accessibility')
+        for flag in (
+            '--check-independent',
+            '--check-compatibility',
+            '--check-accessibility',
+            '--check-popup-lifetime',
+        )
     ):
         compositor.wait()
 except KeyboardInterrupt:

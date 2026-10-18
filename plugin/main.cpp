@@ -132,7 +132,15 @@ private:
     QPointer<ClientConnection> m_client;
     QPointer<Window> m_target;
     QPointer<SurfaceInterface> m_surface;
-    QList<QPointer<Window>> m_agentPopups;
+    struct AgentPopup {
+        QPointer<Window> window;
+        QPointer<XdgPopupInterface> role;
+        QPointer<ClientConnection> client;
+    };
+    QList<AgentPopup> m_agentPopups;
+    QList<AgentPopup> m_pendingPopups;
+    QTimer m_popupDismissTimer;
+    void dismissPopups();
     QPointer<QLocalSocket> m_owner;
     QList<uint32_t> m_resources;
     QSet<uint32_t> m_buttons;
@@ -164,6 +172,8 @@ private:
 
 Artist::Artist() {
     m_clock.start();
+    m_popupDismissTimer.setSingleShot(true);
+    connect(&m_popupDismissTimer, &QTimer::timeout, this, &Artist::dismissPopups);
     input()->addInputDevice(&m_hostDevice);
     input()->installInputEventSpy(this);
     m_hostWatchdog.setSingleShot(true);
@@ -211,7 +221,7 @@ Artist::Artist() {
         auto parent=waylandServer()->findWindow(lookup.popup->parentSurface());
         if (parent!=m_target && !popupFor(parent, m_target)) return;
         if (QObject::disconnect(lookup.popup, SIGNAL(grabRequested(KWin::SeatInterface*,quint32)), w, nullptr))
-            m_agentPopups.append(w);
+            m_agentPopups.append({w, lookup.popup, m_client});
     });
     for (auto w : workspace()->stackingOrder()) observe(w);
     connect(workspace(), &Workspace::windowAdded, this, [this](Window *w) {
@@ -225,6 +235,8 @@ Artist::Artist() {
 Artist::~Artist() {
     m_animation.stop();
     release(true, QStringLiteral("plugin_unloaded"));
+    m_popupDismissTimer.stop();
+    dismissPopups();
     releaseHost(true);
     input()->uninstallInputEventSpy(this);
     input()->removeInputDevice(&m_hostDevice);
@@ -413,7 +425,12 @@ bool Artist::acquire(Window *w, QLocalSocket *socket) {
     if (!valid()) { m_client.clear(); m_target.clear(); return false; }
     m_resources = pointers();
     if (m_resources.isEmpty()) { m_client.clear(); m_target.clear(); return false; }
-    m_clientClosed = connect(m_client, &ClientConnection::aboutToBeDestroyed, this, [this] { release(true, QStringLiteral("application_closed")); });
+    m_clientClosed = connect(m_client, &ClientConnection::aboutToBeDestroyed, this, [this] {
+        // tearingDown() becomes true only AFTER this signal. Do not schedule
+        // protocol events for a connection that is already being destroyed.
+        m_agentPopups.clear();
+        release(true, QStringLiteral("application_closed"));
+    });
     m_owner = socket;
     m_lease = QUuid::createUuid().toString(QUuid::WithoutBraces);
     m_stopReason.clear();
@@ -529,13 +546,26 @@ void Artist::release(bool revoke, const QString &reason) {
     auto owner = m_owner;
     m_owner.clear();
     m_watchdog.stop();
-    const auto popups=std::exchange(m_agentPopups, {});
-    for (auto it=popups.crbegin(); it!=popups.crend(); ++it) if (*it) (*it)->popupDone();
+    // Window::closed can run inside an XDG role destructor. KWin also dismisses
+    // child popups from that signal. Finish revocation now, but let that entire
+    // teardown/parent-close dispatch unwind before touching popup roles.
+    m_pendingPopups.append(std::exchange(m_agentPopups, {}));
+    if (!m_pendingPopups.isEmpty()) m_popupDismissTimer.start(0);
     cancelPointer();
     m_agentKeyboard.end(uint32_t(m_clock.elapsed()));
     disconnect(m_clientClosed);
     m_client.clear(); m_target.clear(); m_resources.clear(); m_lease.clear();
     if (revoke && owner) { owner->setProperty("revoked",true); owner->abort(); }
+}
+void Artist::dismissPopups() {
+    const auto popups = std::exchange(m_pendingPopups, {});
+    // Nested popups must be dismissed before their parents. QPointer<Window>
+    // alone is insufficient: effects can retain a deleted window beyond its
+    // XDG role lifetime, and popupDone() is not safe to call twice.
+    for (auto it = popups.crbegin(); it != popups.crend(); ++it) {
+        if (it->window && !it->window->isDeleted() && it->role
+            && it->client && !it->client->tearingDown()) it->window->popupDone();
+    }
 }
 QJsonArray Artist::windows() const {
     QJsonArray result;

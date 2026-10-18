@@ -23,6 +23,7 @@ role = sys.argv[1]
 # Container environments have no experiment folder; their HOME is readable on the host.
 out = Path(os.environ.get('CA_EXPERIMENT_OUTPUT') or os.environ['HOME'])
 app = QApplication(sys.argv)
+app.setQuitOnLastWindowClosed(False)
 app.setApplicationName('computer-artist-' + role)
 
 
@@ -155,6 +156,22 @@ content.setFocus()
 
 # A test-only trigger exercises application-created dialog activation.
 def maybe_dialog():
+    popup_trigger = out / (role + '-popup-command')
+    if popup_trigger.exists():
+        command = popup_trigger.read_text()
+        popup_trigger.unlink()
+        if command == 'nested':
+            menu = content.test_menu
+            submenu = menu.actions()[1].menu()
+            submenu.popup(menu.mapToGlobal(menu.rect().topRight()))
+        elif command == 'destroy-popups':
+            content.test_menu.hide()
+            content.test_menu.deleteLater()
+        elif command == 'close-parent':
+            window.close()
+        elif command == 'show-parent':
+            window.show()
+        record('popup_command', command=command)
     sibling_trigger = out / (role + '-open-sibling')
     if sibling_trigger.exists():
         sibling_trigger.unlink()

@@ -25,6 +25,7 @@ if [[ "${1:-}" == "--integration" ]]; then
     CA_OUTPUT_DIR="$integration_output" python tests/integration/run-stock-plugin.py --headless --check
     CA_OUTPUT_DIR="$integration_output" python tests/integration/run-stock-plugin.py --headless --check-independent
     CA_OUTPUT_DIR="$integration_output" python tests/integration/run-stock-plugin.py --headless --check-recovery
+    CA_OUTPUT_DIR="$integration_output" python tests/integration/run-stock-plugin.py --headless --check-popup-lifetime
     CA_OUTPUT_DIR="$integration_output" python tests/integration/run-stock-plugin.py --headless --check-compatibility
     CA_OUTPUT_DIR="$integration_output" python tests/integration/run-stock-plugin.py --headless --check-accessibility
 elif [[ $# -gt 0 ]]; then

@@ -26,6 +26,11 @@ KWrite with the clipboard restored, and captures and box writes reached the
 project folder. Docker Desktop on Windows and the new Windows UI Automation, capture
 and scroll code were not run; see [Windows](WINDOWS.md).
 
+On 19 October 2026, an isolated baseline reproduced the popup teardown crash;
+the fixed build passed the nested-popup lifetime regression. See the
+[crash finding and regression record](validation/2026-10-19-popup-lifetime.md).
+The live host plugin remains unchanged.
+
 Earlier records (29–30 September 2026: KolourPaint, scrcpy, KWrite and the
 removed HTML export) live in git history before this branch; they prove those
 revisions, not current source.
