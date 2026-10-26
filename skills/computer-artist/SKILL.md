@@ -47,5 +47,22 @@ exactly one guide and follow its steps; never mix them:
 - Stop what you started (`ca env stop NAME`, `ca session close`); never stop
   another agent's environment. Input separation is not a security sandbox.
 
+## 3. Larger work, such as artwork
+
+- Plan the whole composition first, then submit a substantial `ca execute`
+  program grouped by layer, tool and color, not one command per stroke. Inspect
+  the complete result, list its issues and fix them together in the next program.
+- A large program keeps observe, map, act, verify. Select the tool explicitly
+  before each group and confirm it. Add bounded checkpoints (`ctx.observe`,
+  `ctx.verify`) wherever state or geometry can change, and stop on surprises.
+- Re-observe and remap after zoom, scroll, resize, a popup or dialog, or a plugin
+  reload. After an interruption, check the current tool and any unfinished
+  gesture (an open polygon, a held drag) and reset it before resuming.
+- Keep clicks and vertices a safe margin inside the canvas. Clicks near its edge
+  can grab resize handles.
+- Observe at decision points only. For a timelapse or video, use a real screen
+  recorder when one is available, and on the user's desktop only with permission.
+  Do not loop captures: each one costs the compositor and can stall the desktop.
+
 Programs, fragments, observation, handoff and evidence work the same everywhere:
 see [programs](references/programs.md) and [environments](references/environments.md).

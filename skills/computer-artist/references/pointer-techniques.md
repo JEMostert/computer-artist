@@ -6,7 +6,9 @@ Use held-button `ctx.path` for freehand contours and vertex clicks for polygons.
 The tested Polygon tool used fill-only, left-click vertices and right-click the
 last vertex to commit; double-click was different. Close clicks can become double
 clicks. The demo used about 16 logical pixels spacing or .45-second pauses for
-close vertices; adjust timing without discarding geometry.
+close vertices; adjust timing without discarding geometry. Paths sent while
+Polygon is still selected become polygon vertices, not brush strokes: select the
+brush again before each stroke group.
 
 Bucket fill follows existing color boundaries. Opaque filled polygons/ellipses can
 cover earlier art; restore outlines afterwards. Draw back-to-front: background,
