@@ -44,6 +44,7 @@
 #include <QUuid>
 #include <QSet>
 #include <QTemporaryFile>
+#include <QThreadPool>
 #include <unistd.h>
 #include <algorithm>
 #include <cmath>
@@ -105,6 +106,7 @@ private:
     bool m_releasingHost = false;
     QString m_hostStopReason;
     QJsonObject request(QLocalSocket *, const QJsonObject &);
+    QJsonObject finish(QLocalSocket *, const QString &lane, QJsonObject reply, bool ok);
     QJsonArray windows() const;
     Window *find(const QString &id) const;
     bool visible(Window *) const;
@@ -129,6 +131,7 @@ private:
     void observe(Window *);
     bool valid() const;
     QLocalServer m_server;
+    QThreadPool m_encoder; // PNG encoding and writing, off the compositor thread.
     QPointer<ClientConnection> m_client;
     QPointer<Window> m_target;
     QPointer<SurfaceInterface> m_surface;
@@ -233,6 +236,7 @@ Artist::Artist() {
     });
 }
 Artist::~Artist() {
+    m_encoder.waitForDone(); // Plugin code must not run after unload.
     m_animation.stop();
     release(true, QStringLiteral("plugin_unloaded"));
     m_popupDismissTimer.stop();
@@ -270,7 +274,7 @@ bool Artist::start() {
             });
             connect(socket, &QLocalSocket::readyRead, this, [this,socket] {
                 while (socket->canReadLine() && !socket->property("revoked").toBool()) {
-                    if(socket->property("clipboard_pending").toBool()) { socket->abort(); return; }
+                    if(socket->property("reply_pending").toBool()) { socket->abort(); return; }
                     // readLine returns at most maxSize-1 bytes; a longer line must
                     // abort rather than be answered as several invalid requests.
                     auto line = socket->readLine(65538);
@@ -480,11 +484,15 @@ bool Artist::move(const QPointF &p) {
                 .9 + random->generateDouble() * 1.6});
         }
     }
+    const bool firstPosition = !m_positionKnown;
     m_positionKnown = true;
     m_position = p;
     m_trail.append({now, m_glideMs ? shown : p, !m_buttons.isEmpty()});
     m_lastMove = now;
-    drawCursor();
+    // Input can arrive much faster than the display refresh. Coalesce visual
+    // updates on the animation timer; dispatch above is never delayed.
+    if (m_animation.interval() != 16) m_animation.setInterval(16);
+    if (firstPosition) drawCursor();
     return true;
 }
 QPointF Artist::shownPosition(qint64 now) const {
@@ -511,6 +519,7 @@ bool Artist::button(uint32_t code, bool down) {
     }
     if (down) m_buttons.insert(code); else m_buttons.remove(code);
     if (m_positionKnown) m_trail.append({now, m_position, !m_buttons.isEmpty()});
+    if (m_animation.interval() != 16) m_animation.setInterval(16);
     auto serial = waylandServer()->display()->nextSerial();
     send([&](wl_resource *r) { wl_pointer_send_button(r, serial, uint32_t(m_clock.elapsed()), code, down ? WL_POINTER_BUTTON_STATE_PRESSED : WL_POINTER_BUTTON_STATE_RELEASED); });
     frame();
@@ -662,14 +671,27 @@ QJsonObject Artist::request(QLocalSocket *socket, const QJsonObject &o) {
             && QFileInfo(path).isAbsolute() && !QFileInfo::exists(path) && !QFileInfo(path).isSymLink()) {
             auto image = captureClient(w);
             if (!image.isNull()) {
-                // Publish a complete PNG without replacing any destination that
-                // appeared during rendering. The temporary file is on the same
-                // filesystem; link() atomically fails when the name exists.
-                QTemporaryFile file(QFileInfo(path).absolutePath() + "/.ca-capture-XXXXXX");
-                ok=file.open() && image.save(&file,"PNG") && file.flush();
-                if(ok) ok=::link(QFile::encodeName(file.fileName()).constData(),
-                                 QFile::encodeName(path).constData()) == 0;
-                if(ok) { reply.insert("path",path); reply.insert("source","kwin_composited_client"); }
+                // Only rendering and readback need the compositor thread. Encoding a
+                // 4K window took ~190 ms there and froze the whole desktop.
+                socket->setProperty("reply_pending",true);
+                QPointer<QLocalSocket> receiver=socket;
+                m_encoder.start([this,receiver,image,path,lane] {
+                    // Publish a complete PNG without replacing any destination that
+                    // appeared during rendering. The temporary file is on the same
+                    // filesystem; link() atomically fails when the name exists.
+                    QTemporaryFile file(QFileInfo(path).absolutePath() + "/.ca-capture-XXXXXX");
+                    const bool saved=file.open() && image.save(&file,"PNG") && file.flush()
+                        && ::link(QFile::encodeName(file.fileName()).constData(), QFile::encodeName(path).constData()) == 0;
+                    QMetaObject::invokeMethod(this, [this,receiver,path,lane,saved] {
+                        if(!receiver || receiver->state()!=QLocalSocket::ConnectedState) return;
+                        receiver->setProperty("reply_pending",false);
+                        QJsonObject reply;
+                        if(saved) { reply.insert("path",path); reply.insert("source","kwin_composited_client"); }
+                        else reply.insert("error","capture_unavailable_or_path_exists");
+                        receiver->write(QJsonDocument(finish(receiver,lane,reply,saved)).toJson(QJsonDocument::Compact)+'\n');
+                    }, Qt::QueuedConnection);
+                });
+                return {{"pending",true}};
             }
         }
         if(!ok) reply.insert("error","capture_unavailable_or_path_exists");
@@ -712,6 +734,9 @@ QJsonObject Artist::request(QLocalSocket *socket, const QJsonObject &o) {
             }
         }
     }
+    return finish(socket,lane,reply,ok);
+}
+QJsonObject Artist::finish(QLocalSocket *socket, const QString &lane, QJsonObject reply, bool ok) {
     if (!ok) { if(socket==m_owner) cancel(); if(!reply.contains("error")) reply.insert("error","rejected_or_unsupported"); }
     if(socket==m_owner) m_watchdog.start();
     if(socket==m_hostOwner) m_hostWatchdog.start();
@@ -826,11 +851,11 @@ QJsonObject Artist::requestHost(QLocalSocket *socket,const QJsonObject &o) {
         else if(socket!=m_hostOwner && !o.value("lease").toString().isEmpty()) error="stale_host_lease_or_target";
         else if(op=="clipboard_set" && !o.value("text").isString()) error="clipboard_text_required";
         else {
-            socket->setProperty("clipboard_pending",true);
+            socket->setProperty("reply_pending",true);
             QPointer<QLocalSocket> receiver=socket;
             auto done=[receiver](QJsonObject result) {
                 if(!receiver || receiver->state()!=QLocalSocket::ConnectedState) return;
-                receiver->setProperty("clipboard_pending",false);
+                receiver->setProperty("reply_pending",false);
                 result.insert("lane","host");
                 receiver->write(QJsonDocument(result).toJson(QJsonDocument::Compact)+'\n');
             };
@@ -936,7 +961,8 @@ void Artist::drawCursor()
     }
     m_drops.removeIf([&](const InkDrop &drop) { return now - drop.born >= dropMs; });
     const bool splashing = now - m_lastClick < splashMs;
-    m_animation.setInterval(now - m_lastMove < brushMs || splashing || !m_drops.isEmpty() || pressed ? 16 : 50);
+    const int interval = now - m_lastMove < brushMs || splashing || !m_drops.isEmpty() || pressed ? 16 : 50;
+    if (m_animation.interval() != interval) m_animation.setInterval(interval);
     auto dropAt = [&](const InkDrop &drop) {
         const qreal age = (now - drop.born) / dropMs;
         return std::pair{drop.origin + drop.velocity * ((1 - std::pow(1 - age, 2)) * .35), drop.radius * std::pow(1 - age, .6)};
