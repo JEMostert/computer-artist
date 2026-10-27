@@ -173,7 +173,7 @@ class EnvironmentCommandTest(unittest.TestCase):
             client = MagicMock()
             client.__enter__.return_value = client
             client.request.return_value = {'ok': True, 'windows': []}
-            client.window_store.display_windows.side_effect = lambda windows: windows
+            client.present_windows.side_effect = lambda windows: windows
             with (
                 self.subTest(argv=argv),
                 patch.dict(os.environ),

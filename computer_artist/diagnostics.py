@@ -194,6 +194,8 @@ def diagnose(args):
                             'remedy': 'Rebuild the plugin against the running KWin and reload it.',
                         }
                     )
+        # A private environment's seat has no human: its default host lane decides.
+        private_seat = lane == 'host' and bool(backend.get('environment'))
         for window in raw_windows:
             labels = {
                 'target_not_visible': 'Not visible on the current desktop',
@@ -228,24 +230,38 @@ def diagnose(args):
                 reasons.append(
                     'Compositor refuses acquisition (window type, grab or pointer resource restriction)'
                 )
-            windows.append(
-                {
-                    **{
-                        field: window.get(field)
-                        for field in ('id', 'title', 'native', 'visible', 'pid')
-                    },
-                    'agent_candidate': not reasons,
-                    'readiness_source': 'native_acquisition_checks'
-                    if 'agent_restrictions' in window
-                    else 'legacy_heuristic',
-                    'restrictions': list(dict.fromkeys(reasons)),
-                    'restriction_codes': reason_codes,
-                    'host_candidate': window.get('host_acquirable'),
-                    'host_restrictions': [
-                        labels.get(code, code) for code in window.get('host_restrictions', [])
-                    ],
-                }
-            )
+            identity = {
+                field: window.get(field) for field in ('id', 'title', 'native', 'visible', 'pid')
+            }
+            agent = {
+                'agent_candidate': not reasons,
+                'readiness_source': 'native_acquisition_checks'
+                if 'agent_restrictions' in window
+                else 'legacy_heuristic',
+                'restrictions': list(dict.fromkeys(reasons)),
+                'restriction_codes': reason_codes,
+            }
+            host = {
+                'host_candidate': window.get('host_acquirable'),
+                'host_restrictions': [
+                    labels.get(code, code) for code in window.get('host_restrictions', [])
+                ],
+            }
+            if private_seat:
+                windows.append(
+                    {
+                        **identity,
+                        'lane': 'host',
+                        'ready': host['host_candidate'],
+                        **host,
+                        'agent_lane': {
+                            **agent,
+                            'note': 'Optional agent lane only; it does not block the default host lane',
+                        },
+                    }
+                )
+            else:
+                windows.append({**identity, **agent, **host})
         if any('agent_restrictions' not in window for window in raw_windows):
             warnings.append(
                 {
@@ -260,7 +276,7 @@ def diagnose(args):
                 {
                     'code': 'stale_bindings',
                     'names': stale,
-                    'remedy': 'Rebind deliberately with ca set --name NAME --title UNIQUE_TITLE, then revalidate the layout.',
+                    'remedy': 'These names point at closed windows and are harmless until used. Before using one, rebind it with ca set --name NAME --title UNIQUE_TITLE and revalidate its layout.',
                 }
             )
         if args.window:

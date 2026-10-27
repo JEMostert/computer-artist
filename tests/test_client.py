@@ -59,6 +59,60 @@ class ControllerTest(unittest.TestCase):
         self.thread.join(3)
         self.tmp.cleanup()
 
+    def _host_windows(self, environment):
+        self.replies['capabilities'] = {
+            'ok': True,
+            'lane': 'host',
+            'host_pointer': True,
+            'protocol': 3,
+            'environment': environment,
+        }
+        self.replies['windows'] = {
+            'ok': True,
+            'generation': 1,
+            'windows': [
+                {
+                    'id': 'kp',
+                    'title': 'KolourPaint',
+                    'native': True,
+                    'visible': True,
+                    'x': 640,
+                    'y': 378,
+                    'width': 640,
+                    'height': 480,
+                    'acquirable': False,
+                    'agent': False,
+                    'agent_keyboard': True,
+                    'human_active': True,
+                    'agent_restrictions': [
+                        'human_pointer_in_application',
+                        'human_keyboard_in_application',
+                    ],
+                    'host': False,
+                    'host_acquirable': True,
+                    'host_restrictions': [],
+                }
+            ],
+        }
+        with Client(self.path, lane='host', window_dir=Path(self.tmp.name) / 'window') as client:
+            return client.windows()[0]
+
+    def test_private_seat_reports_host_readiness_and_groups_agent_lane(self):
+        window = self._host_windows('creation-bench')
+        self.assertEqual((window['lane'], window['ready']), ('host', True))
+        self.assertEqual(window['host_restrictions'], [])
+        for field in ('acquirable', 'human_active', 'agent_restrictions'):
+            self.assertNotIn(field, window)
+        self.assertTrue(window['agent_lane']['human_active'])
+        self.assertIn('human_pointer_in_application', window['agent_lane']['agent_restrictions'])
+        self.assertEqual((window['x'], window['width']), (640, 640))
+
+    def test_desktop_host_lane_keeps_agent_fields(self):
+        window = self._host_windows('')
+        self.assertNotIn('agent_lane', window)
+        self.assertFalse(window['acquirable'])
+        self.assertTrue(window['human_active'])
+
     def test_deadline_returns_app_while_program_is_idle(self):
         with Client(self.path, deadline=0.1) as client:
             client.acquire('existing-window')

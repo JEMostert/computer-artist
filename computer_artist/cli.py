@@ -349,7 +349,7 @@ def execute(client, args):
     if args.command in ('windows', 'capabilities', 'stop'):
         reply = client.request('takeover' if args.command == 'stop' else args.command)
         if args.command == 'windows':
-            reply['windows'] = client.window_store.display_windows(reply['windows'])
+            reply['windows'] = client.present_windows(reply['windows'])
         return reply
     if args.command == 'set':
         windows = client.windows()

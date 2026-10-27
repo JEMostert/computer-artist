@@ -19,6 +19,23 @@ class ActionError(RuntimeError):
 
 
 CLIPBOARD_MAX_BYTES = 8192
+AGENT_LANE_FIELDS = ('acquirable', 'agent', 'agent_keyboard', 'agent_restrictions', 'human_active')
+
+
+def private_seat_view(window):
+    """Readiness for the host lane on a private environment's own seat.
+
+    Nobody else uses that seat, so its pointer and focus sitting in a new window
+    say nothing about readiness. Agent-lane fields stay available, grouped.
+    """
+    view = {key: value for key, value in window.items() if key not in AGENT_LANE_FIELDS}
+    view['lane'] = 'host'
+    view['ready'] = window.get('host_acquirable')
+    view['agent_lane'] = {
+        **{key: window[key] for key in AGENT_LANE_FIELDS if key in window},
+        'note': 'Optional agent lane only; it does not block the default host lane',
+    }
+    return view
 
 
 def require_keyboard(capabilities, lane):
@@ -98,6 +115,8 @@ class Client:
         self._keyboard_capabilities = None
         self._keyboard_initialized = False
         self.trace = deque(maxlen=512)
+        # Set for a host lane on a private environment's seat; see private_seat_view.
+        self.private_seat = False
         if lane == 'host':
             try:
                 support = self._request('capabilities')
@@ -109,6 +128,7 @@ class Client:
                     raise ValueError(
                         'Connected plugin does not support the host lane; refusing fallback'
                     )
+                self.private_seat = bool(support.get('environment'))
             except BaseException:
                 if self.reader:
                     self.reader.close()
@@ -268,7 +288,12 @@ class Client:
         reply = self.request('windows')
         # Explicit observation is the only operation that refreshes geometry.
         self.generation = reply['generation']
-        return self.window_store.display_windows(reply['windows'])
+        return self.present_windows(reply['windows'])
+
+    def present_windows(self, windows):
+        if self.private_seat:
+            windows = [private_seat_view(window) for window in windows]
+        return self.window_store.display_windows(windows)
 
     def acquire(self, window_id):
         reply = self.request('acquire', window=self.window_store.resolve_window(window_id))

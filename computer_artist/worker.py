@@ -24,7 +24,9 @@ def interruption_evidence(ctx, spec, result):
     errors = []
     observations = []
     try:
-        with Client(spec['socket'], deadline=2, action_budget=20) as observer:
+        with Client(
+            spec['socket'], deadline=2, action_budget=20, lane=spec.get('lane', 'agent')
+        ) as observer:
             windows = observer.windows()
             target = next((w for w in windows if w['id'] == ctx.window_id), None)
             candidates = ctx._related(windows, target or ctx.baseline)

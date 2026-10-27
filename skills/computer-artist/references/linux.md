@@ -37,7 +37,10 @@ Read [environments](environments.md) for recipes, browsers and limits.
 
 All commands below and in references take `--environment TASK` when working
 privately. Inside an environment the default lane is that desktop's own seat (no
-human uses it); targets are raised automatically. Never drop the selector to
+human uses it); targets are raised automatically. There `ready`/`host_acquirable`
+(doctor: `host_candidate`) decide readiness; `acquirable`, `agent_restrictions` and
+`human_active` (grouped under `agent_lane`) describe the agent lane and do not
+block. Never drop the selector to
 recover from a refusal. XWayland windows can be observed but not driven.
 
 Inspect `ca capabilities`, `ca windows`, `ca doctor --window APP` and a fresh

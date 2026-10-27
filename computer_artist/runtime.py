@@ -125,6 +125,7 @@ class Context:
         if self.client.failure and isinstance(self.client.failure, (OSError, ActionError)):
             with Client(
                 self.client.socket_path,
+                lane=self.client.lane,
                 shared=self.client.shared,
                 window_dir=self.store.root,
             ) as observer:

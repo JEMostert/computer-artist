@@ -87,6 +87,54 @@ class DiagnosticsTest(unittest.TestCase):
             self.assertIn('human_pointer_in_application', window['restriction_codes'])
             self.assertFalse((root / 'window').exists())
 
+    def test_environment_host_lane_reports_host_readiness_first(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            args = Namespace(
+                window_dir=root / 'window',
+                output_dir=root / 'output',
+                socket=str(root / 'control'),
+                deadline=2,
+                window='kp',
+                build=False,
+                lane='host',
+                environment_info={'name': 'bench', 'kind': 'kwin', 'lane': 'host'},
+            )
+            client = MagicMock()
+            client.__enter__.return_value = client
+            client.request.side_effect = [
+                {'protocol': 3, 'operations': ['capture'], 'environment': 'bench'},
+                {
+                    'windows': [
+                        {
+                            'id': 'kp',
+                            'title': 'Untitled - KolourPaint',
+                            'native': True,
+                            'visible': True,
+                            'human_active': True,
+                            'acquirable': False,
+                            'agent_restrictions': [
+                                'human_pointer_in_application',
+                                'human_keyboard_in_application',
+                            ],
+                            'host_acquirable': True,
+                            'host_restrictions': [],
+                        }
+                    ]
+                },
+                {'clipboard': True},
+            ]
+            with patch('computer_artist.diagnostics.Client', return_value=client):
+                report = diagnose(args)
+            selected = next(c for c in report['checks'] if c['name'] == 'selected_window')
+            self.assertTrue(selected['passed'])
+            window = report['windows'][0]
+            self.assertEqual((window['lane'], window['ready']), ('host', True))
+            self.assertNotIn('restrictions', window)
+            self.assertNotIn('agent_candidate', window)
+            self.assertFalse(window['agent_lane']['agent_candidate'])
+            self.assertIn('human_pointer_in_application', window['agent_lane']['restriction_codes'])
+
     def test_plugin_build_detects_a_stale_loaded_plugin(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)
