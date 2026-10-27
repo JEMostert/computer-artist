@@ -15,6 +15,11 @@
 #include <cstring>
 
 namespace KWin {
+uint32_t agentSerial() {
+    const auto serial = waylandServer()->display()->nextSerial();
+    input()->setLastInteractionSerial(waylandServer()->display()->nextSerial());
+    return serial;
+}
 ArtistKeyboard::~ArtistKeyboard() { end(0); }
 QList<uint32_t> ArtistKeyboard::resources(ClientConnection *client) {
     QList<uint32_t> result;
@@ -53,7 +58,7 @@ bool ArtistKeyboard::begin(SurfaceInterface *surface) {
     m_resources = keyboards;
     wl_array keys;
     wl_array_init(&keys);
-    const auto serial = waylandServer()->display()->nextSerial();
+    const auto serial = agentSerial();
     send([&](wl_resource *r) { wl_keyboard_send_enter(r, serial, surface->resource(), &keys); });
     wl_array_release(&keys);
     modifiers();
@@ -66,7 +71,7 @@ bool ArtistKeyboard::ready() const {
 }
 void ArtistKeyboard::modifiers() const {
     if (!m_state) return;
-    auto serial = waylandServer()->display()->nextSerial();
+    auto serial = agentSerial();
     send([&](wl_resource *r) {
         wl_keyboard_send_modifiers(r, serial,
             xkb_state_serialize_mods(m_state, XKB_STATE_MODS_DEPRESSED),
@@ -79,7 +84,7 @@ bool ArtistKeyboard::key(uint32_t code, bool pressed, uint32_t time) {
     if (!ready() || code == 0 || code > 247 || m_keys.contains(code) == pressed) return false;
     if (pressed) m_keys.append(code); else m_keys.removeAll(code);
     xkb_state_update_key(m_state, code + 8, pressed ? XKB_KEY_DOWN : XKB_KEY_UP);
-    auto serial = waylandServer()->display()->nextSerial();
+    auto serial = agentSerial();
     send([&](wl_resource *r) { wl_keyboard_send_key(r, serial, time, code,
         pressed ? WL_KEYBOARD_KEY_STATE_PRESSED : WL_KEYBOARD_KEY_STATE_RELEASED); });
     modifiers();
@@ -90,7 +95,7 @@ void ArtistKeyboard::cancel(uint32_t time) {
     for (auto it = m_keys.crbegin(); it != m_keys.crend(); ++it) {
         const auto code = *it;
         if (m_state) xkb_state_update_key(m_state, code + 8, XKB_KEY_UP);
-        auto serial = waylandServer()->display()->nextSerial();
+        auto serial = agentSerial();
         send([&](wl_resource *r) { wl_keyboard_send_key(r, serial, time, code, WL_KEYBOARD_KEY_STATE_RELEASED); });
     }
     m_keys.clear();
@@ -106,7 +111,7 @@ void ArtistKeyboard::end(uint32_t time) {
     cancel(time);
     const auto human = waylandServer()->seat()->focusedKeyboardSurface();
     if (m_surface && (!human || human->client() != m_client)) {
-        auto serial = waylandServer()->display()->nextSerial();
+        auto serial = agentSerial();
         send([&](wl_resource *r) { wl_keyboard_send_leave(r, serial, m_surface->resource()); });
     }
     m_surface.clear(); m_client.clear(); m_resources.clear();

@@ -45,7 +45,8 @@ only. Four concurrent container environments were exercised on 4 October 2026.
 
 Human pointer/focus must stay outside the target connection. Simultaneous editing
 within one application is not required. Two lanes cannot own the same connection.
-App dialogs can activate themselves and change human focus; prevention is absent.
+Apps cannot activate themselves with agent input serials (Qt fixture and Vivaldi in
+separate KWin, 25 Oct 2026); new app windows and dialogs can still take human focus.
 XWayland, independent clipboard/IME, popup grabs and app data drag-and-drop are
 unsupported. There is no fallback and input separation is not a security sandbox.
 

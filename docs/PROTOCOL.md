@@ -51,5 +51,6 @@ activation. Changed resources/keymaps revoke readiness; verify effects before re
 Window acquisition fields snapshot real checks but can become stale; older plugins
 may omit them. Capture publishes by atomic no-replace hard link; existing paths,
 symlinks and unsupported hard-link filesystems are refused. XWayland, independent
-clipboard/IME, popup grabs and data drag-and-drop are unsupported. Dialogs can
-activate themselves. Input separation is not a sandbox.
+clipboard/IME, popup grabs and data drag-and-drop are unsupported. Agent serials are
+never newer than KWin's last interaction serial, so they cannot earn xdg-activation;
+new dialogs can still activate themselves. Input separation is not a sandbox.

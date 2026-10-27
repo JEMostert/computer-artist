@@ -11,6 +11,12 @@ namespace KWin {
 class ClientConnection;
 class SurfaceInterface;
 
+// A serial for an agent pointer or keyboard event. KWin grants an app's
+// xdg-activation request when it quotes a serial newer than the last human
+// press, so a later serial is recorded as the last interaction: an app cannot
+// use agent input to activate itself and take the human's keyboard focus.
+uint32_t agentSerial();
+
 // Protocol delivery only: never changes KWin's focus, pressed keys or XKB state.
 // The caller owns target visibility, connection ownership and takeover checks.
 class ArtistKeyboard {

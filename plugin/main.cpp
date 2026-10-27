@@ -454,7 +454,7 @@ bool Artist::move(const QPointF &p) {
         if (!m_buttons.isEmpty()) return false;
         cancelPointer();
         m_surface = surface;
-        const auto serial = waylandServer()->display()->nextSerial();
+        const auto serial = agentSerial();
         send([&](wl_resource *r) { wl_pointer_send_enter(r, serial, surface->resource(), wl_fixed_from_double(local.x()), wl_fixed_from_double(local.y())); });
     } else {
         send([&](wl_resource *r) { wl_pointer_send_motion(r, uint32_t(m_clock.elapsed()), wl_fixed_from_double(local.x()), wl_fixed_from_double(local.y())); });
@@ -520,7 +520,7 @@ bool Artist::button(uint32_t code, bool down) {
     if (down) m_buttons.insert(code); else m_buttons.remove(code);
     if (m_positionKnown) m_trail.append({now, m_position, !m_buttons.isEmpty()});
     if (m_animation.interval() != 16) m_animation.setInterval(16);
-    auto serial = waylandServer()->display()->nextSerial();
+    auto serial = agentSerial();
     send([&](wl_resource *r) { wl_pointer_send_button(r, serial, uint32_t(m_clock.elapsed()), code, down ? WL_POINTER_BUTTON_STATE_PRESSED : WL_POINTER_BUTTON_STATE_RELEASED); });
     frame();
     return true;
@@ -536,13 +536,13 @@ bool Artist::agentKeyboardReady() const {
 }
 void Artist::cancelPointer() {
     for (auto code : std::as_const(m_buttons)) {
-        auto serial = waylandServer()->display()->nextSerial();
+        auto serial = agentSerial();
         send([&](wl_resource *r) { wl_pointer_send_button(r, serial, uint32_t(m_clock.elapsed()), code, WL_POINTER_BUTTON_STATE_RELEASED); });
     }
     m_buttons.clear();
     // Never erase a new human enter that stock KWin has already delivered.
     if (m_surface && !owns(waylandServer()->seat()->focusedPointerSurface())) {
-        auto serial = waylandServer()->display()->nextSerial();
+        auto serial = agentSerial();
         send([&](wl_resource *r) { wl_pointer_send_leave(r, serial, m_surface->resource()); });
     }
     frame();

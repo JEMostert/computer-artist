@@ -24,6 +24,11 @@ with Client(s['control']) as observer, Client(s['control']) as owner:
     canvas = next(w for w in observer.windows() if w['title'] == 'Agent canvas')
     owner.acquire(canvas['id'])
     owner.move(canvas['x'] + 180, canvas['y'] + 250)
+    # An app activating itself with the agent's click serial must not take focus.
+    owner.button(pressed=True)
+    owner.button(pressed=False)
+    time.sleep(0.3)
+    assert not next(w for w in observer.windows() if w['id'] == canvas['id'])['human_active']
     owner.button(code=273, pressed=True)
     owner.button(code=273, pressed=False)
     time.sleep(0.3)

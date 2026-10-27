@@ -58,6 +58,8 @@ class Canvas(QWidget):
             return
         self.previous = event.position()
         record('press', x=self.previous.x(), y=self.previous.y())
+        # Like Chromium, ask to be activated on click with the press's serial.
+        self.window().windowHandle().requestActivate()
 
     def mouseMoveEvent(self, event):
         if self.previous is not None and event.buttons() & Qt.MouseButton.LeftButton:
