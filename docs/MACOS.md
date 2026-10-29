@@ -2,9 +2,10 @@
 
 Requires macOS and Python 3.12 or later. The native backend controls Mac applications
 on the current desktop; Docker Desktop is needed only for private Linux boxes.
-Native drawing and text workflows were verified in Chrome on macOS 27.0.1
+Independent native drawing and text workflows were verified in Chrome on macOS 27.0.1
 (Apple M1 Pro) on 15 October 2026. Other native apps and OS versions remain
-unverified. This is not a claim of parity with KWin.
+unverified on the independent lane; separately authorized borrowed drags were
+verified in Pinta as recorded below. This is not a claim of parity with KWin.
 
 ```bash
 git clone https://github.com/JEMostert/computer-artist.git
@@ -34,7 +35,10 @@ uses its own transport.
 ## Native behavior and limits
 
 The same CLI supports window binding, observation, read-only accessibility,
-conditional programs, gestures, watch, handoff, outcome checks and reusable fragments.
+conditional programs, gestures, watch, handoff, outcome checks, reusable fragments
+and [workflow memory](../skills/computer-artist/references/memory.md). Memory
+learning/retrieval is local; the painting benchmark exercises a Linux box, not
+native Mac application reuse.
 Agent pointer events use private SkyLight delivery; physical keyboard events go to
 the selected process, with text resolved against the live keyboard layout. The
 agent has its own click-through ink pen, drawn without moving the human pointer.
@@ -118,6 +122,9 @@ is made. Native tests include portable takeover regressions; they do not verify
 live human takeover, host input, Retina scaling or other applications.
 
 The container results below are separate from native application evidence.
+The [29 October workflow-memory benchmark](WORKFLOW-MEMORY-BENCHMARK.md) adds a
+private KolourPaint discovery/learning/reuse journey; its timings and screenshots
+are separate from the 15 October platform checks below.
 
 | Feature | macOS scope | Status |
 | --- | --- | --- |

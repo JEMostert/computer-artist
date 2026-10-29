@@ -1,7 +1,8 @@
 # Computer Artist
 
-This project was reset on 18 September 2026. Read docs/CAPABILITIES.md for the intended
-capabilities and build sequence. No prior implementation remains.
+This project was reset on 18 September 2026. Read docs/CAPABILITIES.md for current
+capabilities, verification limits and remaining work. Source and dated validation
+records describe the implementation built since that reset.
 
 - The goal is independent agent input in applications on the user's actual
   desktop while the user continues using their own pointer and keyboard.
@@ -13,6 +14,9 @@ capabilities and build sequence. No prior implementation remains.
 - Keep compositor experiments separate from the running host compositor.
 - Preserve the broader capabilities in docs/CAPABILITIES.md: conditional programs, continuous
   observation, precise gestures, handoff, verified outcomes, and reusable work.
+  Workflow memory is the first reuse path; guarded maps and versioned fragments
+  remain supported. See skills/computer-artist/references/memory.md for learning,
+  eligibility, retention and adaptation limits.
 - Distinguish proposed, implemented, and verified behavior. Do not inherit old
   test results or describe input isolation as a security sandbox.
 - Never silently fall back to moving the human's pointer or stealing focus.

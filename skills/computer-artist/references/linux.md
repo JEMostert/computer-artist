@@ -69,10 +69,12 @@ use `ca target APP NAME --observation OBS --rect X Y W H` and guarded
 Changing canvases use verified geometry, not artwork pixel hashes. Coordinates
 are logical content pixels; account for capture/display scaling.
 
-Reuse or register small typed fragments under `window/api-fragmants/`, then compose
-bounded `ca execute` programs with conditions and loops. Inspect actual transitions
-and correct unexpected results before continuing. Task-specific geometry belongs
-in the task; reusable fragments read maps. See [programs](programs.md).
+Search [workflow memory](memory.md) before building a new procedure. Reuse its
+guarded program when it fits, or adapt from its notes and fresh UI evidence.
+Explicitly authored typed fragments remain under `window/api-fragmants/`; layout
+maps are optional and must match the live state. Compose bounded `ca execute`
+programs with conditions and loops, inspect actual transitions and correct
+unexpected results before continuing. See [programs](programs.md).
 
 Independent physical keys require advertised keyboard support and ready target
 resources. Use `ctx.press`, `key_down`, `key_up` and `ctx.write`/`ca write` for

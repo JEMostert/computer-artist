@@ -4,7 +4,8 @@ Read this only on macOS. The rules in SKILL.md apply as well.
 
 The native backend was verified for Excalidraw drawing in Chrome, physical text, right
 click, scroll and middle drag on macOS 27.0.1 (Apple M1 Pro). Other apps/OS versions
-remain unverified. It uses private SkyLight pointer delivery and per-process
+remain unverified on the independent lane; borrowed drags in Pinta are recorded
+separately below. It uses private SkyLight pointer delivery and per-process
 physical keys, with text resolved from the live keyboard layout. It draws its own click-through
 ink pen. No agent operation falls back to the human pointer, focus or clipboard.
 The pen stays at its last position between actions until `ca session close`, and
@@ -67,9 +68,10 @@ needs their authorization in the current task:
 
 ```bash
 ca drag --host-drags --window app --from 900 740 --to 1400 1020
-ca draw --host-drags --window app --path-file shape.svg
+ca draw --host-drags --window app --path-file shape-path.txt
 ```
 
+`shape-path.txt` contains SVG path `d` data, not a complete SVG/XML document.
 Clicks stay on the agent lane. Each drag borrows the real cursor: it refuses while
 a human button is held, detaches the user's physical mouse, moves the cursor to
 every point, and on release returns the cursor, rejoins the mouse and returns

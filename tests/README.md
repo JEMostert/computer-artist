@@ -1,5 +1,10 @@
 # Test scope
 
+This document records the rationale and counts from the October 2026 reductions,
+not a current test inventory. Counts depend on the revision, runner selection and
+platform. Use the current [runner output](#running) for present counts; later
+features and CI timing fixes are not included in the historical tables below.
+
 The 15 October 2026 reduction starts at `0d88ee5`: **379 discovered tests,
 370 passed and 9 native Windows skips** on macOS/Python 3.13. It deletes 156
 methods (41%), leaving **223 tests: 214 passed and the same 9 skips**. Retained
@@ -9,8 +14,8 @@ These are revision-specific counts, not a target or a coverage percentage.
 After integrating main through `8296af5` (including the five ink-pen tests from
 `31dab1a`), the equivalent count is **384 -> 228 discovered**, with **219 passed
 and 9 native Windows skips** in 19.215s. All incoming pen tests and Windows fixture
-changes are preserved. The portable Windows runner selection passes **81 tests
-with 9 native skips** on macOS; lint and formatting pass for 108 Python files.
+changes are preserved. That revision's Windows runner record reports **81 passes
+and 9 native skips** on macOS; lint and formatting passed for 108 Python files.
 
 Tests are kept for their failure consequence: unwanted input, held resources,
 false success, lost/corrupt work or crossing a platform boundary. A unique
@@ -39,9 +44,10 @@ remain production API even though their import-shape test was removed.
 
 A second independent review of the retained suite deletes 19 more methods:
 **228 -> 209 discovered, 200 passed and 9 native Windows skips**. The portable
-Windows runner selection goes from **90 to 84 tests** (same 9 skips); no runner
-module was dropped. No production code or assertion in a retained test changed.
-Where this table and the one above disagree, this one is current.
+Windows runner selection at those revisions goes from **90 to 84 test cases**
+(same 9 skips when run on macOS); no runner module was dropped. No production code
+or assertion in a retained test changed during that reduction. This table records
+the second-pass revision; it does not override counts from subsequent development.
 
 | File (`test_*.py`) | Removed | Why it did not earn its cost |
 | --- | --- | --- |
@@ -60,11 +66,11 @@ Where this table and the one above disagree, this one is current.
 | windows | session-status lane report | Status representation for stop-reason display only; the Windows/KWin update busy checks do not depend on it. |
 | diagnostics | doctor host lane inside a private environment | Report wording/lane selection only; restriction reporting and stale/mismatched plugin detection stay. |
 
-The 209 remaining tests each guard a distinct consequential failure in the
+At that revision, the 209 remaining tests guarded consequential failures in the
 categories above: unwanted or unreleased input, missing host gates or fallbacks,
 deadlines/cancellation, false success, lost or corrupt work, wrong targets, and
 platform/box boundaries. Further cuts would remove the only check of such a
-failure, so the second pass stops here rather than chasing a count.
+failure, so that second pass stopped there rather than chasing a count.
 
 ## Deliberately reduced coverage
 

@@ -1,98 +1,101 @@
 # Computer Artist
 
-`ca` gives an agent its own animated ink-pen pointer and physical keyboard input in supported
-native Wayland applications on your KDE desktop. You can keep using your pointer
-and keyboard in another application. It is a local CLI backed by a KWin plugin.
-
-On KDE, keep your pointer and keyboard focus outside the target application's connection.
-Returning to it revokes agent control. `--host` explicitly selects the real desktop
-pointer, focus and clipboard. The agent lane never falls back to host input.
-XWayland, independent clipboard/IME and popup grabs are unsupported.
+Computer Artist gives agents a local CLI for observing and operating supported
+GUI applications, verifying outcomes, and remembering useful workflows. Supported
+native backends let an agent work in one application while you use another.
+Private desktops are available for development and testing.
 
 ![The agent's ink pen: writing leaves a fading ink stroke, a click splashes, and at rest a drop gathers on the nib](docs/assets/agent-cursor.svg)
 
-On **Windows** the agent also gets its own drawn pointer, but it is not a second
-input device: it drives standard text fields and buttons with targeted window
-messages and other controls through UI Automation, without moving your pointer or
-focus. Canvases, drawing and apps that ignore UI Automation are refused there. See
-[Windows](docs/WINDOWS.md) for what is implemented and what is verified.
+## Install and choose a desktop
 
-On **macOS** a native backend is implemented using private SkyLight pointer
-posting and per-process physical keys, with its own click-through arrow. Drawing,
-text, right-click, scroll and middle drag were verified in Chrome on macOS 27.0.1
-(Apple M1 Pro). Foreground watching is allowed; real input in the target stops
-agent control. This takeover behavior has portable regressions; a live human
-takeover journey, other apps, host paste and Retina scaling remain unverified.
-See [macOS](docs/MACOS.md) for permissions and current restrictions.
+Requires Python 3.12 or later. Follow the instructions for your platform:
 
-For development and testing, give each agent a private environment instead: its own
-KWin desktop, seat, clipboard and session bus, with apps from the host or a Podman
-or Docker container. On Windows and macOS each environment is a Linux box container
-instead (see [Windows](docs/WINDOWS.md) and [macOS](docs/MACOS.md)). Nothing in a
-private environment touches your pointer, focus or browser:
+| Platform | Native desktop input | Installation and limits |
+| --- | --- | --- |
+| Linux / KDE Wayland | KWin plugin delivers independent pointer and physical-key events to supported native Wayland apps | [Linux installation](docs/INSTALL.md); XWayland input is unsupported |
+| Windows | Targeted standard-control messages and UI Automation, with a separately drawn pen | [Windows](docs/WINDOWS.md); the agent lane does not support drawing, drags or general shortcuts |
+| macOS | Private SkyLight pointer delivery, process-targeted physical keys and a separately drawn pen | [macOS](docs/MACOS.md); application compatibility and drag behavior vary |
 
-```bash
-ca env start web --image docker.io/library/node:22 --project .   # or --recipe ca-env.toml
-ca env exec web --name app --wait-window "My App" -- npm run start
-ca --environment web observe --window app
-ca --environment web click --window app --x 120 --y 80
-ca env stop web
-```
+`ca doctor` reports backend readiness without sending input. Linux needs a matching
+loaded KWin plugin; installing the Python package or agent skill does not deploy it.
+`ca setup --codex` installs the bundled agent instructions: a source link on
+Linux/macOS, or a managed copy on Windows. Re-run setup to update managed copies.
 
-See [private environments](skills/computer-artist/references/environments.md) for
-recipes, browsers, private profiles and limits.
-
-Install using [installation](docs/INSTALL.md). Linux needs the matching KWin
-plugin; Windows and macOS use their native backends:
+For development and testing, use a private desktop. On Linux, apps can run from
+the host or Podman/Docker; Windows and macOS require Docker Desktop and run Linux
+apps in a box. This example needs KWrite installed on the Linux host; box images
+already include it:
 
 ```bash
-python -m venv .venv
-.venv/bin/python -m pip install -e .
-source .venv/bin/activate
-ca doctor --build
-ca capabilities
-ca windows
-ca set WINDOW_ID --name paint
-ca observe --window paint
-ca click --window paint --x 200 --y 150
-ca write --window editor 'Hello, world!'         # independent keys, live layout
-ca a11y --window editor --role 'push button'     # read-only accessibility tree
-ca watch --window paint --duration 10 --changes-only
-ca session close
+ca env start demo --project .
+ca env exec demo --name editor --wait-window -- kwrite
+ca --environment demo windows
+ca --environment demo observe --window editor
+ca env stop demo
 ```
 
-Coordinates are logical pixels relative to window content on Linux and Windows.
-On macOS they are logical window-frame points including decoration; Retina capture
-pixels can have a different scale. Inspect the captured
-image before input. A cursor session starts on acquisition and stays visible
-between commands until closed. The agent cursor is separate from your own cursor.
+Keep `--environment demo` on every command operating that desktop. Its default
+host lane drives the private desktop's own seat, not your desktop. See
+[private environments](skills/computer-artist/references/environments.md) for
+recipes, additional apps, browsers, profiles and evidence paths. Linux-only
+`--image IMAGE` is not supported by the Windows/macOS box backend.
 
-Programs define `run(ctx)` and arrive on stdin. They run in a supervised worker
-with a hard deadline, shared request budget and input cleanup:
+## Remember and reuse workflows
+
+Search before discovering the same task again:
 
 ```bash
-ca execute --window paint --deadline 15 --budget 1000 <<'PY'
-def run(ctx):
-    ctx.path([(100, 100), (180, 140), (240, 100)], interval=.03)
-    return ctx.observe()
-PY
+ca memory search "export report" --app APP
+ca memory show NAME
+ca observe --window APP
+ca memory run NAME --window APP --args '{}'
 ```
 
-Search `ca memory search "TASK"` before discovering a workflow again. Learn a
-completed run with `ca memory learn NAME --run RUN_ID --task "TASK" --app "APP"`
-and reuse it with `ca memory run NAME --window paint`. Memories retain task
-instructions, the procedure and outcome evidence beyond temporary run cleanup.
-See [workflow memory](skills/computer-artist/references/memory.md).
-The [painting benchmark](docs/WORKFLOW-MEMORY-BENCHMARK.md) records two fresh agents:
-53.9 seconds to discover/learn, then 19.5 seconds to retrieve/reuse the same task.
+The agent reads the memory, inspects the current UI, and chooses whether its stored
+procedure fits. A fast path checks the initial app identity, title and dimensions
+before using the existing supervised runtime. A mismatch requires fresh inspection
+and adaptation; selected tools, canvas contents and redesigned controls still need
+the agent's judgment. Search matches local words in task/app/notes; it is not a
+model call or automatic control discovery.
 
-Use `ca fragments create NAME < code.py` and `ca fragments run NAME --window paint`
-for explicitly authored, typed, versioned procedures. See the
-[CLI programs](docs/PROGRAMS.md) for conditions, gestures and file verification.
+Learn an existing completed run with `ca memory learn NAME --run RUN_ID --task
+"TASK" --app "APP" --notes "PROCEDURE"`, or remember a new program automatically:
 
-An input reply means dispatched. A returned program is unverified until its own
-named checks pass. A child fragment's checks do not verify its parent task.
-Inspect or stop work from the terminal:
+```bash
+ca execute --window APP --remember NAME --task "TASK" --app "APP" \
+  --notes "Starting state, semantic steps, variable inputs, pitfalls and success checks" < workflow.py
+```
+
+Programs define `run(ctx)` and use invocation-owned checks to establish a
+`verified` outcome. Automatic learning preserves an existing memory after a failed
+or unverified attempt. The agent still inspects the actual result: a program check
+is a claim, not independent proof. Memories retain notes, a source snapshot and
+outcome summaries; original screenshots and exported files need separate retention.
+This is agent-assisted learning from runs, not passive recording of your desktop.
+See [workflow memory](skills/computer-artist/references/memory.md) for eligibility,
+updates, notes-only memories and guarded reuse.
+
+The [painting benchmark](docs/WORKFLOW-MEMORY-BENCHMARK.md) records two fresh Terra
+agents drawing the same KolourPaint scene: 53.9 seconds to discover/draw/learn,
+then 19.5 seconds to retrieve/reuse/verify. It is one paired workflow, with the
+starting conditions, retries, screenshots and timing limits recorded there.
+
+## Programs, controls and evidence
+
+Programs run with a hard deadline, shared request budget and input cleanup. They
+support conditions, loops, waits, paths, SVG path data, handoff and file checks.
+Explicitly authored, typed, versioned fragments remain available through
+`ca fragments`. Guarded pixel targets and layout maps remain optional tools;
+prefer accessibility roles/names when the app exposes usable controls. See
+[CLI programs](docs/PROGRAMS.md).
+
+Bind an exact live window with `ca set WINDOW_ID --name APP`. Rebind and observe
+again after reopening. Coordinates are logical content pixels on Linux, physical
+client pixels on Windows, and whole-window-frame points on macOS; convert screenshot
+pixels using the reported image and window dimensions. A dispatched action does
+not establish task completion, and a child's checks do not verify its parent task.
+`ca session close` removes the persistent drawn pen after native-desktop work.
 
 ```bash
 ca runs list
@@ -101,13 +104,34 @@ ca runs stop RUN_ID
 ca storage keep RUN_ID
 ```
 
-`window/layout/` holds maps, `window/api-fragmants/` holds reusable code, and
-`output/` holds bounded evidence. Five eligible runs are retained by default;
-active and preserved runs are protected. Save final documents outside rotating
-output. Programs have your user permissions; input separation is not a sandbox.
+In a checkout, `window/workflows/` holds durable memories, `window/api-fragmants/`
+holds versioned fragments, `window/layout/` holds window maps, and `output/` holds
+bounded run evidence. Private desktops share memories/fragments with the main
+workspace, but keep their own names, maps and run output. Five eligible runs rotate
+by default; active and preserved runs are protected. Save final documents outside
+rotating output. See [installation](docs/INSTALL.md) for installed-package paths
+and workspace overrides.
 
-`ca setup --codex` links the bundled agent skill. `ca update` pulls the checkout,
-rebuilds the plugin and swaps it into the running KWin; `ca update --check` only reports.
-Read [capabilities](docs/CAPABILITIES.md), [validation](docs/VALIDATION.md),
-[code structure](docs/CODE-STRUCTURE.md), [protocol](docs/PROTOCOL.md) or
-[contributing](CONTRIBUTING.md). [GPL-2.0-or-later](LICENSE).
+## Input boundaries
+
+On KDE, keep your pointer and keyboard focus outside the agent's target connection;
+returning revokes its control. Platform-specific takeover and compatibility limits
+are documented in the platform guides. The agent lane never falls back to moving
+your pointer or stealing focus. Explicit `--host` selects real desktop input;
+macOS `--host-drags` temporarily borrows your mouse for each drag and requires
+specific authorization. Neither is an automatic recovery path.
+
+Programs have your user permissions, and input separation is not a security
+sandbox. Private environments are test harnesses; the product goal remains
+independent input in applications on the user's actual desktop.
+
+## Documentation
+
+- [Capabilities and remaining work](docs/CAPABILITIES.md)
+- [Recorded validation](docs/VALIDATION.md) and [workflow-memory benchmark](docs/WORKFLOW-MEMORY-BENCHMARK.md)
+- [Code structure](docs/CODE-STRUCTURE.md) and [socket protocol](docs/PROTOCOL.md)
+- [Contributing](CONTRIBUTING.md) and [test scope](tests/README.md)
+
+On Linux, `ca update` can pull the checkout, rebuild and reload the KWin plugin;
+`ca update --check` reports the plan. Read the [update precautions](docs/INSTALL.md#updating)
+before changing a running compositor. [GPL-2.0-or-later](LICENSE).

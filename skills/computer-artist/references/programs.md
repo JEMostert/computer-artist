@@ -1,5 +1,10 @@
 # CLI programs
 
+Search [workflow memory](memory.md) before discovering a procedure again. Inspect
+the live app, then reuse a matching procedure or adapt its notes. The optional
+guarded-target/fragment example below is useful when named controls are unavailable;
+it is not a required setup step for every task.
+
 ```bash
 ca set ID --name APP
 ca observe --window APP
@@ -35,14 +40,16 @@ control discovery. Rebound guards require a fresh observation and explicit
 `ca target APP NAME --observation OBS --revalidate`; changed geometry/pixels need
 new regions. Never bypass a refused guard with copied coordinates.
 
-Independent keys use `ctx.press('Ctrl+S')` or paired `key_down`/`key_up` when the
-loaded plugin supports them. `ctx.write(text)` (CLI `ca write`) types text as physical
-keys resolved from the live layout with the agent's own Shift/AltGr; characters the
-layout cannot reach (dead keys, compose, IME) are refused before any key, so use host
-paste for those. `ctx.type` writes on the agent lane and pastes on the host lane.
-KWrite has a demonstrated workflow; verify other apps. Explicit host contexts use real
-focus. `ctx.paste(text, shortcut='Shift+Insert')` and `ctx.clipboard_get/set` are
-host-only; text caps at 8192 UTF-8 bytes.
+Linux/macOS independent keys use `ctx.press('Ctrl+S')` or paired `key_down`/`key_up`
+when supported by the backend and target. `ctx.write(text)` (CLI `ca write`) uses
+the live physical-key layout; unreachable characters (dead keys, compose, IME)
+are refused before input. Windows uses targeted control text insertion and a
+limited key set instead; see its platform guide. Host paste for otherwise
+unreachable text requires current-task authorization. `ctx.type` uses the agent
+text path on the agent lane and pastes on the host lane. Explicit host contexts
+use real focus. `ctx.paste(text, shortcut=None)` and `ctx.clipboard_get/set` are
+host-only; paste defaults to the backend's shortcut (Cmd+V on macOS, Shift+Insert
+on Linux/Windows) and caps text at 8192 UTF-8 bytes.
 
 When the app exposes accessibility (`ca a11y --window APP`; private environments
 enable it for Qt apps), prefer named controls over pixel maps:

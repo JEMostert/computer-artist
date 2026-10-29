@@ -38,8 +38,8 @@ exactly one guide and follow its steps; never mix them:
   macOS `--host-drags`, which borrows the real cursor for each drag.
 - For text use `ca type` / `ctx.type`. With `--host` and inside environments it
   pastes the whole text at once and then restores the previous clipboard; on the
-  Windows agent lane it inserts the whole text into the control; only the Linux
-  agent lane types keys (it has no private clipboard). Use `ca write` (key by key)
+  Windows agent lane it inserts the whole text into the control; Linux and macOS
+  agent lanes use physical keys (they have no private clipboard). Use `ca write` (key by key)
   only when an application rejects paste.
 - Dispatch, a screenshot or a child's passing checks do not verify the outer task.
   Read back text, snapshot files before saving and check them with
@@ -86,5 +86,6 @@ for learning, adaptation and timing.
   recorder when one is available, and on the user's desktop only with permission.
   Do not loop captures: each one costs the compositor and can stall the desktop.
 
-Programs, fragments, observation, handoff and evidence work the same everywhere:
-see [programs](references/programs.md) and [environments](references/environments.md).
+The shared program, fragment, memory, handoff and evidence interfaces retain each
+backend's input limits. See [programs](references/programs.md) and
+[environments](references/environments.md).

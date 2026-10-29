@@ -21,7 +21,7 @@ equivalent to root on the host; prefer rootless Podman or rootless Docker.
 usable runtime is installed, `ca env start` says so: tell the user which runtime
 this operating system needs, and stop.
 
-## Recipes
+## Recipes (Linux host/container backend)
 
 A TOML (or JSON) recipe is the reusable definition. Relative paths follow the file.
 
@@ -60,8 +60,10 @@ at once and restores the previous plain-text clipboard.
 - Without a window wait, exec reports whether the process is alive after a second.
 - `--wait` runs a command to completion and returns its status and output tail.
 - `ca env logs NAME` lists `kwin`, `build`, `container` and this session's `a1`, `a2`…
-- Names and layout maps are per environment; fragments are shared with your main
-  workspace. Run evidence goes to the environment's output folder.
+- Names and layout maps are per environment; fragments and workflow memories are
+  shared with your main workspace. Run evidence goes to the environment's output
+  folder. Keep `--environment NAME` on `memory learn` to select the correct run
+  output; removing an environment leaves the shared library intact.
 
 ## Browsers
 
@@ -76,7 +78,9 @@ Environments start the AT-SPI registry and set `QT_LINUX_ACCESSIBILITY_ALWAYS_ON
 for their apps (`status.accessibility`). `ca --environment TASK a11y --window APP`
 then lists roles, names, states, text and window-content centers from the private
 bus; programs use `ctx.find`/`ctx.click(element=...)`. Verified for a Qt6 app on
-11 October 2026; GTK, browsers and container apps are untested. Remove reports
+11 October 2026 and in a macOS Linux box on 15 October (see the
+[platform evidence](../../../docs/validation/2026-10-15-macos.json)); GTK and
+browser accessibility trees remain unverified. Remove reports
 `running: null` when the manager does not answer and refuses to delete until the
 environment is known to be stopped.
 
@@ -115,4 +119,6 @@ use box paths (`/project/...`). The box contains KWrite, Konsole and Firefox;
 install extra apps with a recipe `containerfile` that starts with `ARG BOX_IMAGE`
 and `FROM ${BOX_IMAGE}`. Plain `--image`, `--gpu` and `exec --on-host` are not
 supported in a box. Default lane, names, layouts, fragments and evidence behave as
-above.
+above, including the shared workflow-memory library. The Linux recipe example
+above needs adapting for boxes: omit `image` and `gpu`, use `/project` inside app
+commands, and extend the base image through `ARG BOX_IMAGE` / `FROM ${BOX_IMAGE}`.

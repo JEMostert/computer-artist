@@ -1,8 +1,10 @@
 # Validation
 
 Source, recorded workflow evidence and the loaded host plugin are separate. Python
-tests do not prove desktop compatibility. This simplification does not deploy or
-reload the host plugin; inspect its actual build with `ca capabilities`.
+tests do not prove desktop compatibility. The dated records below establish only
+the revisions, applications and environments they exercised; inspect the running
+plugin's actual build with `ca capabilities`. Native platform evidence is recorded
+separately in [Windows](WINDOWS.md) and [macOS](MACOS.md).
 
 On 4 October 2026, 222 Python tests and all separate-KWin suites, now including a
 Qt menu popup check, passed with the rebuilt plugin. Private environments were
@@ -29,10 +31,18 @@ and scroll code were not run; see [Windows](WINDOWS.md).
 On 19 October 2026, an isolated baseline reproduced the popup teardown crash;
 the fixed build passed the nested-popup lifetime regression. See the
 [crash finding and regression record](validation/2026-10-19-popup-lifetime.md).
-The live host plugin remains unchanged.
+That validation did not change the live host plugin.
+
+On 29 October 2026, two fresh Terra agents completed the same KolourPaint drawing
+in a private Linux box: the first discovered and learned the flow, and the second
+retrieved and reused it. The agent also checked mismatch refusal before input,
+automatic learning and preservation after an unverified run. See the
+[workflow-memory benchmark](WORKFLOW-MEMORY-BENCHMARK.md) for the measured timings,
+screenshots, retries and limits. This does not verify native Windows/macOS reuse
+or automatic adaptation to changed interfaces.
 
 Earlier records (29–30 September 2026: KolourPaint, scrcpy, KWrite and the
-removed HTML export) live in git history before this branch; they prove those
+removed HTML export) live in git history for those revisions; they prove those
 revisions, not current source.
 
 Fresh checks: `scripts/check.sh`, Python unittest discovery and

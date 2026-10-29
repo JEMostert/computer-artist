@@ -9,8 +9,9 @@ instructions below apply to Linux only.
 
 Requires Python 3.12+, Pillow, jeepney, KDE Wayland and matching installed KWin
 development headers. Accessibility reading needs `at-spi2-core`. Installing Python
-does not deploy the plugin. Container environments (`ca env --image`) need Podman
-(rootless, preferred) or Docker; `ca env doctor NAME` checks the runtime.
+does not deploy the plugin. Container environments
+(`ca env start NAME --image IMAGE`) need Podman (rootless, preferred) or Docker;
+`ca env doctor NAME` checks the runtime.
 
 ```bash
 python -m venv .venv
@@ -59,19 +60,24 @@ From a checkout, `ca update` does the steps above safely:
 4. Replaces `computerartist.so` for later logins, deletes unloaded old versioned
    copies and runs `ca doctor`.
 
-`ca update --check` fetches and reports the planned actions without changing
-anything. Set `CA_KWIN_PLUGIN_DIR` if KWin plugins live outside `/usr/lib*/qt6`.
+`ca update --check` fetches Git refs and reports the planned actions without
+changing the checkout or running plugin. Set `CA_KWIN_PLUGIN_DIR` if KWin plugins
+live outside `/usr/lib*/qt6`.
 A crash in a newly loaded plugin takes KWin down with it; run `scripts/test.sh
 --integration` first when plugin sources changed.
 
 Socket: `$XDG_RUNTIME_DIR/computer-artist/control`, overridden by `--socket` or
 `CA_SOCKET`. `ca doctor` checks both lanes without input or sessions.
-`ca setup --codex` links the skill into `~/.agents/skills`; `--skills-dir PATH`
-selects another location. Keep the linked source in place.
+`ca setup --codex` links the skill into `~/.agents/skills` on Linux/macOS;
+`--skills-dir PATH` selects another location. Keep the linked source in place.
+Windows uses a managed copy; re-run setup to update it (manual edits are preserved).
 
 A checkout uses `window/` and `output/`. Wheels use
 `$XDG_DATA_HOME/computer-artist/window` and `$XDG_STATE_HOME/computer-artist/output`
 (defaults under `~/.local/share` and `~/.local/state`). Override with
-`--window-dir`/`CA_WINDOW_DIR` and `--output-dir`/`CA_OUTPUT_DIR`. Back up the window root.
+`--window-dir`/`CA_WINDOW_DIR` and `--output-dir`/`CA_OUTPUT_DIR`. The window root
+contains durable `workflows/` memories and versioned `api-fragmants/`, alongside
+window names/maps; back up this root. Memory source and outcome summaries survive
+run cleanup, but referenced images and exports are not copied automatically.
 Build with `pip wheel . --wheel-dir dist`; offline install uses
 `pip install --no-index --find-links dist computer-artist` with dependencies present.

@@ -29,7 +29,9 @@ For a new or adapted workflow, pass `--remember NAME --task "TASK" --app "APP"`
 and `--notes "PROCEDURE"` to `ca execute` to learn automatically after its checks
 pass. A verified run updates an existing memory of that name; a failed or
 unverified attempt leaves the previous procedure intact. Inspect the returned
-`memory` or `memory_error` field. Automatic learning still requires the agent to
+`memory` or `memory_error` field, including `memory.executable`. A successful
+verified run can still produce a notes-only memory if its source or initial-window
+evidence is unsuitable for reuse. Automatic learning still requires the agent to
 inspect the actual result before relying on the memory in future work.
 
 Memories store a durable copy of the procedure and evidence summaries so rotating
@@ -39,10 +41,19 @@ Use `ca memory list` to inspect the library and `ca memory forget NAME` to remov
 an obsolete memory. `learn --update` revises an existing memory from a new run.
 Non-successful runs can be learned as notes, but have no executable fast path.
 Runs recorded before initial-window evidence was added are also notes-only.
+Executable reuse requires valid source, known verified success, an initial title,
+dimensions and usable application identity, and no literal reference to the
+original window ID in the source. `memory show` exposes the eligibility result;
+adapt the procedure and learn a new successful run when it cannot be executed.
 Stored programs that call other fragments still need those fragments available;
 prefer a standalone procedure when teaching a reusable flow.
 Notes and stored programs are local data with the same user
 permissions as other Computer Artist programs. Review imported memories before use.
+They live in `workflows/` under the main window root (shared with private desktops).
+Each update replaces the current procedure and increments its revision counter;
+it does not retain restorable old source versions. The latest twenty supervised reuse
+attempts retain their run IDs, statuses and execution durations. Use versioned
+fragments when immutable procedure history/restore is needed.
 
 ## Guarded reuse
 

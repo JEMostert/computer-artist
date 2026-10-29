@@ -20,7 +20,7 @@ Add `.venv\Scripts` to this terminal's PATH, or call its `ca.exe` explicitly.
 The skill is discovered on the next agent turn. Setup uses managed copies without
 symlink privileges and refuses to overwrite manually edited or unrelated skills.
 The bundled skill asks the agent to detect the operating system first and then
-follows the Linux or Windows guide only.
+follows the guide for the detected platform only.
 
 ## Implemented behavior
 
@@ -44,6 +44,7 @@ verified on Windows.
 | Monitor scope | `--monitor DEVICE_OR_EDID` or `CA_WINDOWS_MONITOR` restricts capture, input and placement | Verified 13 Oct |
 | Private environments | One Linux box container per environment (`containers/linux-box`) in Docker Desktop; commands run inside it with path translation | Box verified on Linux with Podman and the Docker CLI; Docker Desktop on Windows unverified |
 | Programs | Conditional programs, fragments, file/outcome checks, bounded evidence, job deadlines and descendant cleanup | Verified 13 Oct |
+| Workflow memory | Shared local task/app search, learned source/notes and guarded reuse through the program runtime | Implemented; native Windows reuse unverified; private Linux painting benchmark recorded separately |
 
 The agent lane is not a second keyboard or pointer. Applications that read raw
 input, the cursor position or draw their own canvas cannot be driven by it, and
@@ -55,6 +56,10 @@ and app-created activation can restrict control. Focus moving into the agent's
 target process (by the human or by the app itself) stops the lease. Input
 separation is not a security sandbox.
 
+Input coordinates are physical client-area pixels, including on mixed-DPI
+displays. Use the reported capture/window dimensions and keep monitor selection
+consistent across commands.
+
 ## Private environments (Linux boxes)
 
 `ca env start NAME [--project DIR] [--recipe FILE]` builds the box image from this
@@ -65,11 +70,15 @@ as on Linux. Every `ca --environment NAME ...` and `ca env exec/logs/browser NAM
 command runs inside the box with `exec`. Host paths in arguments are translated to
 box paths and box paths in replies back to Windows paths; a path outside the
 project, the mounts and the environment folder is refused. State lives in
-`%LOCALAPPDATA%\computer-artist\environments\NAME`; fragments are shared through
+`%LOCALAPPDATA%\computer-artist\environments\NAME`; fragments and workflow memories are shared through
 the window folder. The box contains KWrite, Konsole and Firefox; recipes add more
 with a containerfile starting `ARG BOX_IMAGE` / `FROM ${BOX_IMAGE}`. Selecting
 Podman is refused on Windows. The same path can be exercised on Linux with
 `CA_ENVIRONMENT_BACKEND=box` (Docker or Podman).
+
+See [workflow memory](../skills/computer-artist/references/memory.md) for learning
+and retrieving procedures. Keep `--environment NAME` when learning from a box's
+run evidence; the shared library survives that environment's removal.
 
 To check on Windows (not done yet): Docker Desktop bind mounts of
 `%LOCALAPPDATA%` (file locks and permissions), build time, KWin software rendering
