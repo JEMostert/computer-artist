@@ -71,7 +71,9 @@ After timing, the second agent also exercised a short
 
 The private environment was stopped, and the local workflow library was retained.
 Lint, formatting and wheel packaging passed. No new unit tests or broad local
-suite runs were added for this hobby feature; existing CI remains the merge gate.
+suite runs were added for this hobby feature; existing CI remains the merge gate. Its pre-existing asynchronous export test
+needed a wider stability window after two macOS scheduling races; production
+export behavior was unchanged.
 
 Cross-reviewed: 3 rounds with GPT-6.1 Terra. Verdict: APPROVE. C1 (native app
 identity missing from the reuse guard) was fixed; subsequent rounds approved it
