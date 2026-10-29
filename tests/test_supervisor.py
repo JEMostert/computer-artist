@@ -84,7 +84,9 @@ class SupervisorTest(unittest.TestCase):
             'def run(ctx):\n'
             '    ctx.observe()\n'
             '    ctx.verify("frame observed", True, evidence={"stage": "before loop"})\n'
-            '    while True: pass\n'
+            '    while True: pass\n',
+            # Include worker startup and a checkpoint on slow CI runners.
+            deadline=1,
         )
         self.assertFalse(result['ok'])
         self.assertEqual(result['status'], 'interrupted')

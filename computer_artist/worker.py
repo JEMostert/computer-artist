@@ -77,7 +77,8 @@ def main(folder):
             ctx = Context(
                 client, spec['window'], Workspace(spec['window_root'], spec['output_root'], folder)
             )
-            result['initial_window'] = ctx.window
+            # Context already refreshed this window during construction.
+            result['initial_window'] = dict(ctx.baseline)
             journal = Journal(folder, ctx)
             journal.start()
             with redirect_stdout(sys.stderr):
