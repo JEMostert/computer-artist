@@ -29,7 +29,7 @@ packages = ["computer_artist"]
 
 [tool.setuptools.data-files]
 "share/computer-artist/skills/computer-artist" = ["skills/computer-artist/SKILL.md"]
-"share/computer-artist/skills/computer-artist/references" = ["skills/computer-artist/references/programs.md", "skills/computer-artist/references/pointer-techniques.md", "skills/computer-artist/references/operating-tips.md", "skills/computer-artist/references/environments.md", "skills/computer-artist/references/windows.md", "skills/computer-artist/references/linux.md", "skills/computer-artist/references/macos.md"]
+"share/computer-artist/skills/computer-artist/references" = ["skills/computer-artist/references/programs.md", "skills/computer-artist/references/memory.md", "skills/computer-artist/references/pointer-techniques.md", "skills/computer-artist/references/operating-tips.md", "skills/computer-artist/references/environments.md", "skills/computer-artist/references/windows.md", "skills/computer-artist/references/linux.md", "skills/computer-artist/references/macos.md"]
 
 [tool.ruff]
 target-version = "py312"

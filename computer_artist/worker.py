@@ -1,6 +1,7 @@
 """One execution process; its supervisor enforces a wall-clock deadline."""
 
 import json
+import math
 import os
 import sys
 from contextlib import redirect_stdout
@@ -76,15 +77,34 @@ def main(folder):
             ctx = Context(
                 client, spec['window'], Workspace(spec['window_root'], spec['output_root'], folder)
             )
+            result['initial_window'] = ctx.window
             journal = Journal(folder, ctx)
             journal.start()
             with redirect_stdout(sys.stderr):
+                if 'memory_window' in spec:
+                    observation = ctx.observe()
+                    window = observation['window']
+                    expected = spec['memory_window']
+                    fields = ('title', 'app_id', 'resource_class', 'class')
+                    same_size = all(
+                        math.isclose(window[k], expected[k], rel_tol=0, abs_tol=1e-6)
+                        for k in ('width', 'height')
+                    )
+                    if (
+                        not any(expected.get(k) for k in ('app_id', 'resource_class', 'class'))
+                        or not same_size
+                        or any(window.get(k) != expected.get(k) for k in fields)
+                    ):
+                        raise ValueError(
+                            'Memory window mismatch; inspect current UI and adapt with execute. Notes: '
+                            + spec.get('memory_notes', '')
+                        )
                 if 'module' in spec:
                     value = ctx.call(spec['module'], spec['arguments'], version=spec['version'])
                     status = ctx.last_call['status']
                 else:
                     info = contract(spec['source'])
-                    arguments = prepare(ctx, info, {})
+                    arguments = prepare(ctx, info, spec.get('arguments', {}))
                     value, status = evaluate(
                         ctx, spec['source'], arguments, filename='<ca execute>'
                     )

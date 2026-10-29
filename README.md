@@ -78,9 +78,17 @@ def run(ctx):
 PY
 ```
 
+Search `ca memory search "TASK"` before discovering a workflow again. Learn a
+completed run with `ca memory learn NAME --run RUN_ID --task "TASK" --app "APP"`
+and reuse it with `ca memory run NAME --window paint`. Memories retain task
+instructions, the procedure and outcome evidence beyond temporary run cleanup.
+See [workflow memory](skills/computer-artist/references/memory.md).
+The [painting benchmark](docs/WORKFLOW-MEMORY-BENCHMARK.md) records two fresh agents:
+53.9 seconds to discover/learn, then 19.5 seconds to retrieve/reuse the same task.
+
 Use `ca fragments create NAME < code.py` and `ca fragments run NAME --window paint`
-for reusable, typed, versioned procedures. See the [CLI programs](docs/PROGRAMS.md)
-for guarded regions, conditions, gestures and file verification.
+for explicitly authored, typed, versioned procedures. See the
+[CLI programs](docs/PROGRAMS.md) for conditions, gestures and file verification.
 
 An input reply means dispatched. A returned program is unverified until its own
 named checks pass. A child fragment's checks do not verify its parent task.

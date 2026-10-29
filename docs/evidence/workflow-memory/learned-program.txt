@@ -1,0 +1,24 @@
+def run(ctx):
+    before = ctx.observe()
+    # Closed outlines followed by flood fills; palette coordinates are window-relative.
+    def tool(name):
+        ctx.click(x={'Rectangle':57, 'Line':23, 'Flood Fill':23, 'Ellipse':57}[name], y={'Rectangle':303, 'Line':167, 'Flood Fill':235, 'Ellipse':337}[name])
+    def color(x):
+        ctx.click(x=x, y=404)
+    def fill(x,y):
+        tool('Flood Fill'); ctx.click(x=x,y=y)
+    # Orange house walls
+    color(296); tool('Rectangle'); ctx.drag(start=(190,220), end=(335,330)); fill(220,260)
+    # Red triangular roof, closed with three lines
+    color(270); tool('Line'); ctx.drag(start=(175,220), end=(262,145)); ctx.drag(start=(262,145), end=(350,220)); ctx.drag(start=(350,220), end=(175,220)); fill(260,195)
+    # Blue door
+    color(400); tool('Rectangle'); ctx.drag(start=(245,270), end=(280,329)); fill(260,290)
+    # Sun
+    color(322); tool('Ellipse'); ctx.drag(start=(106,96), end=(155,145)); fill(130,120)
+    # Tree trunk brown from lower palette
+    ctx.click(x=296,y=430); tool('Rectangle'); ctx.drag(start=(395,260), end=(410,330)); fill(402,290)
+    # green crown
+    color(348); tool('Ellipse'); ctx.drag(start=(365,195), end=(440,275)); fill(400,230)
+    after = ctx.observe(since=before['id'])
+    ctx.verify('composition changed blank canvas', after['changes']['pixels_changed'] is True, evidence={'changes': after['changes'], 'observation': after['id'], 'features': 'roof, house, door, sun, tree drawn with shapes and fill'})
+    return after

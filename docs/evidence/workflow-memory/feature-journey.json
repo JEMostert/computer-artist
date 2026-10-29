@@ -1,0 +1,33 @@
+{
+  "guard": {
+    "run_id": "2026-10-29_13-01-12-537546Z-093ead",
+    "error_type": "ValueError",
+    "error": "Memory window mismatch",
+    "trace_successful_input_replies": 0
+  },
+  "chimney": {
+    "run_id": "2026-10-29_13-01-21-163850Z-de226b",
+    "status": "verified",
+    "memory": {
+      "name": "house-chimney",
+      "executable": true,
+      "revision": 1
+    },
+    "visual_observation": "Thin brown vertical stroke extends above left roof slope",
+    "screenshot": "chimney.png"
+  },
+  "search_found_house_chimney": true,
+  "unverified": {
+    "run_id": "2026-10-29_13-01-30-207625Z-c3bc34",
+    "status": "returned_unverified",
+    "memory_error": "Only a verified successful run updates workflow memory",
+    "revision_before": 1,
+    "revision_after": 1,
+    "source_unchanged": true,
+    "sha256_unchanged": true
+  },
+  "environment": {
+    "name": "ca-memory-paint",
+    "running": false
+  }
+}

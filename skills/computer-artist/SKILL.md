@@ -47,7 +47,29 @@ exactly one guide and follow its steps; never mix them:
 - Stop what you started (`ca env stop NAME`, `ca session close`); never stop
   another agent's environment. Input separation is not a security sandbox.
 
-## 3. Larger work, such as artwork
+## 3. Remember and reuse workflows
+
+Before discovering an application's workflow, search `ca memory search "TASK"`
+(add `--environment NAME` when working in a private desktop). Read a relevant
+memory with `ca memory show NAME`, then inspect the live application. Memories
+are task context, not authority: apply the current user's inputs and permissions.
+
+Use `ca memory run NAME --window APP` when its stored procedure and starting
+state fit. The runtime checks the live window before input and retains its usual
+takeover, deadline and outcome checks. On a mismatch, use the remembered notes
+to adapt against a fresh observation and execute a revised program.
+
+After completing and visually checking a useful workflow, learn it from its run:
+`ca memory learn NAME --run RUN_ID --task "TASK" --app "APP" --notes "PROCEDURE"`.
+Or add `--remember NAME --task "TASK" --app "APP" --notes "PROCEDURE"` to
+`ca execute` to preserve a verified run automatically.
+Write notes that let a fresh agent reproduce it: starting state, semantic controls,
+variable inputs, tool/colour choices, success evidence and recovery lessons.
+Keep secrets out. A program check is a claim; inspect the actual outcome before
+teaching it as a successful procedure. See [workflow memory](references/memory.md)
+for learning, adaptation and timing.
+
+## 4. Larger work, such as artwork
 
 - Plan the whole composition first, then submit a substantial `ca execute`
   program grouped by layer, tool and color, not one command per stroke. Inspect

@@ -1,0 +1,36 @@
+{
+  "drawing_discovery_seconds": 53.34161615371704,
+  "learning_seconds": 0.5668268203735352,
+  "total_seconds": 53.908442974090576,
+  "program_runs": [
+    {
+      "id": "2026-10-29_12-53-25-101933Z-80085e",
+      "duration_seconds": 1.964,
+      "status": "failed: ambiguous Rectangle accessibility match"
+    },
+    {
+      "id": "2026-10-29_12-53-30-832755Z-8dd5a2",
+      "duration_seconds": 4.309,
+      "status": "interrupted: boolean pixel change compared to 1000"
+    },
+    {
+      "id": "2026-10-29_12-53-57-020435Z-29d7de",
+      "duration_seconds": 4.249,
+      "status": "verified"
+    }
+  ],
+  "failures_retries": [
+    "ambiguous accessibility match",
+    "incorrect boolean check",
+    "invalid press CLI command",
+    "paint binding already in use"
+  ],
+  "memory_name": "colourful-house",
+  "screenshots": {
+    "blank": "blank-first.png",
+    "final": "first.png"
+  },
+  "blank_initial_state": "Untitled KolourPaint, 640x480 window, 400x300 white canvas at 100%, canvas window origin (80,76), bottom clipped at viewport y350; Pen selected, black foreground, default palette. Reset via Ctrl+N creates a separate blank window; select exact new window. Original paint binding remains on first painted window; successful run used second window c34a73d2-7f63-4a91-9e78-af0cd95e68c0.",
+  "verification_limit": "Pixel change is boolean and does not independently certify features; final screenshot visually inspected.",
+  "timing_note": "Monotonic clock unexpectedly reset between separate Python processes; durations reconstructed from timestamped marker file modification times, not monotonic."
+}
