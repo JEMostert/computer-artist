@@ -31,6 +31,9 @@ class WatchTest(unittest.TestCase):
         self.events = []
 
     def test_changes_only_stream_and_record_never_acquire(self):
+        # Allow slow CI captures to reach an unchanged third frame.
+        self.args.duration = 1
+
         def emit(event):
             self.events.append(event)
             if event.get('sequence') == 1:

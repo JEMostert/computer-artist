@@ -5,7 +5,12 @@ Inspect `ca capabilities`, `ca windows` and a fresh `ca observe --window APP` im
 Reopening requires explicit rebind and fresh mapping. Coordinates are logical
 window-content pixels; convert screenshot pixels using the capture/window sizes.
 
-Map stable controls: `ca target APP NAME --observation OBS --rect X Y W H`.
+Search remembered workflows first: `ca memory search "TASK"`. See
+[workflow memory](../skills/computer-artist/references/memory.md) for learning a
+completed run and reusing it against a fresh live window.
+
+When semantic controls are unavailable, optionally map stable controls:
+`ca target APP NAME --observation OBS --rect X Y W H`.
 Use `ctx.click(target='@NAME')`; guards recheck exact ID, geometry and pixels.
 After a rebind, `--revalidate` adopts an unchanged guard from a fresh observation.
 Changed pixels/geometry need a new `--rect`. Map changing canvases by geometry,

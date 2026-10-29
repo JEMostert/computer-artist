@@ -451,7 +451,10 @@ def route_environment(args, explicit_lane):
 def main(argv=None):
     argument_parser = parser()
     args, extra = argument_parser.parse_known_args(argv)
-    if extra and not (args.command == 'fragments' and args.fragment_action == 'run'):
+    if extra and not (
+        (args.command == 'fragments' and args.fragment_action == 'run')
+        or (args.command == 'memory' and args.memory_action == 'run')
+    ):
         argument_parser.error('unrecognized arguments: ' + ' '.join(extra))
     explicit_lane = 'lane' in vars(args)
     for name, default in (
@@ -572,7 +575,8 @@ def main(argv=None):
             print(json.dumps(reply, indent=2))
             return 0
         if args.command in ('execute', 'draw') or (
-            args.command == 'fragments' and args.fragment_action == 'run'
+            (args.command == 'fragments' and args.fragment_action == 'run')
+            or (args.command == 'memory' and args.memory_action == 'run')
         ):
             reply = run_program(args, extra, socket_path(args.socket))
             print(json.dumps(reply, indent=2))

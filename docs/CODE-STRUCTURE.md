@@ -15,6 +15,7 @@ supervised worker path. There is no web interface or legacy `main(client)` runne
 | Read-only AT-SPI accessibility trees | `accessibility` |
 | File checks and JSON inspection | `artifacts`, `records` |
 | Names, fragments, retention, files | `workspace`, `fragments`, `storage`, `files` |
+| Learned tasks, retrieval, guarded procedure snapshots | `workflows` |
 | Private environments: definitions/lifecycle, apps/browsers, service, CLI | `environments`, `environment_apps`, `environment_service`, `environment_commands` |
 | Geometry, keys, configuration/setup | `gestures`, `input`, `config`, `diagnostics`, `setup`, `update`, `errors` |
 

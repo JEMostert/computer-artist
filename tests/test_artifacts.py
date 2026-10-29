@@ -40,7 +40,17 @@ class ArtifactsTest(unittest.TestCase):
         writer = threading.Thread(target=export)
         writer.start()
         try:
-            result = self.wait(kind='json', after=baseline, expected_json={'finished': True})
+            # Allow scheduler delays between the partial write and atomic publish;
+            # 10 ms stability versus an 8 ms writer pause races on macOS runners.
+            result = wait_for_file(
+                self.path,
+                timeout=1,
+                stable_for=0.1,
+                interval=0.01,
+                kind='json',
+                after=baseline,
+                expected_json={'finished': True},
+            )
         finally:
             writer.join()
         self.assertTrue(result['passed'], result)

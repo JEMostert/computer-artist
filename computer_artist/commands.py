@@ -53,6 +53,31 @@ def add_commands(commands, shared):
         'execute', parents=[shared], help='Run stdin Python defining run(ctx), with a hard deadline'
     )
     execute.add_argument('--window', required=True)
+    execute.add_argument('--remember', metavar='NAME', help='Learn this verified run as a workflow')
+    execute.add_argument('--task', default='', help='Intent to retain with --remember')
+    execute.add_argument('--app', default='', help='Application to retain with --remember')
+    execute.add_argument(
+        '--notes', default='', help='Semantic procedure and lessons for --remember'
+    )
+    memory = commands.add_parser(
+        'memory', parents=[shared], help='Learn and reuse workflow memories'
+    )
+    memories = memory.add_subparsers(dest='memory_action', required=True)
+    for action in ('learn', 'search', 'show', 'list', 'run', 'forget'):
+        cmd = memories.add_parser(action, parents=[shared])
+        if action not in ('list',):
+            cmd.add_argument('name' if action != 'search' else 'query')
+        if action == 'learn':
+            cmd.add_argument('--run', required=True)
+            cmd.add_argument('--task', required=True)
+            cmd.add_argument('--app', required=True)
+            cmd.add_argument('--notes', default='')
+            cmd.add_argument('--update', action='store_true', help='Replace a learned procedure')
+        if action == 'search':
+            cmd.add_argument('--app')
+        if action == 'run':
+            cmd.add_argument('--window', required=True)
+            cmd.add_argument('--args', default='{}')
     store = commands.add_parser('fragments', parents=[shared], help='Small reusable Python modules')
     actions = store.add_subparsers(dest='fragment_action', required=True)
     for action in (
@@ -154,6 +179,26 @@ def local_command(args):
             return {'ok': True, **request_stop(store.output, args.id)}
         dossier = inspect_run(store.output, args.id)
         return {'ok': True, **({'result': dossier['result']} if args.action == 'show' else dossier)}
+    if args.command == 'memory':
+        from .workflows import WorkflowStore
+
+        memories = WorkflowStore(os.environ.get('CA_FRAGMENT_ROOT') or store.root)
+        action = args.memory_action
+        if action == 'run':
+            return None
+        if action == 'learn':
+            result = memories.learn(
+                args.name, args.run, args.task, args.app, args.notes, store, update=args.update
+            )
+        elif action == 'search':
+            result = memories.search(args.query, args.app)
+        elif action == 'show':
+            result = memories.load(args.name)
+        elif action == 'list':
+            result = memories.list()
+        else:
+            result = memories.forget(args.name)
+        return {'ok': True, 'result': result}
     if args.command != 'fragments' or args.fragment_action == 'run':
         return None
     action = args.fragment_action
@@ -176,6 +221,12 @@ def local_command(args):
 
 
 def run_program(args, extra, socket_path):
+    if (
+        args.command == 'execute'
+        and args.remember
+        and (not args.task.strip() or not args.app.strip())
+    ):
+        raise ValueError('--remember requires nonempty --task and --app')
     store = Workspace(args.window_dir, args.output_dir)
     spec = {
         'socket': socket_path,
@@ -215,6 +266,22 @@ def run_program(args, extra, socket_path):
             + '    return result\n'
         )
         spec.update(source=source, arguments={}, kind='draw')
+    elif args.command == 'memory':
+        from .workflows import WorkflowStore
+
+        memories = WorkflowStore(os.environ.get('CA_FRAGMENT_ROOT') or store.root)
+        memory = memories.load(args.name)
+        if not memory.get('executable'):
+            raise ValueError(
+                'Memory has no verified executable fast path. Notes: ' + memory['notes']
+            )
+        info = contract(memory['source'])
+        spec.update(
+            source=memory['source'],
+            arguments=arguments(info, args.args, extra),
+            memory_window=memory['window'],
+            memory_notes=memory['notes'],
+        )
     elif args.command == 'fragments':
         info, _ = store.fragments.load(args.name, args.version)
         spec.update(
@@ -225,4 +292,31 @@ def run_program(args, extra, socket_path):
         info = contract(source)
         bind(info, {})
         spec.update(source=source, arguments={})
-    return run_supervised(spec, trace=args.trace)
+    result = run_supervised(spec, trace=args.trace)
+    if args.command == 'memory':
+        memories.record(args.name, result)
+    elif args.command == 'execute' and args.remember:
+        from .workflows import WorkflowStore
+
+        memories = WorkflowStore(os.environ.get('CA_FRAGMENT_ROOT') or store.root)
+        if result.get('ok') and result.get('status') == 'verified':
+            try:
+                learned = memories.learn(
+                    args.remember,
+                    result['run_id'],
+                    args.task,
+                    args.app,
+                    args.notes,
+                    store,
+                    update=memories.path(args.remember).exists(),
+                )
+                result['memory'] = {
+                    'name': learned['name'],
+                    'executable': learned['executable'],
+                    'revision': learned['revision'],
+                }
+            except (OSError, ValueError) as error:
+                result['memory_error'] = str(error)
+        else:
+            result['memory_error'] = 'Only a verified successful run updates workflow memory'
+    return result

@@ -1,0 +1,23 @@
+{
+  "timing_method": "Host marker modification nanoseconds; wall time.time_ns in markers; search through visual inspection",
+  "total_seconds": 19.545401542,
+  "start_wall_ns": 1793278717973389000,
+  "end_wall_ns": 1793278737518790000,
+  "start_mtime_ns": 1793278717973580493,
+  "end_mtime_ns": 1793278737518982035,
+  "run_id": "2026-10-29_12-58-45-397749Z-45efba",
+  "run_duration_seconds": 4.345,
+  "retrieval_and_reuse_commands": [
+    ".venv/bin/python ca --environment ca-memory-paint memory search 'colorful house triangular red roof blue door yellow sun green tree' --app KolourPaint",
+    ".venv/bin/python ca --environment ca-memory-paint memory show colourful-house",
+    ".venv/bin/python ca --environment ca-memory-paint observe --window paint-second",
+    ".venv/bin/python ca --environment ca-memory-paint memory run colourful-house --window paint-second"
+  ],
+  "memory_fast_path": true,
+  "failures": [
+    "Report creation initially failed after timer stopped due to Python boolean typo; corrected."
+  ],
+  "painting_retries": 0,
+  "visual_observations": "White canvas, orange house, triangular red roof, blue door, yellow sun, green tree crown and brown trunk. Artwork fully visible; lower canvas edge below viewport.",
+  "verification_limit": "Program check establishes pixel change only; visual inspection establishes requested features."
+}

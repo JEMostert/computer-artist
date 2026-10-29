@@ -31,6 +31,7 @@ that goal. Separate KWin instances are development test harnesses.
 | Handoff | Release and yield with evidence; inspect candidates and continue in a fresh run |
 | Verified outcomes | Invocation-owned checks and stable, optionally fresh file/text/JSON/image/hash checks |
 | Reusable work | Typed fragments, contracts, immutable versions, nested calls and explicit restore |
+| Workflow memory | Local task/app search, semantic notes, durable learned program/evidence summaries, guarded reuse and recent attempt timings; the calling agent teaches and verifies flows |
 | Diagnosis | Read-only doctor (including stale/mismatched plugin builds), refusal details, JSON inspection, checkpoints and targeted stop |
 
 Native pointer workflows were demonstrated in KolourPaint, Qt fixtures and scrcpy.
