@@ -157,7 +157,8 @@ def operate(args):
     tab = None
     if getattr(args, 'tab', None) is not None:
         wanted, tab = bridge.parse_tab(args.tab, args.instance)
-    instance = bridge.select_instance(bridge.live_instances(), wanted)
+    problems = []
+    instance = bridge.select_instance(bridge.live_instances(problems=problems), wanted, problems)
     request = {'op': action}
     if tab is not None:
         request['tab'] = tab
@@ -302,6 +303,8 @@ def install(args):
         'allowed_origins': [f'chrome-extension://{ident}/'],
     }
     results = []
+    if not args.remove and not args.dry_run:
+        bridge.private_dir(host_dir)
     for label, location in targets:
         if args.remove:
             action = remove_host(location, command, args.dry_run)
@@ -317,7 +320,6 @@ def install(args):
         return {'ok': True, 'action': 'remove', 'dry_run': args.dry_run, 'hosts': results,
                 'next': 'Remove the extension in chrome://extensions as well.'}  # fmt: skip
     if not args.dry_run:
-        bridge.private_dir(host_dir)
         for path, content in files.items():
             path.write_text(content, encoding='utf-8', newline='')
             if path == command and os.name != 'nt':
@@ -369,12 +371,14 @@ def remove_host(location, command, dry_run):
     if os.name == 'nt':
         import winreg
 
-        try:
-            if not dry_run:
-                winreg.DeleteKey(winreg.HKEY_CURRENT_USER, location)
-            return 'remove'
-        except FileNotFoundError:
+        path = registered_manifest(location)
+        if path is None:
             return 'absent'
+        if not owned_manifest(path, command):
+            return 'kept_unowned'
+        if not dry_run:
+            winreg.DeleteKey(winreg.HKEY_CURRENT_USER, location)
+        return 'remove'
     path = Path(location)
     if not path.is_file():
         return 'absent'
@@ -383,6 +387,17 @@ def remove_host(location, command, dry_run):
     if not dry_run:
         path.unlink()
     return 'remove'
+
+
+def registered_manifest(location):
+    """Windows: the manifest path a browser's registry key names, or None."""
+    import winreg
+
+    try:
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, location) as key:
+            return Path(winreg.QueryValue(key, None))
+    except FileNotFoundError:
+        return None
 
 
 def copy_extension(destination):
@@ -456,13 +471,7 @@ def doctor():
     hosts = []
     for label, location in host_targets():
         if os.name == 'nt':
-            import winreg
-
-            try:
-                with winreg.OpenKey(winreg.HKEY_CURRENT_USER, location) as key:
-                    path = Path(winreg.QueryValue(key, None))
-            except FileNotFoundError:
-                path = None
+            path = registered_manifest(location)
         else:
             path = Path(location)
         ok = bool(path and path.is_file() and owned_manifest(path, command))

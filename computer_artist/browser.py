@@ -294,8 +294,12 @@ def live_instances(root=None, timeout=5.0, problems=None):
     return instances
 
 
-def select_instance(instances, wanted=None):
-    """Pick an instance by id or label; refuse ambiguity instead of guessing."""
+def select_instance(instances, wanted=None, unresolved=()):
+    """Pick an instance by id or label; refuse ambiguity instead of guessing.
+
+    ``unresolved`` lists hosts that exist but did not answer; while any remain,
+    only an explicit choice selects an instance.
+    """
     if wanted:
         matches = [i for i in instances if wanted in (i['instance'], i.get('label'))]
         if not matches:
@@ -303,6 +307,7 @@ def select_instance(instances, wanted=None):
                 'instance_unavailable',
                 f'No connected browser instance {wanted!r}',
                 instances=[summary(i) for i in instances],
+                unreachable=list(unresolved),
             )
         if len(matches) > 1:
             raise BrowserError(
@@ -311,6 +316,13 @@ def select_instance(instances, wanted=None):
                 instances=[summary(i) for i in matches],
             )
         return matches[0]
+    if unresolved:
+        raise BrowserError(
+            'ambiguous_instance',
+            'A browser instance is not answering; pass --instance or a full tab handle',
+            instances=[summary(i) for i in instances],
+            unreachable=list(unresolved),
+        )
     if not instances:
         raise BrowserError(
             'no_instances',

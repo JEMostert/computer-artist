@@ -23,6 +23,7 @@ PAGE = """<!doctype html>
 <ul id="notes"></ul>
 <p id="late">Ready for review</p>
 <a href="/other">Other page</a>
+<iframe id="frame" src="/other" width="320" height="120"></iframe>
 <script>
 const list = document.getElementById('notes');
 async function load() {

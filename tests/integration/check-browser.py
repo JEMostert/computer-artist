@@ -333,20 +333,28 @@ def main():
         shot = ca('screenshot', '--tab', existing['handle'], str(work / 'visible.png'), env=env)
         step('existing_tab_claim_and_screenshot', shot.get('ok') and shot['width'] > 0,
              size=[shot.get('width'), shot.get('height')], url=claimed['url'])  # fmt: skip
-        # The human clicks into the claimed page: the lease ends at once.
-        tools.call(
-            'Input.dispatchMouseEvent', type='mousePressed', x=5, y=5, button='left', clickCount=1
-        )
-        tools.call(
-            'Input.dispatchMouseEvent', type='mouseReleased', x=5, y=5, button='left', clickCount=1
-        )
-        tools.close()
+        # The human clicks inside the page's iframe: the lease ends at once.
+        frame = tools.call('Runtime.evaluate', returnByValue=True, expression=(
+            'JSON.stringify(document.getElementById("frame").getBoundingClientRect())'
+        ))['result']['value']  # fmt: skip
+        box = json.loads(frame)
+        x, y = box['x'] + 20, box['y'] + 20
+        for kind in ('mousePressed', 'mouseReleased'):
+            tools.call('Input.dispatchMouseEvent', type=kind, x=x, y=y, button='left', clickCount=1)
         time.sleep(0.5)
         status = ca('status', '--tab', existing['handle'], '--lease', claimed['lease'], env=env)
         refused = ca('click', '--tab', existing['handle'], '--lease', claimed['lease'], '--text',
                      'Add note', env=env)  # fmt: skip
-        step('human_input_revokes', status.get('stop_reason') == 'human_input'
+        step('human_input_in_iframe_revokes', status.get('stop_reason') == 'human_input'
              and refused.get('error') == 'ownership_revoked', status=status.get('stop_reason'))  # fmt: skip
+        # Claimed again, then the human types in the top document.
+        claimed = ca('claim', '--tab', existing['handle'], env=env, expect_ok=True)
+        tools.call('Input.dispatchKeyEvent', type='keyDown', key='a', text='a')
+        tools.call('Input.dispatchKeyEvent', type='keyUp', key='a')
+        tools.close()
+        time.sleep(0.5)
+        status = ca('status', '--tab', existing['handle'], '--lease', claimed['lease'], env=env)
+        step('human_key_revokes', status.get('stop_reason') == 'human_input')
 
         # Close a tab ca opened; refuse to close one it merely claimed.
         spare = ca('open', url + 'other', '--instance', 'alpha', env=env, expect_ok=True)

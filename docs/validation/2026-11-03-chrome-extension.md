@@ -9,7 +9,7 @@ user browser profile or keyring was touched.
 
 `tests/integration/check-browser.py` started a localhost notes fixture and two
 separate headless Chrome processes with the extension loaded. It then drove them
-only through `ca browser`. All 24 checks passed:
+only through `ca browser`. All 25 checks passed (rerun after cross-review fixes):
 
 - Scoped install; two instances discovered and labelled; an instance-less command
   refused as `ambiguous_instance`.
@@ -21,8 +21,10 @@ only through `ca browser`. All 24 checks passed:
   `tab_claimed`, `wrong_instance`, `target_unavailable`, and `tab_not_visible` for
   a background screenshot.
 - An existing active tab was claimed and captured (780×437 PNG).
-- Trusted DevTools input standing in for the human revoked the lease
-  (`human_input`), and the next click was refused with `ownership_revoked`.
+- Trusted DevTools input standing in for the human revoked the lease: first a
+  click inside the page's iframe, and after a fresh claim a keypress in the top
+  document (`human_input`). The click after revocation was refused with
+  `ownership_revoked`.
   Activating the agent's tab revoked its lease (`human_activated_tab`).
 - After the native host was killed with SIGKILL, requests failed with
   `instance_unavailable`. The extension then started a new host (new PID), and the

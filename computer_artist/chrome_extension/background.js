@@ -221,29 +221,13 @@ async function requireLease(tabId, lease) {
   return claim;
 }
 
-function installHumanWatch() {
-  // Runs in the extension's isolated world of the claimed page.
-  if (globalThis.__caHumanWatch) return true;
-  globalThis.__caHumanWatch = true;
-  const report = (event) => {
-    if (!event.isTrusted) return;
-    try {
-      chrome.runtime.sendMessage({ type: 'ca-human-input', kind: event.type }).catch(() => {});
-    } catch (error) {
-      // The extension was reloaded; this page's watcher is orphaned.
-    }
-  };
-  for (const type of ['pointerdown', 'keydown', 'wheel', 'touchstart']) {
-    addEventListener(type, report, { capture: true, passive: true });
-  }
-  return true;
-}
-
 async function watchTab(tabId) {
+  // watch.js runs in new documents by itself; this covers documents that were
+  // open before the extension loaded. It is idempotent per document.
   await chrome.scripting.executeScript({
-    target: { tabId },
+    target: { tabId, allFrames: true },
     world: 'ISOLATED',
-    func: installHumanWatch,
+    files: ['watch.js'],
   });
 }
 
@@ -271,13 +255,6 @@ chrome.tabs.onActivated.addListener(({ tabId }) => {
   // ca never activates tabs, so an activation hands the tab to the human.
   state().then((current) => {
     if (current.claims[tabId]) endClaim(tabId, 'human_activated_tab');
-  });
-});
-
-chrome.tabs.onUpdated.addListener((tabId, change) => {
-  if (change.status !== 'complete') return;
-  state().then((current) => {
-    if (current.claims[tabId]) watchTab(tabId).catch(() => {});
   });
 });
 
@@ -494,8 +471,17 @@ async function handle(request) {
         await chrome.tabs.remove(tab.id).catch(() => {});
         throw error;
       }
+      const now = await getTab(tab.id);
+      if (now.active) {
+        // The human switched to the new tab while it loaded: it is theirs now.
+        await endClaim(tab.id, 'human_activated_tab');
+        throw new Refusal('ownership_revoked', `You switched to tab ${tab.id} while it opened; ca left it to you`, {
+          stop_reason: 'human_activated_tab',
+          tab: tab.id,
+        });
+      }
       await groupOpenedTab(tab);
-      return { lease: claim.lease, loaded, ...(await describeTab(await getTab(tab.id))) };
+      return { lease: claim.lease, loaded, ...(await describeTab(now)) };
     }
     case 'claim': {
       const tab = await getTab(tabId);
@@ -783,7 +769,7 @@ function pageAction(request) {
   try {
     if (request.op === 'read') {
       let root = document.body || document.documentElement;
-      if (request.selector || request.ref || request.text) {
+      if (request.selector || request.ref || request.text || request.role) {
         root = resolve(request);
         if (root.ok === false) return root;
       }
@@ -804,7 +790,8 @@ function pageAction(request) {
       const limit = Math.min(Math.max(Number(request.limit) || 20, 1), 100);
       return { ok: true, url: location.href, count: nodes.length, elements: nodes.slice(0, limit).map(describe) };
     }
-    const el = request.ref || request.selector || request.text || request.role ? resolve(request) : document.activeElement;
+    const targeted = request.ref || request.selector || request.text || request.role;
+    const el = targeted ? resolve(request) : document.activeElement;
     if (!el || el.ok === false) return el || fail('element_not_found', 'No focused element');
     if (request.op === 'click') {
       if (el.disabled) return fail('element_not_interactable', 'The element is disabled');
@@ -879,7 +866,13 @@ function pageAction(request) {
         } else if (name === 'Enter' && (roleOf(el) === 'button' || roleOf(el) === 'link')) {
           el.click();
           effect = 'activated';
-        } else if ((name === 'Backspace' || name === 'Delete') && editable(el) && !el.isContentEditable) {
+        } else if (
+          (name === 'Backspace' || name === 'Delete') &&
+          editable(el) &&
+          !el.isContentEditable &&
+          !el.disabled &&
+          !el.readOnly
+        ) {
           const start = el.selectionStart ?? el.value.length;
           const end = el.selectionEnd ?? start;
           const from = start === end ? (name === 'Backspace' ? Math.max(0, start - 1) : start) : start;

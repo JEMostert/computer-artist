@@ -8,6 +8,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import types
 import unittest
 from argparse import Namespace
 from pathlib import Path
@@ -189,6 +190,12 @@ class Discovery(unittest.TestCase):
         with self.assertRaises(bridge.BrowserError):
             bridge.select_instance(found, 'work')
         self.assertEqual(bridge.select_instance(found, 'bbbbbbbb')['instance'], 'bbbbbbbb')
+        # A host that exists but did not answer keeps the choice explicit.
+        silent = [{'instance': 'cccccccc', 'error': 'instance_unavailable'}]
+        with self.assertRaises(bridge.BrowserError) as raised:
+            bridge.select_instance(found[:1], None, silent)
+        self.assertEqual(raised.exception.code, 'ambiguous_instance')
+        self.assertEqual(bridge.select_instance(found[:1], 'aaaaaaaa', silent)['label'], 'work')
         self.assertEqual(bridge.parse_tab('aaaaaaaa:12'), ('aaaaaaaa', 12))
         with self.assertRaises(bridge.BrowserError) as raised:
             bridge.parse_tab('aaaaaaaa:12', 'bbbbbbbb')
@@ -257,6 +264,74 @@ class Install(unittest.TestCase):
         second = browser_commands.package(self.home / 'b')
         self.assertEqual(first['sha256'], second['sha256'])
         self.assertIn('manifest.json', first['files'])
+
+
+@unittest.skipUnless(os.name == 'nt', 'Windows paths; Linux/macOS use manifest folders')
+class WindowsRegistry(unittest.TestCase):
+    """Registry registration and ownership-checked removal, with a fake winreg."""
+
+    def setUp(self):
+        self.home = Path(tempfile.mkdtemp(prefix='cab-'))
+        (self.home / 'Google/Chrome/User Data').mkdir(parents=True)
+        self.keys = {}
+        keys = self.keys
+
+        class Key:
+            def __init__(self, path):
+                self.path = path
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc):
+                return False
+
+        def open_key(root, path):
+            if path not in keys:
+                raise FileNotFoundError(path)
+            return Key(path)
+
+        def delete_key(root, path):
+            del keys[path]
+
+        fake = types.SimpleNamespace(
+            HKEY_CURRENT_USER=1,
+            REG_SZ=1,
+            CreateKey=lambda root, path: (keys.setdefault(path, None), Key(path))[1],
+            SetValueEx=lambda key, name, reserved, kind, value: keys.__setitem__(key.path, value),
+            OpenKey=open_key,
+            QueryValue=lambda key, name: keys[key.path],
+            DeleteKey=delete_key,
+        )
+        patches = [
+            mock.patch.dict(sys.modules, {'winreg': fake}),
+            mock.patch.dict(
+                os.environ,
+                {'CA_BROWSER_DATA_DIR': str(self.home / 'data'), 'LOCALAPPDATA': str(self.home)},
+            ),  # fmt: skip
+        ]
+        for patch in patches:
+            patch.start()
+            self.addCleanup(patch.stop)
+
+    def run_install(self, remove=False):
+        args = Namespace(browser=None, user_data_dir=None, dry_run=False, remove=remove)
+        return browser_commands.install(args)
+
+    def test_fresh_install_registers_and_removal_respects_ownership(self):
+        reply = self.run_install()
+        [(location, manifest)] = self.keys.items()
+        self.assertIn(r'Google\Chrome\NativeMessagingHosts', location)
+        self.assertEqual(json.loads(Path(manifest).read_text())['path'], reply['host'])
+        # Another installation took the registration over: removal leaves it.
+        other = self.home / 'other.json'
+        other.write_text(json.dumps({'name': bridge.HOST_NAME, 'path': 'C:/elsewhere.bat'}))
+        self.keys[location] = str(other)
+        self.assertEqual(self.run_install(remove=True)['hosts'][0]['action'], 'kept_unowned')
+        self.assertIn(location, self.keys)
+        self.keys[location] = manifest
+        self.assertEqual(self.run_install(remove=True)['hosts'][0]['action'], 'remove')
+        self.assertEqual(self.keys, {})
 
 
 if __name__ == '__main__':

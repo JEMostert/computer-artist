@@ -122,8 +122,11 @@ different lease is refused with `lease_mismatch`, and a second claim with
 applies. ca only closes tabs it opened. Claims live in the extension's session
 storage: they survive the native host restarting and end when the browser exits.
 
-Human input is detected from trusted page events. The extension cannot see clicks
-in the browser's own toolbar or address bar, so typing a URL into a claimed tab's
+Human input is detected from trusted page events by `watch.js`. This small content
+script runs at document start in every frame of every page and sends only the
+event type to the extension. It is injected into already-open documents when a tab
+is claimed. The extension cannot see clicks in the browser's own toolbar or
+address bar, so typing a URL into a claimed tab's
 address bar is not detected unless you also switch to that tab.
 
 ## Limits
@@ -154,7 +157,7 @@ ca browser ──(same-user socket, mutual HMAC)──> native host ──(stdio
 
 - **Extension** (Manifest V3, `computer_artist/chrome_extension`). Its permissions
   are `nativeMessaging`, `tabs`, `scripting`, `storage`, `alarms` and `tabGroups`,
-  with host access `<all_urls>`. The service worker connects to the native host at
+  with host access `<all_urls>` and the `watch.js` content script. The service worker connects to the native host at
   startup, and that open port keeps it running. It reconnects with backoff after a
   disconnect and checks every minute from an alarm.
 - **Native host** (`computer_artist/browser_host.py`). Chrome starts one per
