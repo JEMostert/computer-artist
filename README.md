@@ -41,6 +41,18 @@ host lane drives the private desktop's own seat, not your desktop. See
 recipes, additional apps, browsers, profiles and evidence paths. Linux-only
 `--image IMAGE` is not supported by the Windows/macOS box backend.
 
+## Drive your running browser
+
+The [Computer Artist extension](docs/BROWSER.md) lets agents work in background
+tabs of the Chrome or Chromium you already use, through DOM actions that never move
+your pointer or switch your tabs. Your own input in a claimed tab takes it back.
+
+```bash
+ca browser install                       # native host; then Load unpacked the printed folder
+ca browser open http://localhost:5173    # background tab, returns handle and lease
+ca browser type --tab HANDLE --lease LEASE --text Name "Ada"
+```
+
 ## Remember and reuse workflows
 
 Search before discovering the same task again:

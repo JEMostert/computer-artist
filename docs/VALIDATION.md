@@ -41,6 +41,11 @@ automatic learning and preservation after an unverified run. See the
 screenshots, retries and limits. This does not verify native Windows/macOS reuse
 or automatic adaptation to changed interfaces.
 
+On 3 November 2026, the Chrome extension bridge passed a 26-check end-to-end run
+against two headless Chrome for Testing 153 instances and a headed run in a private
+KWin desktop on Fedora/GNOME. See the [extension record](validation/2026-11-03-chrome-extension.md);
+branded browsers, macOS and Windows were not exercised with a real browser.
+
 Earlier records (29–30 September 2026: KolourPaint, scrcpy, KWrite and the
 removed HTML export) live in git history for those revisions; they prove those
 revisions, not current source.
