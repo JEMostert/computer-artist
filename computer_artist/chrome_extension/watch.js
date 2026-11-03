@@ -6,7 +6,10 @@ if (!globalThis.__caHumanWatch) {
   globalThis.__caHumanWatch = true;
   let last = -Infinity;
   const report = (event) => {
-    if (!event.isTrusted || event.timeStamp - last < 250) return;
+    if (!event.isTrusted) return;
+    // pageAction reads this to refuse an action the human interrupted mid-glide.
+    globalThis.__caHumanAt = performance.now();
+    if (event.timeStamp - last < 250) return;
     last = event.timeStamp;
     try {
       chrome.runtime.sendMessage({ type: 'ca-human-input', kind: event.type }).catch(() => {});

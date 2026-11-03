@@ -106,8 +106,8 @@ and exit with status 1.
 A tab must be claimed before ca changes it: `open` claims the new tab, and `claim`
 takes an existing one. The claim returns a **lease** that `navigate`, `click`,
 `type`, `press`, `release` and `close` require. Reads (`tabs`, `read`, `locate`,
-`wait`, `screenshot`) need only the tab handle. A claimed tab shows a blue **CA**
-badge on the extension icon. Tabs that ca opened also sit in a **CA** tab group.
+`wait`, `screenshot`) need only the tab handle. A claimed tab shows a teal **CA**
+badge on the extension icon. Tabs that ca opened also sit in a green **CA** tab group.
 
 | Lease ends | `stop_reason` |
 | --- | --- |
@@ -115,6 +115,9 @@ badge on the extension icon. Tabs that ca opened also sit in a **CA** tab group.
 | You switch to the tab | `human_activated_tab` |
 | The tab closes or Chrome replaces it | `target_closed`, `target_replaced` |
 | `ca browser release` | none, the claim is simply gone |
+
+Input while the agent's pen is still moving to its target also counts: the action
+is refused with `ownership_revoked` (`human_input`) instead of performed.
 
 A revoked lease is refused with `ownership_revoked` and its stop reason. A
 different lease is refused with `lease_mismatch`, and a second claim with
@@ -128,6 +131,31 @@ event type to the extension. It is injected into already-open documents when a t
 is claimed. The extension cannot see clicks in the browser's own toolbar or
 address bar, so typing a URL into a claimed tab's
 address bar is not detected unless you also switch to that tab.
+
+### What you see
+
+When you watch a tab an agent is working in, its pen moves through the page. This
+is the native ink pen from computer use, drawn in teal Chrome ink with the owner's
+name beside it, so you can tell browser control from computer use at a glance. The
+blue pen is computer use. The teal pen and its name tag mean Chrome DOM control.
+The pen glides to each target before ca clicks, types or presses a key, splashes
+on clicks, writes along fields and drips at rest. When the claim ends, it shows
+**Back to you** and lifts away. In a background tab ca acts without the glide. If
+you switch to that tab, you see the pen where the agent left it, handing the tab
+back. The pen is drawn above the page's dialogs, ignores the pointer and holds no
+page text, so `read`, `locate` and the obscured-click check do not see it. With
+reduced motion turned on, it moves without animation.
+
+![The teal Chrome pen splashing on a click, with its owner tag](evidence/chrome-extension/pen-click.png)
+
+Click the toolbar icon for the status card. It shows whether the extension
+reaches ca, with Chrome's reason and the fix when it does not. It also shows
+who controls the tab you are looking at, every tab an agent holds now with its
+latest action, and why recent claims ended, for example **You switched to
+"Example Domain"**. The card only reads state the extension already keeps; it
+never acts on tabs. Copy the instance ID from its footer for `--instance`.
+
+![The status card in light and dark mode](evidence/chrome-extension/status-card.png)
 
 ## Limits
 
@@ -157,7 +185,9 @@ ca browser ──(same-user socket, mutual HMAC)──> native host ──(stdio
 
 - **Extension** (Manifest V3, `computer_artist/chrome_extension`). Its permissions
   are `nativeMessaging`, `tabs`, `scripting`, `storage`, `alarms` and `tabGroups`,
-  with host access `<all_urls>` and the `watch.js` content script. The service worker connects to the native host at
+  with host access `<all_urls>` and the `watch.js` content script. `pen.js` is
+  injected only into the top frame of a claimed tab before an action. The popup
+  reads bridge and claim state from session storage. The service worker connects to the native host at
   startup, and that open port keeps it running. It reconnects with backoff after a
   disconnect and checks every minute from an alarm.
 - **Native host** (`computer_artist/browser_host.py`). Chrome starts one per
@@ -184,7 +214,7 @@ open to the network.
 | Platform | Status |
 | --- | --- |
 | Linux (Fedora 43, GNOME Wayland) | Verified on 3 November 2026 with Chrome for Testing 153, headless and headed in a private KWin desktop. See the [validation record](validation/2026-11-03-chrome-extension.md). |
-| macOS | Implemented (Unix socket, `~/Library/Application Support/<browser>/NativeMessagingHosts`); covered by portable tests, not exercised with a real browser |
+| macOS | Unix socket, `~/Library/Application Support/<browser>/NativeMessagingHosts`. The pen, status card and takeover were verified on 3 November 2026 with headless Chrome for Testing 153 on macOS 27; see the [pen and status card record](validation/2026-11-03-chrome-pen-status.md). |
 | Windows | Implemented (loopback TCP plus key, `HKCU\Software\<vendor>\NativeMessagingHosts`) for Chrome, Chromium, Edge and Brave; covered by portable tests, not exercised with a real browser |
 
 The folder names for Chrome Beta, Dev and Canary, Brave, Edge and Vivaldi follow

@@ -35,7 +35,7 @@ that goal. Separate KWin instances are development test harnesses.
 | Verified outcomes | Invocation-owned checks and stable, optionally fresh file/text/JSON/image/hash checks |
 | Reusable work | Typed fragments, contracts, immutable versions, nested calls and explicit restore |
 | Workflow memory | Local task/app search, semantic notes, durable learned program/evidence summaries, guarded reuse and recent attempt timings; the calling agent teaches and verifies flows |
-| Browser tabs | `ca browser` drives tabs in your running Chrome/Chromium through the Computer Artist extension: DOM read/locate/click/type, leased tab claims revoked by your input, no OS input or tab switching; see [browser](BROWSER.md) |
+| Browser tabs | `ca browser` drives tabs in your running Chrome/Chromium through the Computer Artist extension: DOM read/locate/click/type, leased tab claims revoked by your input, a teal agent pen in watched tabs, a toolbar status card, no OS input or tab switching; see [browser](BROWSER.md) |
 | Diagnosis | Read-only doctor (including stale/mismatched plugin builds), refusal details, JSON inspection, checkpoints and targeted stop |
 
 Workflow memory is agent-assisted: the agent searches local task/app/notes,
