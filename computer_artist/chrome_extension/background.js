@@ -4,12 +4,16 @@
 // (untrusted events); nothing here moves the pointer, activates a tab or
 // focuses a window. Claimed tabs carry a lease, a "CA" badge and, for tabs ca
 // opened, a "CA" tab group. Human input in a claimed tab revokes the lease.
+// Actions in a visible tab show the agent's pen (pen.js) in teal "Chrome lane"
+// ink, distinct from the blue native pen. The toolbar popup (popup.js) shows the
+// bridge and claim state that this worker keeps in session storage.
 
 const HOST = 'com.computer_artist.browser';
 const PROTOCOL = 1;
 const VERSION = chrome.runtime.getManifest().version;
-const BADGE = '#4058ff';
+const BADGE = '#0a7c60'; // Chrome lane teal, shared with pen.js and the popup.
 const GROUP_TITLE = 'CA';
+const GROUP_COLOR = 'green';
 const MAX_TEXT = 100000;
 const MAX_READ = 200000;
 const ALLOWED_SCHEMES = ['http:', 'https:', 'file:'];
@@ -70,6 +74,7 @@ async function hello() {
 
 function setConnected(value, detail) {
   ready = value;
+  saveBridge(value ? 'connected' : 'disconnected', value ? null : detail);
   chrome.action.setBadgeText({ text: value ? '' : '!' });
   chrome.action.setBadgeBackgroundColor({ color: value ? BADGE : '#b3261e' });
   chrome.action.setTitle({
@@ -78,6 +83,11 @@ function setConnected(value, detail) {
       : `Computer Artist: not connected to ca${detail ? ` (${detail})` : ''}. ` +
         'Run `ca browser install`, then reload this extension.',
   });
+}
+
+// The popup reads the bridge state from session storage rather than asking the worker.
+function saveBridge(status, detail = null) {
+  chrome.storage.session.set({ bridge: { status, detail: detail || null, at: Date.now() } }).catch(() => {});
 }
 
 function scheduleReconnect() {
@@ -100,6 +110,7 @@ async function connect() {
     return;
   }
   port = current;
+  if (!ready) saveBridge('connecting');
   current.onDisconnect.addListener(() => {
     const detail = chrome.runtime.lastError?.message;
     if (port === current) port = null;
@@ -186,10 +197,18 @@ async function endClaim(tabId, reason) {
   if (!claim) return null;
   delete current.claims[tabId];
   if (reason !== 'released') {
-    current.revoked[tabId] = { reason, owner: claim.owner, lease: claim.lease, at: Date.now() };
+    const title = reason === 'target_closed' ? null : (await chrome.tabs.get(tabId).catch(() => null))?.title;
+    current.revoked[tabId] = {
+      reason,
+      owner: claim.owner,
+      lease: claim.lease,
+      at: Date.now(),
+      title: title || claim.title || '',
+    };
   }
   await persist();
   if (reason !== 'target_closed') {
+    liftPen(tabId, reason);
     await mark(tabId, null);
     if (claim.opened) {
       try {
@@ -222,6 +241,26 @@ async function requireLease(tabId, lease) {
     });
   }
   return claim;
+}
+
+function liftPen(tabId, reason) {
+  chrome.scripting
+    .executeScript({
+      target: { tabId },
+      world: 'ISOLATED',
+      func: (why) => globalThis.__caPen?.leave(why),
+      args: [reason],
+    })
+    .catch(() => {}); // Replaced, closing or unscriptable: there is no pen to lift.
+}
+
+async function noteAction(tabId, lease, op) {
+  // The popup shows each agent's last action; only the claim that acted is updated.
+  const current = await state();
+  const claim = current.claims[tabId];
+  if (!claim || claim.lease !== lease) return;
+  claim.last = { op, at: Date.now() };
+  await persist();
 }
 
 async function watchTab(tabId) {
@@ -347,8 +386,15 @@ function waitForLoad(tabId, timeoutMs, start) {
   });
 }
 
-async function inPage(tabId, request) {
+async function inPage(tabId, request, claim = null) {
   let results;
+  if (claim) {
+    // The pen is cosmetic: a page that refuses it still gets the action.
+    await chrome.scripting
+      .executeScript({ target: { tabId }, world: 'ISOLATED', files: ['pen.js'] })
+      .catch(() => {});
+    request = { ...request, pen: { owner: claim.owner } };
+  }
   try {
     results = await chrome.scripting.executeScript({
       target: { tabId },
@@ -381,7 +427,7 @@ async function groupOpenedTab(tab) {
     const groupId = await chrome.tabs.group(
       group ? { tabIds: [tab.id], groupId: group.id } : { tabIds: [tab.id], createProperties: { windowId: tab.windowId } },
     );
-    if (!group) await chrome.tabGroups.update(groupId, { title: GROUP_TITLE, color: 'blue' });
+    if (!group) await chrome.tabGroups.update(groupId, { title: GROUP_TITLE, color: GROUP_COLOR });
   } catch (error) {
     // Tab groups are a visible marker only; some Chromium builds lack them.
   }
@@ -395,7 +441,7 @@ async function claimTab(tab, owner, opened) {
       owner: existing.owner,
     });
   }
-  const claim = { lease: token(), owner, since: Date.now(), opened };
+  const claim = { lease: token(), owner, since: Date.now(), opened, title: tab.title || '' };
   current.claims[tab.id] = claim;
   delete current.revoked[tab.id];
   await persist();
@@ -536,6 +582,7 @@ async function handle(request) {
       if (!request.reload) checkUrl(request.url);
       const loaded = await waitForLoad(tab.id, timeoutMs(request, 30), start);
       await requireLease(tabId, request.lease);
+      await noteAction(tabId, request.lease, request.reload ? 'reload' : 'navigate');
       return { loaded, ...(await describeTab(await getTab(tabId))) };
     }
     case 'read':
@@ -560,12 +607,14 @@ async function handle(request) {
     case 'click':
     case 'type':
     case 'press': {
-      await requireLease(tabId, request.lease);
+      const claim = await requireLease(tabId, request.lease);
       await getTab(tabId);
       if (request.op === 'type' && String(request.input ?? '').length > MAX_TEXT) {
         throw new Refusal('payload_too_large', `Type at most ${MAX_TEXT} characters at once`);
       }
-      return inPage(tabId, request);
+      const result = await inPage(tabId, request, claim);
+      await noteAction(tabId, request.lease, request.op);
+      return result;
     }
     case 'screenshot': {
       const tab = await getTab(tabId);
@@ -591,8 +640,9 @@ async function handle(request) {
 // ---------------------------------------------------------- page functions
 
 // Runs inside the page's isolated world. It must be self-contained: Chrome
-// serializes this function's source into the page.
-function pageAction(request) {
+// serializes this function's source into the page. pen.js and watch.js share
+// this world, which is how it reaches the pen and the last human input time.
+async function pageAction(request) {
   const ca = (globalThis.__ca ??= {
     doc: Math.random().toString(36).slice(2, 8),
     next: 1,
@@ -764,6 +814,29 @@ function pageAction(request) {
     }
     el.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: text }));
   };
+  // Glide the pen to the target before acting, like the native pen. Human input
+  // or a claim that ends while it moves refuses the action instead of performing it.
+  const started = performance.now();
+  const pen = request.pen ? globalThis.__caPen : null;
+  const arrive = async (el, spot) => {
+    if (!pen || el === document.body || el === document.documentElement) return null;
+    const { x, y } = spot(el.getBoundingClientRect());
+    await pen.to(x, y, request.pen);
+    if ((globalThis.__caHumanAt ?? -Infinity) > started) {
+      return fail('ownership_revoked', 'Your input took the tab back before ca acted', {
+        stop_reason: 'human_input',
+      });
+    }
+    const ended = globalThis.__caClaimEnded;
+    if (ended && ended.at > started) {
+      if (ended.reason === 'released') return fail('not_claimed', 'The claim was released before ca acted');
+      return fail('ownership_revoked', `The claim ended before ca acted: ${ended.reason}`, {
+        stop_reason: ended.reason,
+      });
+    }
+    return null;
+  };
+  const centre = (rect) => ({ x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 });
   const key = (el, type, name, modifiers) =>
     el.dispatchEvent(
       new KeyboardEvent(type, {
@@ -807,6 +880,9 @@ function pageAction(request) {
       if (el.disabled) return fail('element_not_interactable', 'The element is disabled');
       el.scrollIntoView({ block: 'center', inline: 'center', behavior: 'instant' });
       if (!isVisible(el)) return fail('element_not_interactable', 'The element is not visible');
+      const stopped = await arrive(el, centre);
+      if (stopped) return stopped;
+      if (!el.isConnected) return fail('stale_element', 'The element was removed while the pen moved');
       const init = eventInit(el);
       const hit = document.elementFromPoint(init.clientX, init.clientY);
       if (hit && hit !== el && !el.contains(hit) && !hit.contains(el)) {
@@ -820,11 +896,16 @@ function pageAction(request) {
       el.dispatchEvent(new PointerEvent('pointerup', { ...init, pointerType: 'mouse', isPrimary: true }));
       el.dispatchEvent(new MouseEvent('mouseup', { ...init, button: 0 }));
       el.click();
+      pen?.tap('click');
       return { ok: true, clicked: describe(el), url: location.href };
     }
     if (request.op === 'type') {
       if (!editable(el)) return fail('element_not_editable', `A ${el.tagName.toLowerCase()} does not accept text`);
       if (el.disabled || el.readOnly) return fail('element_not_interactable', 'The field is disabled or read-only');
+      const field = el.getBoundingClientRect();
+      const stopped = await arrive(el, (rect) => ({ x: rect.x + Math.min(14, rect.width / 2), y: rect.y + rect.height / 2 }));
+      if (stopped) return stopped;
+      if (!el.isConnected) return fail('stale_element', 'The field was removed while the pen moved');
       el.focus({ preventScroll: true });
       if (el.isContentEditable) {
         const range = document.createRange();
@@ -854,6 +935,8 @@ function pageAction(request) {
         key(el, 'keyup', ch, {});
       }
       el.dispatchEvent(new Event('change', { bubbles: true }));
+      const typed = Array.from(String(request.input ?? '')).length;
+      pen?.write(Math.min(Math.max(field.width - 28, 0), typed * 7), typed);
       return { ok: true, typed: Array.from(String(request.input ?? '')).length, element: describe(el) };
     }
     if (request.op === 'press') {
@@ -866,6 +949,9 @@ function pageAction(request) {
         metaKey: parts.includes('Meta'),
       };
       if (!name) return fail('invalid_key', 'Pass a key such as Enter, Escape or Backspace');
+      const stopped = await arrive(el, (rect) => ({ x: rect.x + Math.min(14, rect.width / 2), y: rect.y + rect.height / 2 }));
+      if (stopped) return stopped;
+      pen?.tap('press');
       const proceed = key(el, 'keydown', name, modifiers);
       let effect = 'dispatched';
       if (proceed && !Object.values(modifiers).some(Boolean)) {

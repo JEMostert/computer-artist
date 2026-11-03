@@ -30,7 +30,8 @@ or released.
 ## Refusals
 
 - `ownership_revoked` (`stop_reason` `human_input` or `human_activated_tab`): the
-  user took the tab. Stop acting in it; reclaim only if they ask.
+  user took the tab, possibly while the pen was still moving, in which case the
+  action did not happen. Stop acting in it; reclaim only if they ask.
 - `ambiguous_target` lists candidates: choose a `ref`, or pass `--first` only when
   any match is acceptable.
 - `tab_not_visible`: screenshots work only on the active tab, and ca never

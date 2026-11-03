@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Computer Artist</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <header class="head">
+    <svg class="mark" viewBox="-6 -40 46 46" aria-hidden="true">
+      <g transform="rotate(-50) scale(1.15)">
+        <polygon class="m-barrel" points="18.6,-5.2 36,-5.2 38,-3.9 38.8,0 38,3.9 36,5.2 18.6,5.2"/>
+        <polygon class="m-shade" points="18.6,.8 36.4,.8 38.3,2.6 38,3.9 36,5.2 18.6,5.2"/>
+        <polygon class="m-section" points="12.5,-4.4 17,-4.7 17,4.7 12.5,4.4"/>
+        <polygon class="m-nib" points="0,0 3,-1.2 6.5,-2.6 10,-3.8 12.5,-4.2 12.5,4.2 10,3.8 6.5,2.6 3,1.2"/>
+        <polygon class="m-line" points="0,0 3,-1.2 6.5,-2.6 10,-3.8 12.5,-4.2 12.5,-4.4 17,-4.7 17,-5.1 18.6,-5.2 36,-5.2 38,-3.9 38.8,0 38,3.9 36,5.2 18.6,5.2 17,5.1 17,4.7 12.5,4.4 12.5,4.2 10,3.8 6.5,2.6 3,1.2"/>
+      </g>
+    </svg>
+    <div class="who">
+      <h1>Computer Artist</h1>
+      <p class="sub" id="browser"></p>
+    </div>
+    <p class="pill" id="bridge" role="status"><span class="dot"></span><span id="bridge-text">Checking</span></p>
+  </header>
+  <svg class="stroke" viewBox="0 0 320 14" preserveAspectRatio="none" aria-hidden="true">
+    <path id="stroke" pathLength="100" d="M2 9C40 3 66 12 104 7S170 2 210 8S282 11 318 5"/>
+  </svg>
+
+  <section class="here" id="here" aria-live="polite"></section>
+
+  <section class="block" id="fix" hidden>
+    <h2>Connect ca</h2>
+    <p class="detail" id="fix-detail"></p>
+    <p class="note">Run <code>ca browser install</code>, then reload this extension on the extensions page.</p>
+  </section>
+
+  <section class="block">
+    <h2>Agent tabs <span class="count" id="claims-count"></span></h2>
+    <ul class="tabs" id="claims"></ul>
+    <p class="empty" id="claims-empty" hidden>No agent is working in this browser.</p>
+  </section>
+
+  <section class="block" id="history-block" hidden>
+    <h2>Handed back</h2>
+    <ul class="history" id="history"></ul>
+  </section>
+
+  <footer class="foot">
+    <span>Instance <code id="instance">…</code></span>
+    <button type="button" id="copy" title="Copy the instance ID for --instance">Copy ID</button>
+    <span class="version" id="version"></span>
+  </footer>
+  <script src="popup.js"></script>
+</body>
+</html>

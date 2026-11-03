@@ -45,6 +45,9 @@ On 3 November 2026, the Chrome extension bridge passed a 26-check end-to-end run
 against two headless Chrome for Testing 153 instances and a headed run in a private
 KWin desktop on Fedora/GNOME. See the [extension record](validation/2026-11-03-chrome-extension.md);
 branded browsers, macOS and Windows were not exercised with a real browser.
+The teal in-page pen, mid-glide takeover and toolbar status card were verified the
+same day with headless Chrome for Testing on macOS 27; see the
+[pen and status card record](validation/2026-11-03-chrome-pen-status.md).
 
 Earlier records (29–30 September 2026: KolourPaint, scrcpy, KWrite and the
 removed HTML export) live in git history for those revisions; they prove those

@@ -28,7 +28,7 @@ ca = "computer_artist.cli:main"
 packages = ["computer_artist"]
 
 [tool.setuptools.package-data]
-computer_artist = ["chrome_extension/*.js", "chrome_extension/*.json", "chrome_extension/icons/*.png"]
+computer_artist = ["chrome_extension/*.js", "chrome_extension/*.json", "chrome_extension/*.html", "chrome_extension/*.css", "chrome_extension/icons/*.png"]
 
 [tool.setuptools.data-files]
 "share/computer-artist/skills/computer-artist" = ["skills/computer-artist/SKILL.md"]

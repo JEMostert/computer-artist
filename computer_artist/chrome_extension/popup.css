@@ -1,0 +1,129 @@
+/* Chrome lane palette: the teal ink of the in-page pen (pen.js). */
+:root {
+  --paper: #ffffff;
+  --text: #16211f;
+  --muted: #5b6a67;
+  --rule: #e2e9e7;
+  --ink: #0a7c60;
+  --ink-bright: #10b48a;
+  --ink-deep: #053b2f;
+  --wash: #e6f6f0;
+  --alert: #b3261e;
+  --alert-wash: #fbeceb;
+  --idle: #8a9794;
+  color-scheme: light dark;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --paper: #101716;
+    --text: #e6eeec;
+    --muted: #93a5a1;
+    --rule: #22302d;
+    --ink: #3fd4a8;
+    --ink-bright: #3fd4a8;
+    --ink-deep: #032a21;
+    --wash: #13302a;
+    --alert: #ff8a80;
+    --alert-wash: #3a1d1b;
+    --idle: #6f7f7b;
+  }
+}
+
+* { box-sizing: border-box; }
+
+body {
+  width: 340px;
+  margin: 0;
+  padding: 14px 16px 12px;
+  background: var(--paper);
+  color: var(--text);
+  font: 13px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+h1, h2, p, ul { margin: 0; }
+
+code { font: 12px ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+
+/* Header: the pen mark, name and bridge state. */
+.head { display: flex; align-items: center; gap: 10px; }
+.mark { width: 30px; height: 30px; flex: none; overflow: visible; }
+.m-barrel { fill: var(--ink-bright); }
+.m-shade { fill: var(--ink); }
+.m-section { fill: var(--ink-deep); }
+.m-nib { fill: #fcfffd; }
+.m-line { fill: none; stroke: var(--ink-deep); stroke-width: 1; stroke-linejoin: round; }
+.who { flex: 1; min-width: 0; }
+h1 { font: 650 15px/1.2 ui-rounded, system-ui, -apple-system, sans-serif; letter-spacing: -0.005em; }
+.sub { color: var(--muted); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+.pill {
+  display: inline-flex; align-items: center; gap: 6px; flex: none;
+  padding: 3px 9px 3px 8px; border-radius: 999px;
+  font-size: 12px; font-weight: 600; color: var(--muted); background: var(--rule);
+}
+.dot { width: 7px; height: 7px; border-radius: 50%; background: var(--idle); }
+body[data-bridge="connected"] .pill { color: var(--ink); background: var(--wash); }
+body[data-bridge="connected"] .dot { background: var(--ink-bright); box-shadow: 0 0 0 3px color-mix(in srgb, var(--ink-bright) 25%, transparent); }
+body[data-bridge="disconnected"] .pill { color: var(--alert); background: var(--alert-wash); }
+body[data-bridge="disconnected"] .dot { background: var(--alert); }
+
+/* The one flourish: the pen writes this stroke when the card opens, in the bridge's colour. */
+.stroke { display: block; width: 100%; height: 14px; margin: 8px 0 10px; }
+#stroke {
+  fill: none; stroke: var(--idle); stroke-width: 2.4; stroke-linecap: round;
+  stroke-dasharray: 100; stroke-dashoffset: 100;
+  animation: write .7s cubic-bezier(.3, .7, .2, 1) .05s forwards;
+}
+body[data-bridge="connected"] #stroke { stroke: var(--ink-bright); }
+body[data-bridge="disconnected"] #stroke { stroke: var(--alert); stroke-dasharray: 9 5; animation: none; stroke-dashoffset: 0; }
+@keyframes write { to { stroke-dashoffset: 0; } }
+
+/* This tab: the answer to "who has the tab I am looking at?" */
+.here {
+  padding: 10px 12px; border-radius: 10px; background: var(--rule);
+  background: color-mix(in srgb, var(--rule) 55%, transparent);
+}
+.here.agent { background: var(--wash); box-shadow: inset 3px 0 0 var(--ink-bright); }
+.here .lead { font-size: 14px; font-weight: 600; }
+.here .lead b { color: var(--ink); font-weight: 700; }
+.here .meta { color: var(--muted); font-size: 12px; }
+.here .hint { margin-top: 6px; font-size: 12px; color: var(--muted); }
+
+.block { margin-top: 14px; }
+h2 { font-size: 12px; font-weight: 650; color: var(--muted); margin-bottom: 6px; }
+.count { font-weight: 500; }
+.note, .detail, .empty { font-size: 12px; color: var(--muted); }
+.detail { color: var(--alert); margin-bottom: 4px; overflow-wrap: anywhere; }
+
+ul { list-style: none; padding: 0; }
+.tabs li {
+  display: grid; grid-template-columns: 1fr auto; gap: 0 10px; align-items: baseline;
+  padding: 6px 0 6px 10px; border-left: 2px solid var(--ink-bright);
+}
+.tabs li + li { margin-top: 4px; }
+.tabs li.current { background: linear-gradient(90deg, var(--wash), transparent 80%); }
+.tabs .title { font-weight: 550; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tabs .owner { font-size: 12px; font-weight: 650; color: var(--ink); max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tabs .meta { grid-column: 1 / -1; font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+.history li { display: flex; justify-content: space-between; gap: 10px; font-size: 12px; padding: 3px 0; }
+.history .what { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.history time { color: var(--muted); flex: none; }
+
+.foot {
+  display: flex; align-items: center; gap: 8px; margin-top: 14px; padding-top: 10px;
+  border-top: 1px solid var(--rule); font-size: 12px; color: var(--muted);
+}
+.foot code { color: var(--text); }
+.version { margin-left: auto; }
+button {
+  font: inherit; font-size: 12px; font-weight: 600; color: var(--ink);
+  background: none; border: 1px solid var(--rule); border-radius: 6px; padding: 1px 7px; cursor: pointer;
+}
+button:hover { border-color: var(--ink-bright); }
+button:focus-visible { outline: 2px solid var(--ink-bright); outline-offset: 2px; }
+
+@media (prefers-reduced-motion: reduce) {
+  #stroke { animation: none; stroke-dashoffset: 0; }
+}
