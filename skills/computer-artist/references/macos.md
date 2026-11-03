@@ -12,7 +12,8 @@ The pen stays at its last position between actions until `ca session close`, and
 glides to the next action's position before its input is sent.
 Action completion still releases held buttons/keys. `ca session status` reports
 the shared visual session without starting one.
-This is not a security sandbox or a claim of KWin parity.
+Programs, gestures, watch, checks, fragments and handoff use the shared CLI
+workflow. This is not a security sandbox or a claim of KWin parity.
 
 ```bash
 ca doctor                                      # native APIs and OS permissions
@@ -80,8 +81,7 @@ release, so keys typed then can land in it. The drag path must be visible: a
 covering window stops the drag. A human click during the drag stops it; mouse
 motion is ignored while detached. Verified live with Pinta 3.1.1 on macOS 27.0.1;
 other apps are unverified. Tell the user their mouse is locked out during each
-stroke. Programs, gestures, watch, checks,
-fragments and handoff use the shared CLI workflow.
+stroke.
 
 Private Linux boxes remain available through **Docker Desktop** (not Podman).
 They test Linux and web applications; Mac applications cannot run inside them.

@@ -32,7 +32,7 @@ computer_artist = ["chrome_extension/*.js", "chrome_extension/*.json", "chrome_e
 
 [tool.setuptools.data-files]
 "share/computer-artist/skills/computer-artist" = ["skills/computer-artist/SKILL.md"]
-"share/computer-artist/skills/computer-artist/references" = ["skills/computer-artist/references/programs.md", "skills/computer-artist/references/memory.md", "skills/computer-artist/references/pointer-techniques.md", "skills/computer-artist/references/operating-tips.md", "skills/computer-artist/references/environments.md", "skills/computer-artist/references/windows.md", "skills/computer-artist/references/linux.md", "skills/computer-artist/references/macos.md", "skills/computer-artist/references/browser.md"]
+"share/computer-artist/skills/computer-artist/references" = ["skills/computer-artist/references/programs.md", "skills/computer-artist/references/memory.md", "skills/computer-artist/references/kolourpaint.md", "skills/computer-artist/references/operating-tips.md", "skills/computer-artist/references/environments.md", "skills/computer-artist/references/windows.md", "skills/computer-artist/references/linux.md", "skills/computer-artist/references/macos.md", "skills/computer-artist/references/browser.md"]
 
 [tool.ruff]
 target-version = "py312"

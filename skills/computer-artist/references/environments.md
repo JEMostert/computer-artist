@@ -51,8 +51,6 @@ timeout = 90
 (cached) and launches the apps, failing with their log tail when one dies. Flags
 (`--memory 2g`, `--mount SRC`) update a stopped definition; `ca env create` stores
 one without starting. Images need a `sleep` executable. `--pull` refreshes bases.
-With `--host`, or the environment's own default lane, `ca type` pastes the whole text
-at once and restores the previous plain-text clipboard.
 
 ## Applications and evidence
 

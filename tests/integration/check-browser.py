@@ -302,6 +302,29 @@ def main():
         after = windows_snapshot(env, 'alpha')
         step('no_tab_or_window_focus_change', before == after, before=before, after=after)
 
+        options = ca('locate', '--tab', tab, '--selector', '#colour', env=env, expect_ok=True)['elements'][0]
+        selected = ca('select', '--tab', tab, '--lease', lease, '--selector', '#colour', 'blue', env=env)
+        unchanged = ca('select', '--tab', tab, '--lease', lease, '--selector', '#colour', 'blue', env=env)
+        after_select = ca('locate', '--tab', tab, '--selector', '#colour', env=env, expect_ok=True)['elements'][0]
+        events = ca('read', '--tab', tab, '--selector', '#select-events', env=env, expect_ok=True)['text']
+        step('select_readback_and_events', options['value'] == 'red' and len(options['options']) == 6
+             and selected.get('changed') is True and unchanged.get('changed') is False
+             and after_select['value'] == 'blue' and after_select['options'][1]['selected']
+             and after_select['options'][2]['disabled'] and after_select['options'][3]['disabled']
+             and events == 'input,change', events=events, options=after_select['options'])
+        for selector, value, error in [
+            ('#colour', 'missing', 'option_not_found'),
+            ('#colour', 'disabled', 'element_not_interactable'),
+            ('#colour', 'grouped', 'element_not_interactable'),
+            ('#colour', 'duplicate', 'ambiguous_target'),
+            ('#disabled-select', 'x', 'element_not_interactable'),
+            ('#multiple', 'x', 'unsupported_control'),
+            ('#title', 'x', 'unsupported_control'),
+        ]:
+            result = ca('select', '--tab', tab, '--lease', lease, '--selector', selector, value, env=env)
+            step('select_refuses_' + selector[1:] + '_' + value, result.get('error') == error,
+                 expected=error, actual=result.get('error'))
+
         stale = ca('click', '--tab', tab, '--lease', lease, '--ref',
                    alpha['fields']['elements'][0]['ref'], env=env)  # fmt: skip
         step('stale_element_refused', stale.get('error') == 'stale_element')
@@ -318,6 +341,13 @@ def main():
         step('missing_tab_refused', missing.get('error') == 'target_unavailable')
         hidden = ca('screenshot', '--tab', tab, str(work / 'hidden.png'), env=env)
         step('background_screenshot_refused', hidden.get('error') == 'tab_not_visible')
+        unleased = ca('focus', '--tab', tab, '--lease', 'wrong', env=env)
+        focused = ca('focus', '--tab', tab, '--lease', lease, env=env)
+        held = ca('status', '--tab', tab, '--lease', lease, env=env)
+        shown = ca('screenshot', '--tab', tab, str(work / 'focused.png'), env=env)
+        step('focus_requires_lease_and_shows_tab', unleased.get('ok') is False
+             and focused.get('focused') and focused.get('active') and held.get('holds_lease')
+             and shown.get('ok'), unleased=unleased.get('error'), focused=focused.get('active'))  # fmt: skip
 
         # A page the "user" already has open in the active tab: claim it, capture it.
         port = devtools_port(profiles['beta'])
@@ -375,16 +405,18 @@ def main():
              during=gone.get('error'), old_pid=host_pid,
              new_pid=next(i['pid'] for i in reconnected if i['label'] == 'alpha'))  # fmt: skip
 
-        # The human switches to the agent's tab: that also ends the lease.
+        # Activation alone preserves ownership and permits subsequent actions.
         port = devtools_port(profiles['alpha'])
         agent_page = page_target(port, lambda t: t['url'] == url)
         with urlopen(f'http://127.0.0.1:{port}/json/activate/{agent_page["id"]}') as response:
             response.read()
         time.sleep(0.5)
         status = ca('status', '--tab', tab, '--lease', lease, env=env)
-        step('human_activation_revokes', status.get('stop_reason') == 'human_activated_tab')
+        action = ca('type', '--tab', tab, '--lease', lease, '--selector', '#title', 'watchable', env=env)
+        step('human_activation_preserves_lease', status.get('holds_lease') and action.get('ok'),
+             status=status, action=action.get('error'))
 
-        # The human visits a tab while ca is still opening it, then leaves: no lease.
+        # Activation during a slow open also preserves ownership.
         pending = {}
         opener = threading.Thread(target=lambda: pending.setdefault(
             'reply', ca('open', url + 'slow', '--instance', 'alpha', env=env)))  # fmt: skip
@@ -401,8 +433,51 @@ def main():
                 response.read()
         opener.join(30)
         reply = pending.get('reply', {})
-        step('activation_while_opening_refused', reply.get('error') == 'ownership_revoked'
-             and reply.get('stop_reason') == 'human_activated_tab', error=reply.get('error'))  # fmt: skip
+        slow_action = ca('click', '--tab', reply.get('handle', ''), '--lease', reply.get('lease', ''),
+                         '--text', 'Press me', env=env) if reply.get('ok') else {}
+        step('activation_while_opening_preserves_lease', reply.get('ok') and slow_action.get('ok'),
+             error=reply.get('error'), action=slow_action.get('error'))
+
+        # Input after the document exists but before its slow subresource loads.
+        loading_reply = {}
+        loading_opener = threading.Thread(target=lambda: loading_reply.setdefault(
+            'reply', ca('open', url + 'loading', '--instance', 'alpha', env=env)))
+        loading_opener.start()
+        loading = None
+        deadline = time.time() + 10
+        while loading is None and time.time() < deadline:
+            try:
+                loading = page_target(port, lambda t: t['url'].endswith('/loading'))
+            except LookupError:
+                time.sleep(0.1)
+        with urlopen(f'http://127.0.0.1:{port}/json/activate/{loading["id"]}') as response:
+            response.read()
+        time.sleep(1)
+        human = DevTools(loading['webSocketDebuggerUrl'])
+        human.call('Input.dispatchKeyEvent', type='keyDown', key='a', text='a')
+        human.call('Input.dispatchKeyEvent', type='keyUp', key='a')
+        human.close()
+        loading_opener.join(30)
+        taken = loading_reply.get('reply', {})
+        step('human_input_while_opening_refuses_ownership',
+             taken.get('error') == 'ownership_revoked' and taken.get('stop_reason') == 'human_input',
+             result=taken)
+        with urlopen(f'http://127.0.0.1:{port}/json/activate/{agent_page["id"]}') as response:
+            response.read()
+
+        # Trusted input revokes only the active tab, leaving two sibling leases intact.
+        third = ca('open', url + 'other', '--instance', 'alpha', env=env, expect_ok=True)
+        human = DevTools(agent_page['webSocketDebuggerUrl'])
+        human.call('Input.dispatchKeyEvent', type='keyDown', key='a', text='a')
+        human.call('Input.dispatchKeyEvent', type='keyUp', key='a')
+        human.close()
+        time.sleep(0.5)
+        revoked = ca('status', '--tab', tab, '--lease', lease, env=env)
+        sibling = ca('click', '--tab', third['handle'], '--lease', third['lease'], '--text', 'Press me', env=env)
+        slow_status = ca('status', '--tab', reply.get('handle', ''), '--lease', reply.get('lease', ''), env=env)
+        step('human_input_only_revokes_relevant_tab', revoked.get('stop_reason') == 'human_input'
+             and sibling.get('ok') and slow_status.get('holds_lease'), revoked=revoked.get('stop_reason'),
+             sibling=sibling.get('error'), slow=slow_status.get('holds_lease'))
 
         if args.idle:
             pid = next(

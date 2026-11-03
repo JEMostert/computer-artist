@@ -101,20 +101,42 @@ after navigation or removal.
 Every reply is JSON. Refusals use `{"ok": false, "error": CODE, "detail": ...}`
 and exit with status 1.
 
+### Native selects
+
+`ca browser locate --tab H --selector select` lists exact option values, labels,
+selected state and disabled state. Use `ca browser select --tab H --lease L
+--selector '#colour' blue` to choose one exact value in a native single select.
+This explicit DOM control sets the selection without opening a native popup and
+emits bubbling `input` then `change`, only if the selection changes. It uses the
+same lease, pen and human-interruption guard as other actions. Missing/ambiguous
+values, disabled options/optgroups/controls and multiple selects are refused.
+Events remain untrusted; trusted-gesture requirements are unchanged.
+
+### Focusing a tab
+
+`ca browser focus --tab H --lease L` activates a claimed tab and focuses its
+window, restoring it if minimized. It is the only command that switches tabs or
+focuses a window, and it takes keyboard focus from whatever the user was doing.
+Use it only for visible testing or when the user's attention is wanted, never for
+background work. Activation keeps every lease, like the user switching tabs.
+
 ### Tab claims
 
 A tab must be claimed before ca changes it: `open` claims the new tab, and `claim`
 takes an existing one. The claim returns a **lease** that `navigate`, `click`,
-`type`, `press`, `release` and `close` require. Reads (`tabs`, `read`, `locate`,
+`type`, `select`, `press`, `focus`, `release` and `close` require. Reads (`tabs`, `read`, `locate`,
 `wait`, `screenshot`) need only the tab handle. A claimed tab shows a teal **CA**
 badge on the extension icon. Tabs that ca opened also sit in a green **CA** tab group.
 
 | Lease ends | `stop_reason` |
 | --- | --- |
 | You click, press a key, scroll or touch inside the tab | `human_input` |
-| You switch to the tab | `human_activated_tab` |
 | The tab closes or Chrome replaces it | `target_closed`, `target_replaced` |
 | `ca browser release` | none, the claim is simply gone |
+
+Tab activation and browser window focus are observation: they preserve the watched
+claim and all other tabs. Trusted page input revokes only the tab receiving it.
+Hover and page focus events do not count as takeover.
 
 Input while the agent's pen is still moving to its target also counts: the action
 is refused with `ownership_revoked` (`human_input`) instead of performed.
@@ -130,7 +152,8 @@ script runs at document start in every frame of every page and sends only the
 event type to the extension. It is injected into already-open documents when a tab
 is claimed. The extension cannot see clicks in the browser's own toolbar or
 address bar, so typing a URL into a claimed tab's
-address bar is not detected unless you also switch to that tab.
+address bar is not detected. Tab activation alone is allowed; browser-toolbar
+input is outside this page-input guard.
 
 ### What you see
 
@@ -141,8 +164,7 @@ blue pen is computer use. The teal pen and its name tag mean Chrome DOM control.
 The pen glides to each target before ca clicks, types or presses a key, splashes
 on clicks, writes along fields and drips at rest. When the claim ends, it shows
 **Back to you** and lifts away. In a background tab ca acts without the glide. If
-you switch to that tab, you see the pen where the agent left it, handing the tab
-back. The pen is drawn above the page's dialogs, ignores the pointer and holds no
+you switch to that tab, its agent keeps working and you can watch the pen. The pen is drawn above the page's dialogs, ignores the pointer and holds no
 page text, so `read`, `locate` and the obscured-click check do not see it. With
 reduced motion turned on, it moves without animation.
 
@@ -151,8 +173,7 @@ reduced motion turned on, it moves without animation.
 Click the toolbar icon for the status card. It shows whether the extension
 reaches ca, with Chrome's reason and the fix when it does not. It also shows
 who controls the tab you are looking at, every tab an agent holds now with its
-latest action, and why recent claims ended, for example **You switched to
-"Example Domain"**. The card only reads state the extension already keeps; it
+latest action, and why recent claims ended, for example **Your input in "Example Domain"**. The card only reads state the extension already keeps; it
 never acts on tabs. Copy the instance ID from its footer for `--instance`.
 
 ![The status card in light and dark mode](evidence/chrome-extension/status-card.png)
@@ -166,9 +187,9 @@ never acts on tabs. Copy the instance ID from its footer for `--instance`.
   `debugger` permission, so there is no "being debugged" banner and no trusted
   input.
 - **Screenshots need the active tab of a visible window.** `chrome.tabs.captureVisibleTab`
-  cannot capture background tabs and ca never switches tabs, so
+  cannot capture background tabs and ca never switches tabs by itself, so
   `ca browser screenshot` on a background tab is refused as `tab_not_visible`.
-  Use `read` and `locate` there.
+  Use `read` and `locate` there, or `focus` the tab when the user should see it.
 - **Scriptable pages only.** `chrome://` pages, the Web Store, other extensions'
   pages and, unless you allow file access on the extension card, `file://` URLs
   cannot be claimed or read. Only the top frame is read; iframes are not.

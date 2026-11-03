@@ -55,9 +55,8 @@ do not infer general compatibility. Report native Wayland and XWayland separatel
 Actual-desktop control remains available when the user explicitly requests it.
 Only in that mode omit `--environment`. Human pointer/focus must stay outside the
 agent target connection. Host focus/pointer recovery requires authorization in the
-current task; this skill itself does not grant it. Never silently move the human's
-pointer or steal focus. Do not use host input to perform a refused agent action.
-Human takeover stops input; inspect before retrying. App dialogs can change human
+current task; this skill itself does not grant it. Do not use host input to perform
+a refused agent action. Human takeover stops input; inspect before retrying. App dialogs can change human
 focus; do not promise prevention.
 
 When `ca a11y --window APP` lists the controls you need, locate them by role and
@@ -78,13 +77,8 @@ unexpected results before continuing. See [programs](programs.md).
 
 Independent physical keys require advertised keyboard support and ready target
 resources. Use `ctx.press`, `key_down`, `key_up` and `ctx.write`/`ca write` for
-layout-resolved text; verify effects before release.
-For text, prefer `ca type`/`ctx.type`: inside an environment (and with `--host`) it
-pastes the whole text at once and then restores the previous plain-text clipboard;
-on the agent lane it types layout-resolved keys. Unicode paste on your desktop uses
-explicit host focus/clipboard within the task's authorization.
-Snapshot the destination before saving and use `ctx.verify_file` afterwards.
-Dispatch, a screenshot or a child's passing checks do not verify the outer task.
+layout-resolved text; verify effects before release. Unicode paste on the user's
+desktop uses explicit host focus/clipboard within the task's authorization.
 
 Use `ca watch` for bounded JSONL observation, `ca runs inspect ID` for evidence,
 `ca runs stop ID` for targeted stopping and `ctx.handoff(reason)` to release/yield.
@@ -92,6 +86,3 @@ Inspect related-window candidates and choose an exact ID in a fresh run; interru
 contexts cannot resume. Checkpoints can miss recent actions and never prove completion.
 Keep required evidence with `ca storage keep ID`; five eligible runs rotate and
 captures are separately bounded. Close the cursor session with `ca session close`.
-
-For drawing read [pointer techniques](pointer-techniques.md); for
-scaling/recovery read [operating tips](operating-tips.md).

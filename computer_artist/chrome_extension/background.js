@@ -24,9 +24,11 @@ let retryDelay = 1000;
 let retryTimer = null;
 let identityPromise = null;
 let statePromise = null;
-// Tabs ca is opening, and which of them the human activated before the claim.
+// Track activation only to preserve a viewed tab if opening fails.
+// Activation is observation, not evidence of human page input.
 const opening = new Set();
 const activatedWhileOpening = new Set();
+const inputWhileOpening = new Set();
 
 class Refusal extends Error {
   constructor(code, detail, extra = {}) {
@@ -275,6 +277,7 @@ async function watchTab(tabId) {
 
 chrome.runtime.onMessage.addListener((message, sender) => {
   if (message?.type === 'ca-human-input' && sender.id === chrome.runtime.id && sender.tab) {
+    if (opening.has(sender.tab.id)) inputWhileOpening.add(sender.tab.id);
     state().then((current) => {
       if (current.claims[sender.tab.id]) endClaim(sender.tab.id, 'human_input');
     });
@@ -294,11 +297,9 @@ chrome.tabs.onReplaced.addListener((added, removed) => {
 });
 
 chrome.tabs.onActivated.addListener(({ tabId }) => {
-  // ca never activates tabs, so an activation hands the tab to the human.
+  // Chrome activation (including grouping/window changes) has no input attribution.
+  // Watching is allowed; trusted page input alone ends the relevant claim.
   if (opening.has(tabId)) activatedWhileOpening.add(tabId);
-  state().then((current) => {
-    if (current.claims[tabId]) endClaim(tabId, 'human_activated_tab');
-  });
 });
 
 // ----------------------------------------------------------------- helpers
@@ -522,18 +523,19 @@ async function handle(request) {
         now = await getTab(tab.id);
       } catch (error) {
         // Close the failed tab unless the human already switched to it.
-        if (!activatedWhileOpening.delete(tab.id)) await chrome.tabs.remove(tab.id).catch(() => {});
+        if (!activatedWhileOpening.delete(tab.id) && !inputWhileOpening.has(tab.id)) {
+          await chrome.tabs.remove(tab.id).catch(() => {});
+        }
+        inputWhileOpening.delete(tab.id);
         throw error;
       } finally {
         opening.delete(tab.id);
       }
-      const activated = activatedWhileOpening.delete(tab.id);
-      if (now.active || activated) {
-        // The human switched to the new tab while it loaded: it is theirs now.
-        await endClaim(tab.id, 'human_activated_tab');
-        throw new Refusal('ownership_revoked', `You switched to tab ${tab.id} while it opened; ca left it to you`, {
-          stop_reason: 'human_activated_tab',
-          tab: tab.id,
+      activatedWhileOpening.delete(tab.id);
+      if (inputWhileOpening.delete(tab.id)) {
+        await endClaim(tab.id, 'human_input');
+        throw new Refusal('ownership_revoked', 'Your input took the tab while it opened', {
+          stop_reason: 'human_input', tab: tab.id,
         });
       }
       await groupOpenedTab(tab);
@@ -606,7 +608,8 @@ async function handle(request) {
     }
     case 'click':
     case 'type':
-    case 'press': {
+    case 'press':
+    case 'select': {
       const claim = await requireLease(tabId, request.lease);
       await getTab(tabId);
       if (request.op === 'type' && String(request.input ?? '').length > MAX_TEXT) {
@@ -616,6 +619,20 @@ async function handle(request) {
       await noteAction(tabId, request.lease, request.op);
       return result;
     }
+    case 'focus': {
+      // The one deliberate exception to "never switch tabs or focus windows":
+      // only on explicit request, to show the user a tab or to test visibly.
+      await requireLease(tabId, request.lease);
+      const tab = await getTab(tabId);
+      await chrome.tabs.update(tabId, { active: true });
+      const window = await chrome.windows.get(tab.windowId);
+      await chrome.windows.update(tab.windowId, {
+        focused: true,
+        ...(window.state === 'minimized' ? { state: 'normal' } : {}),
+      });
+      await noteAction(tabId, request.lease, 'focus');
+      return { focused: true, ...(await describeTab(await getTab(tabId))) };
+    }
     case 'screenshot': {
       const tab = await getTab(tabId);
       const window = await chrome.windows.get(tab.windowId);
@@ -623,7 +640,7 @@ async function handle(request) {
         throw new Refusal(
           'tab_not_visible',
           'Chrome can capture only the active tab of a visible window, and ca never switches ' +
-            'tabs. Read or locate this tab instead, or ask the user to show it.',
+            'tabs by itself. Read or locate this tab instead, or use focus when the user wants to see it.',
           { active: tab.active, window_state: window.state },
         );
       }
@@ -715,6 +732,13 @@ async function pageAction(request) {
     };
     if ('value' in el && ['INPUT', 'TEXTAREA', 'SELECT'].includes(el.tagName)) {
       info.value = el.type === 'password' ? '[hidden]' : clip(el.value, 200);
+    }
+    if (el.tagName === 'SELECT') {
+      info.options = Array.from(el.options, (option) => ({
+        value: option.value, label: option.label, selected: option.selected,
+        disabled: option.disabled || Boolean(option.closest('optgroup')?.disabled),
+      }));
+      info.multiple = el.multiple;
     }
     if (el.type === 'checkbox' || el.type === 'radio') info.checked = el.checked;
     return info;
@@ -898,6 +922,37 @@ async function pageAction(request) {
       el.click();
       pen?.tap('click');
       return { ok: true, clicked: describe(el), url: location.href };
+    }
+    if (request.op === 'select') {
+      if (el.tagName !== 'SELECT' || el.multiple) {
+        return fail('unsupported_control', 'Select requires a native single-select control');
+      }
+      if (el.matches(':disabled') || !isVisible(el)) {
+        return fail('element_not_interactable', 'The select is disabled or not visible');
+      }
+      const options = Array.from(el.options).filter((option) => option.value === request.value);
+      if (options.length !== 1) {
+        return fail(options.length ? 'ambiguous_target' : 'option_not_found', 'Choose one exact option value');
+      }
+      const option = options[0];
+      if (option.disabled || option.closest('optgroup')?.disabled) {
+        return fail('element_not_interactable', 'The option is disabled');
+      }
+      const stopped = await arrive(el, centre);
+      if (stopped) return stopped;
+      if (!el.isConnected || !el.contains(option)) return fail('stale_element', 'The select changed while the pen moved');
+      if (el.matches(':disabled') || option.disabled || option.closest('optgroup')?.disabled) {
+        return fail('element_not_interactable', 'The select or option became disabled');
+      }
+      // Like type, this is an explicit DOM action, not an OS popup or trusted key.
+      const changed = el.selectedIndex !== option.index;
+      Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set.call(el, request.value);
+      if (changed) {
+        el.dispatchEvent(new Event('input', { bubbles: true, composed: true }));
+        el.dispatchEvent(new Event('change', { bubbles: true }));
+      }
+      pen?.tap('select');
+      return { ok: true, changed, element: describe(el) };
     }
     if (request.op === 'type') {
       if (!editable(el)) return fail('element_not_editable', `A ${el.tagName.toLowerCase()} does not accept text`);

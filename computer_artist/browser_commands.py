@@ -35,7 +35,8 @@ BROWSERS = {
 }
 
 OPERATIONS = ('instances', 'label', 'tabs', 'open', 'claim', 'release', 'status', 'close',
-              'navigate', 'read', 'locate', 'wait', 'click', 'type', 'press', 'screenshot')  # fmt: skip
+              'focus', 'navigate', 'read', 'locate', 'wait', 'click', 'type', 'select', 'press',
+              'screenshot')  # fmt: skip
 
 
 def add_command(commands):
@@ -44,7 +45,7 @@ def add_command(commands):
         help='Drive tabs in your running Chrome/Chromium through the Computer Artist extension',
         description='Operate tabs in browsers where the Computer Artist extension is installed. '
         'Actions are DOM operations inside the page; they never move your pointer, switch tabs '
-        'or focus windows. Tabs ca acts on are claimed with a lease that your own clicks or '
+        'or focus windows, except the explicit focus command. Tabs ca acts on are claimed with a lease that your own clicks or '
         'keys in that tab revoke.',
     )
     actions = parser.add_subparsers(dest='browser_action', required=True)
@@ -104,6 +105,12 @@ def add_command(commands):
     status = target('status', 'Report a tab claim and why a lease ended')
     status.add_argument('--lease')
     target('close', 'Close a tab that ca opened', lease=True)
+    target(
+        'focus',
+        'Bring a claimed tab and its window to the front. Only for visible testing or when '
+        "the user should look; it takes the user's focus, so never use it for background work",
+        lease=True,
+    )
     navigate = target('navigate', 'Load a URL in a claimed tab, or reload it', lease=True)
     destination = navigate.add_mutually_exclusive_group(required=True)
     destination.add_argument('--url')
@@ -123,6 +130,9 @@ def add_command(commands):
     element(type_)
     type_.add_argument('--clear', action='store_true', help='Replace the current value')
     type_.add_argument('value', metavar='TEXT')
+    select = target('select', 'Select a native HTML option by exact value', lease=True)
+    element(select)
+    select.add_argument('value', metavar='VALUE')
     press = target('press', 'Press a key such as Enter, Escape or Backspace', lease=True)
     element(press, required=False)
     press.add_argument('key')
@@ -167,6 +177,8 @@ def operate(args):
         value = getattr(args, name, None)
         if value not in (None, False):
             request[name] = value
+    if action == 'select':
+        request['value'] = args.value
     if action == 'type':
         request['input'] = args.value
     if action in ('open', 'claim') and not request.get('owner'):

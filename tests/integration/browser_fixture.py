@@ -20,6 +20,10 @@ PAGE = """<!doctype html>
   <label>Body <textarea id="body" name="body"></textarea></label>
   <button type="submit">Add note</button>
 </form>
+<label>Colour <select id="colour"><option value="red">Red</option><option value="blue">Blue</option><option value="disabled" disabled>Disabled</option><optgroup label="Unavailable" disabled><option value="grouped">Grouped</option></optgroup><option value="duplicate">One</option><option value="duplicate">Two</option></select></label>
+<select id="disabled-select" disabled><option value="x">X</option></select>
+<select id="multiple" multiple><option value="x">X</option></select>
+<p id="select-events"></p>
 <p id="state">Loading</p>
 <ul id="notes"></ul>
 <p id="late">Ready for review</p>
@@ -27,6 +31,10 @@ PAGE = """<!doctype html>
 <iframe id="frame" src="/other" width="320" height="120"></iframe>
 <script>
 const list = document.getElementById('notes');
+const events = [];
+for (const name of ['input', 'change']) document.getElementById('colour').addEventListener(name, () => {
+  events.push(name); document.getElementById('select-events').textContent = events.join(',');
+});
 async function load() {
   const notes = await (await fetch('/api/notes')).json();
   list.replaceChildren(...notes.map((n) => {
@@ -80,6 +88,11 @@ def serve(store):
             elif self.path == '/slow':
                 time.sleep(2)  # leaves time to switch tabs while ca opens it
                 self.send(200, OTHER, 'text/html; charset=utf-8')
+            elif self.path == '/loading':
+                self.send(200, '<html><body><input autofocus><img src="/slow-resource"></body></html>', 'text/html')
+            elif self.path == '/slow-resource':
+                time.sleep(4)
+                self.send(200, '', 'image/png')
             elif self.path == '/other':
                 self.send(200, OTHER, 'text/html; charset=utf-8')
             elif self.path == '/api/notes':

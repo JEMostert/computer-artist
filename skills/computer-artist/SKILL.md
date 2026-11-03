@@ -1,6 +1,6 @@
 ---
 name: computer-artist
-description: Use the ca CLI to test and interact with GUI applications on Linux (KDE Wayland), Windows or macOS, preferring private agent environments; control the user's actual desktop only when explicitly requested.
+description: Use the ca CLI to test and interact with GUI applications on Linux (KDE Wayland), Windows or macOS, and with tabs in the user's running Chrome, preferring private agent environments; control the user's actual desktop only when explicitly requested.
 ---
 
 # Computer Artist
@@ -90,5 +90,7 @@ for learning, adaptation and timing.
   Do not loop captures: each one costs the compositor and can stall the desktop.
 
 The shared program, fragment, memory, handoff and evidence interfaces retain each
-backend's input limits. See [programs](references/programs.md) and
-[environments](references/environments.md).
+backend's input limits. See [programs](references/programs.md),
+[environments](references/environments.md), [coordinates and
+recovery](references/operating-tips.md) for scaling screenshots to input, and
+[KolourPaint techniques](references/kolourpaint.md) before painting in KolourPaint.
