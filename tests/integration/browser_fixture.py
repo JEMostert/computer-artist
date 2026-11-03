@@ -6,6 +6,7 @@ Usage: python browser_fixture.py STORE.json  (prints the URL, serves until kille
 import json
 import sys
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -76,6 +77,9 @@ def serve(store):
         def do_GET(self):
             if self.path == '/':
                 self.send(200, PAGE, 'text/html; charset=utf-8')
+            elif self.path == '/slow':
+                time.sleep(2)  # leaves time to switch tabs while ca opens it
+                self.send(200, OTHER, 'text/html; charset=utf-8')
             elif self.path == '/other':
                 self.send(200, OTHER, 'text/html; charset=utf-8')
             elif self.path == '/api/notes':

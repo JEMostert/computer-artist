@@ -9,7 +9,7 @@ user browser profile or keyring was touched.
 
 `tests/integration/check-browser.py` started a localhost notes fixture and two
 separate headless Chrome processes with the extension loaded. It then drove them
-only through `ca browser`. All 25 checks passed (rerun after cross-review fixes):
+only through `ca browser`. All 26 checks passed (rerun after cross-review fixes):
 
 - Scoped install; two instances discovered and labelled; an instance-less command
   refused as `ambiguous_instance`.
@@ -25,7 +25,9 @@ only through `ca browser`. All 25 checks passed (rerun after cross-review fixes)
   click inside the page's iframe, and after a fresh claim a keypress in the top
   document (`human_input`). The click after revocation was refused with
   `ownership_revoked`.
-  Activating the agent's tab revoked its lease (`human_activated_tab`).
+  Activating the agent's tab revoked its lease (`human_activated_tab`). A tab the
+  human visited and left while `open` was still loading it was refused instead
+  of leased.
 - After the native host was killed with SIGKILL, requests failed with
   `instance_unavailable`. The extension then started a new host (new PID), and the
   existing lease still held.
@@ -57,7 +59,8 @@ browser ran on a private KWin desktop, not on the user's GNOME session.
 
 ## Also run
 
-- `python -m unittest discover -s tests`: 231 tests, 9 skipped.
+- `python -m unittest discover -s tests`: 232 tests, 10 skipped (the Windows
+  registry test runs on Windows CI).
 - `scripts/check.sh`: ruff, plus `node --check` of the service worker.
 - `pip wheel --no-deps .`: the wheel contains `computer_artist/chrome_extension`.
 

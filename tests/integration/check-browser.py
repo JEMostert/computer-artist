@@ -384,6 +384,26 @@ def main():
         status = ca('status', '--tab', tab, '--lease', lease, env=env)
         step('human_activation_revokes', status.get('stop_reason') == 'human_activated_tab')
 
+        # The human visits a tab while ca is still opening it, then leaves: no lease.
+        pending = {}
+        opener = threading.Thread(target=lambda: pending.setdefault(
+            'reply', ca('open', url + 'slow', '--instance', 'alpha', env=env)))  # fmt: skip
+        opener.start()
+        deadline = time.time() + 10
+        slow = None
+        while slow is None and time.time() < deadline:
+            try:
+                slow = page_target(port, lambda t: t['url'].endswith('/slow'))
+            except LookupError:
+                time.sleep(0.1)
+        for target in (slow, agent_page):
+            with urlopen(f'http://127.0.0.1:{port}/json/activate/{target["id"]}') as response:
+                response.read()
+        opener.join(30)
+        reply = pending.get('reply', {})
+        step('activation_while_opening_refused', reply.get('error') == 'ownership_revoked'
+             and reply.get('stop_reason') == 'human_activated_tab', error=reply.get('error'))  # fmt: skip
+
         if args.idle:
             pid = next(
                 i['pid'] for i in ca('instances', env=env)['instances'] if i['label'] == 'alpha'

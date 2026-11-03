@@ -4,7 +4,7 @@
 // DOM events are untrusted. Sends the event type only, at most every 250 ms.
 if (!globalThis.__caHumanWatch) {
   globalThis.__caHumanWatch = true;
-  let last = 0;
+  let last = -Infinity;
   const report = (event) => {
     if (!event.isTrusted || event.timeStamp - last < 250) return;
     last = event.timeStamp;

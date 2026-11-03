@@ -20,6 +20,9 @@ let retryDelay = 1000;
 let retryTimer = null;
 let identityPromise = null;
 let statePromise = null;
+// Tabs ca is opening, and which of them the human activated before the claim.
+const opening = new Set();
+const activatedWhileOpening = new Set();
 
 class Refusal extends Error {
   constructor(code, detail, extra = {}) {
@@ -253,6 +256,7 @@ chrome.tabs.onReplaced.addListener((added, removed) => {
 
 chrome.tabs.onActivated.addListener(({ tabId }) => {
   // ca never activates tabs, so an activation hands the tab to the human.
+  if (opening.has(tabId)) activatedWhileOpening.add(tabId);
   state().then((current) => {
     if (current.claims[tabId]) endClaim(tabId, 'human_activated_tab');
   });
@@ -458,6 +462,7 @@ async function handle(request) {
       const loaded = await waitForLoad(null, timeoutMs(request, 30), async () => {
         try {
           tab = await chrome.tabs.create(properties);
+          opening.add(tab.id);
         } catch (error) {
           throw new Refusal('window_unavailable', `Cannot open a background tab: ${error.message}`);
         }
@@ -465,14 +470,19 @@ async function handle(request) {
       });
       if (!tab) throw new Refusal('window_unavailable', 'Chrome did not open the tab');
       let claim;
+      let now;
       try {
         claim = await claimTab(tab, owner, true);
+        now = await getTab(tab.id);
       } catch (error) {
-        await chrome.tabs.remove(tab.id).catch(() => {});
+        // Close the failed tab unless the human already switched to it.
+        if (!activatedWhileOpening.delete(tab.id)) await chrome.tabs.remove(tab.id).catch(() => {});
         throw error;
+      } finally {
+        opening.delete(tab.id);
       }
-      const now = await getTab(tab.id);
-      if (now.active) {
+      const activated = activatedWhileOpening.delete(tab.id);
+      if (now.active || activated) {
         // The human switched to the new tab while it loaded: it is theirs now.
         await endClaim(tab.id, 'human_activated_tab');
         throw new Refusal('ownership_revoked', `You switched to tab ${tab.id} while it opened; ca left it to you`, {
