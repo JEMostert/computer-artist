@@ -19,6 +19,9 @@ exactly one guide and follow its steps; never mix them:
 - macOS: [macOS](references/macos.md) (native desktop and Docker environments)
 - Anything else: Computer Artist does not support it yet. Tell the user and stop.
 
+Web pages in the user's own running Chrome/Chromium are the exception: on any
+operating system, follow [browser tabs](references/browser.md) (`ca browser`).
+
 ## 2. Rules on every platform
 
 - Prefer a private environment for development and testing (`ca env`). Use the

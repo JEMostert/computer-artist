@@ -21,6 +21,7 @@ interface or legacy `main(client)` runner.
 | Linux boxes on Windows/macOS, container transport and startup | `box`, `box_service`, `containers` |
 | Native Windows input, capture and accessibility | `windows`, `windows_agent`, `windows_pointer`, `windows_capture`, `windows_uia` |
 | Native macOS input, capture and accessibility | `macos`, `macos_native`, `macos_pointer`, `macos_activity`, `macos_capture`, `macos_accessibility` |
+| Browser extension bridge: transport/discovery, native host, CLI/install, MV3 extension | `browser`, `browser_host`, `browser_commands`, `chrome_extension/` |
 | Geometry, keys, configuration/setup | `gestures`, `input`, `config`, `diagnostics`, `setup`, `update`, `errors` |
 
 `Context` owns coordinates, preflight, takeover/geometry guards and invocation
@@ -49,5 +50,7 @@ points. Storage/contracts do not depend on desktop input. Linux input ownership
 and the KWin cursor stay in `plugin/main.cpp`; the Windows and macOS overlays draw
 the same ink pen with `ink_cursor`, so change both renderers together. Capture, clipboard and
 independent keyboard state have dedicated modules. Builds/tests do not update the host.
+`browser_host` is started by Chrome, imports only the standard library and never
+sends desktop input; `ca browser` reaches it through `browser`, not `Client`.
 `environment_service` runs inside each environment's systemd unit; the CLI talks
 to it over the private runtime's manager socket and never to the user's desktop.

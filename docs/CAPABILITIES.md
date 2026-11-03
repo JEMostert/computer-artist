@@ -35,6 +35,7 @@ that goal. Separate KWin instances are development test harnesses.
 | Verified outcomes | Invocation-owned checks and stable, optionally fresh file/text/JSON/image/hash checks |
 | Reusable work | Typed fragments, contracts, immutable versions, nested calls and explicit restore |
 | Workflow memory | Local task/app search, semantic notes, durable learned program/evidence summaries, guarded reuse and recent attempt timings; the calling agent teaches and verifies flows |
+| Browser tabs | `ca browser` drives tabs in your running Chrome/Chromium through the Computer Artist extension: DOM read/locate/click/type, leased tab claims revoked by your input, no OS input or tab switching; see [browser](BROWSER.md) |
 | Diagnosis | Read-only doctor (including stale/mismatched plugin builds), refusal details, JSON inspection, checkpoints and targeted stop |
 
 Workflow memory is agent-assisted: the agent searches local task/app/notes,
@@ -69,7 +70,9 @@ KWrite fixtures in separate KWin on 11 October 2026; GTK, browsers and other
 toolkits' accessibility trees are untested. Next: broaden native app/toolkit/scaling
 tests; investigate keyboard and popup compatibility separately; add
 visual/temporal observers where they measurably help. Automatic control discovery,
-model observers and remote transport are not implemented. Preserve conditional
+model observers and remote transport are not implemented. Browser tab control uses
+untrusted DOM events, not the input lanes above; it was verified only with Chrome for
+Testing on Linux (3 November 2026). Preserve conditional
 programs, continuous observation, precise gestures, handoff, verified outcomes
 and reusable procedures when simplifying.
 

@@ -112,6 +112,9 @@ def parser():
     from .update import add_command as add_update
 
     add_update(commands)
+    from .browser_commands import add_command as add_browser
+
+    add_browser(commands)
     doctor = commands.add_parser(
         'doctor',
         parents=[shared],
@@ -504,6 +507,12 @@ def main(argv=None):
 
             print(json.dumps(dispatch(args), indent=2))
             return 0
+        if args.command == 'browser':
+            from .browser_commands import dispatch
+
+            reply = dispatch(args)
+            print(json.dumps(reply, indent=2))
+            return 0 if reply.get('ok') else 1
         if getattr(args, 'environment', None):
             route_environment(args, explicit_lane)
         if args.command == 'setup':

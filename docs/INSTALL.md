@@ -68,6 +68,8 @@ A crash in a newly loaded plugin takes KWin down with it; run `scripts/test.sh
 
 Socket: `$XDG_RUNTIME_DIR/computer-artist/control`, overridden by `--socket` or
 `CA_SOCKET`. `ca doctor` checks both lanes without input or sessions.
+Browser tab control needs `ca browser install` and the extension loaded in each
+browser; see [browser](BROWSER.md).
 `ca setup --codex` links the skill into `~/.agents/skills` on Linux/macOS;
 `--skills-dir PATH` selects another location. Keep the linked source in place.
 Windows uses a managed copy; re-run setup to update it (manual edits are preserved).
