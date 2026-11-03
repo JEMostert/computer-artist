@@ -21,6 +21,10 @@ in for the human and capturing frames:
   the pen was moving. The action was refused with `ownership_revoked`
   (`human_input`), and no note was added. Later clicks landed after the action,
   which completed, and then ended the claim as before.
+- Trusted clicks inside the page's iframe 0.18 to 0.30 s into a glide ended the
+  claim from that frame. All four actions were refused with `ownership_revoked`
+  (`human_input`) and no note was added. A later fresh claim still typed and
+  clicked normally.
 - After human input, and after the human activated an agent's background tab, the
   tag changed to **Back to you** and the pen lifted away (`human_input`,
   `human_activated_tab`).

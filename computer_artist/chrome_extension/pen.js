@@ -261,6 +261,9 @@ if (!globalThis.__caPen) {
 
     // The claim ended: lift the pen off the page and remove it.
     leave(reason) {
+      // A pending action reads this so a claim that ended mid-glide does not act,
+      // including takeovers seen elsewhere, such as input inside an iframe.
+      globalThis.__caClaimEnded = { at: performance.now(), reason: reason || 'released' };
       if (!host?.isConnected || leaving) return;
       if (glide) glide.cancel();
       leaving = reason || 'released';

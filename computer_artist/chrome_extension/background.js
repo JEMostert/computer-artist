@@ -815,7 +815,7 @@ async function pageAction(request) {
     el.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: text }));
   };
   // Glide the pen to the target before acting, like the native pen. Human input
-  // while it moves takes the tab back, so the action is refused, not performed.
+  // or a claim that ends while it moves refuses the action instead of performing it.
   const started = performance.now();
   const pen = request.pen ? globalThis.__caPen : null;
   const arrive = async (el, spot) => {
@@ -825,6 +825,13 @@ async function pageAction(request) {
     if ((globalThis.__caHumanAt ?? -Infinity) > started) {
       return fail('ownership_revoked', 'Your input took the tab back before ca acted', {
         stop_reason: 'human_input',
+      });
+    }
+    const ended = globalThis.__caClaimEnded;
+    if (ended && ended.at > started) {
+      if (ended.reason === 'released') return fail('not_claimed', 'The claim was released before ca acted');
+      return fail('ownership_revoked', `The claim ended before ca acted: ${ended.reason}`, {
+        stop_reason: ended.reason,
       });
     }
     return null;
