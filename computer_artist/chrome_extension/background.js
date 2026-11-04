@@ -847,11 +847,17 @@ async function handle(request) {
       try {
         if (await painted()) {
           try {
-            data = await chrome.tabs.captureVisibleTab(tab.windowId, { format: 'png' });
+            // A window Chrome stops painting can leave this waiting for a frame that never
+            // comes (seen once for 30 s); after 5 s the debugger renders instead.
+            data = await Promise.race([
+              chrome.tabs.captureVisibleTab(tab.windowId, { format: 'png' }),
+              new Promise((_, reject) => setTimeout(() => reject(new Error('capture_stalled')), 5000)),
+            ]);
             method = 'visible_tab';
           } catch (error) {
             // Chrome allows about two visible captures a second; render the rest instead.
-            if (!/MAX_CAPTURE_VISIBLE_TAB_CALLS_PER_SECOND/.test(String(error?.message))) throw error;
+            const message = String(error?.message);
+            if (!/MAX_CAPTURE_VISIBLE_TAB_CALLS_PER_SECOND|^capture_stalled$/.test(message)) throw error;
           }
           // Hidden or switched away while capturing: that frame may be stale.
           if (method === 'visible_tab' && !((await getTab(tabId)).active && (await painted()))) method = 'debugger';

@@ -109,6 +109,13 @@ The capture now asks the page for `document.visibilityState` and uses
 otherwise it renders through the debugger. Chrome for Testing headless cannot cover a
 window, so the hidden-window path is verified in the user's Chrome after install.
 
+The other agent's own run (issue 2256, 0.7.0) matched: an `--agent-window` tab in an
+unfocused window returned one identical PNG (SHA-256 `08bc5bfa…`) for the grid, an
+opened editor and the settled editor while the DOM changed, and the next
+`visible_tab` screenshot, after a dialog opened, timed out after 30 s. That hang was
+not reproduced here; a visible capture now gives up after 5 s and renders through the
+debugger instead.
+
 Not proven live in the user's Chrome: whether Chrome shows a debugging notice during
 a capture (the agent cannot see browser UI; viewport heights did not change), and
 human takeover (needs real human input; proven in Chrome for Testing).
