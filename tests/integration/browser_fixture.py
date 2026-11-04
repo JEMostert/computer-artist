@@ -106,6 +106,7 @@ for (const tool of document.querySelectorAll('.tool')) {
 }
 const canvas = document.querySelector('canvas');
 const ctx = canvas.getContext('2d');
+ctx.fillStyle = '#ff00aa'; ctx.fillRect(0, 0, 40, 40);  // a mark that only a real render shows
 const strokes = document.getElementById('strokes');
 const log = (text) => { document.getElementById('log').textContent += text + ' '; };
 // Canvas pixels, as editors map them: client point to backing-store scale.

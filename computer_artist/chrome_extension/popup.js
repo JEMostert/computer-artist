@@ -72,13 +72,13 @@ function activity(claim) {
 
 async function render() {
   const [session, local, tabs, [current]] = await Promise.all([
-    chrome.storage.session.get(['bridge', 'claims', 'revoked']),
-    chrome.storage.local.get(['instance', 'label']),
+    chrome.storage.session.get(['bridge']),
+    chrome.storage.local.get(['instance', 'label', 'claims', 'revoked']),
     chrome.tabs.query({}),
     chrome.tabs.query({ active: true, currentWindow: true }),
   ]);
   const byId = new Map(tabs.map((t) => [t.id, t]));
-  const claims = Object.entries(session.claims || {}).map(([id, claim]) => ({ id: Number(id), ...claim }));
+  const claims = Object.entries(local.claims || {}).map(([id, claim]) => ({ id: Number(id), ...claim }));
   const status = session.bridge?.status || 'connecting';
 
   document.body.dataset.bridge = status;
@@ -97,7 +97,7 @@ async function render() {
   here.replaceChildren();
   here.className = 'here';
   const mine = current && claims.find((c) => c.id === current.id);
-  const stopped = current && !mine && session.revoked?.[current.id];
+  const stopped = current && !mine && local.revoked?.[current.id];
   if (mine) {
     here.classList.add('agent');
     const lead = el('p', 'lead');
@@ -137,7 +137,7 @@ async function render() {
   $('claims-empty').hidden = claims.length > 0;
 
   // Recent handbacks, newest first.
-  const history = Object.values(session.revoked || {})
+  const history = Object.values(local.revoked || {})
     .filter((r) => Date.now() - r.at < HISTORY_MS)
     .sort((a, b) => b.at - a.at)
     .slice(0, 3);
