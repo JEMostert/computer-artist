@@ -349,7 +349,8 @@ class Maintenance(unittest.TestCase):
         self.assertEqual(reply['tabs'][1]['result'], 'ended')
         left = sorted(p.name for p in browser_commands.lease_dir().glob('*.json'))
         self.assertEqual(left, [f'aaaaaaaa-1-{"f" * 24}.json', f'aaaaaaaa-2-{2:024x}.json'])
-        self.assertEqual(oct(browser_commands.lease_dir().stat().st_mode & 0o777), '0o700')
+        if os.name != 'nt':  # Windows has no POSIX modes
+            self.assertEqual(oct(browser_commands.lease_dir().stat().st_mode & 0o777), '0o700')
 
     def test_cleanup_keeps_records_it_could_not_check(self):
         current = {'instance': 'aaaaaaaa', 'extension_version': '0.7.0', 'address': 'unix:x'}
