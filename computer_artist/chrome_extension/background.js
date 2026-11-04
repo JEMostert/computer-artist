@@ -821,10 +821,20 @@ async function handle(request) {
           .catch(() => null);
       await pen(true);
       let data;
+      let method = visible ? 'visible_tab' : 'debugger';
       try {
-        data = visible
-          ? await chrome.tabs.captureVisibleTab(tab.windowId, { format: 'png' })
-          : await debuggerCapture(tabId);
+        if (visible) {
+          try {
+            data = await chrome.tabs.captureVisibleTab(tab.windowId, { format: 'png' });
+          } catch (error) {
+            // Chrome allows about two visible captures a second; render the rest instead.
+            if (!/MAX_CAPTURE_VISIBLE_TAB_CALLS_PER_SECOND/.test(String(error?.message))) throw error;
+            data = await debuggerCapture(tabId);
+            method = 'debugger';
+          }
+        } else {
+          data = await debuggerCapture(tabId);
+        }
       } finally {
         await pen(false);
       }
@@ -839,7 +849,7 @@ async function handle(request) {
           func: () => ({ width: innerWidth, height: innerHeight, scroll_x: scrollX, scroll_y: scrollY }),
         })
         .then((results) => results?.[0]?.result ?? null, () => null);
-      return { tab: tabId, format: 'png', data_url: data, viewport, method: visible ? 'visible_tab' : 'debugger' };
+      return { tab: tabId, format: 'png', data_url: data, viewport, method };
     }
     default:
       throw new Refusal('unknown_operation', `Unknown operation ${request.op}`);

@@ -66,7 +66,7 @@ kept, and `cleanup --owner` closed the open tab and reported the lost one as end
 ## Real Chrome regression
 
 `tests/integration/check-browser.py` now loads the extension the way "Load unpacked"
-does, with Developer mode on, and passed all 58 checks. New ones:
+does, with Developer mode on, and passed all 59 checks. New ones:
 
 - A background tab captured by the debugger without changing the focused window or
   active tab; the iframe canvas mark (900 px) appears in it, in 0.11 s through the CLI.
@@ -81,3 +81,16 @@ does, with Developer mode on, and passed all 58 checks. New ones:
   build, the claim held and accepted a click, a tab opened through a redirect kept its
   claim, `ca browser reload` reported no reload
   needed, and a trusted click in the claimed tab still ended its claim.
+
+## Follow-up: visible capture quota (0.7.1)
+
+In the user's Chrome, two back-to-back screenshots of a shown tab failed with
+Chrome's `MAX_CAPTURE_VISIBLE_TAB_CALLS_PER_SECOND` quota (about two a second).
+Reproduced in Chrome for Testing: of four simultaneous captures of the agent-window
+tab, three failed that way. Now only that error falls back to the debugger render;
+the same four captures returned one `visible_tab` and three `debugger` images. Other
+capture errors are reported as before.
+
+Not proven live in the user's Chrome: whether Chrome shows a debugging notice during
+a capture (the agent cannot see browser UI; viewport heights did not change), and
+human takeover (needs real human input; proven in Chrome for Testing).
