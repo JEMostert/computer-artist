@@ -124,6 +124,7 @@ class Host:
                 'ok': False,
                 'error': 'instance_disconnected',
                 'detail': 'The browser closed the extension connection',
+                'delivered': True,
             }
             slot[0].set()
         if self.server:
@@ -151,7 +152,12 @@ class Host:
         except (TypeError, ValueError):
             return {'ok': False, 'error': 'invalid_request', 'detail': 'Invalid timeout'}
         if self.closed.is_set():
-            return {'ok': False, 'error': 'instance_disconnected', 'detail': 'Browser is gone'}
+            return {
+                'ok': False,
+                'error': 'instance_disconnected',
+                'detail': 'Browser is gone',
+                'delivered': False,
+            }
         ident = next(self.ids)
         slot = [threading.Event(), None]
         with self.pending_lock:
@@ -165,7 +171,12 @@ class Host:
         except OSError:
             with self.pending_lock:
                 self.pending.pop(ident, None)
-            return {'ok': False, 'error': 'instance_disconnected', 'detail': 'Browser is gone'}
+            return {
+                'ok': False,
+                'error': 'instance_disconnected',
+                'detail': 'Browser is gone',
+                'delivered': False,
+            }
         if not slot[0].wait(timeout + 2):
             with self.pending_lock:
                 self.pending.pop(ident, None)

@@ -5,9 +5,11 @@ import hashlib
 import json
 import math
 import os
+import re
 import shutil
 import struct
 import sys
+import time
 import uuid
 import zipfile
 from pathlib import Path
@@ -35,12 +37,15 @@ BROWSERS = {
     'vivaldi': ('vivaldi', 'Vivaldi', None),
 }
 
-OPERATIONS = ('instances', 'label', 'tabs', 'open', 'claim', 'release', 'status', 'close',
+OPERATIONS = ('instances', 'label', 'cleanup', 'reload', 'tabs', 'open', 'claim', 'release', 'status', 'close',
               'focus', 'navigate', 'read', 'locate', 'wait', 'click', 'move', 'drag', 'scroll',
               'type', 'select', 'press', 'screenshot')  # fmt: skip
 # Pointer coordinates, gestures and frames need this extension; older ones would
 # ignore the new fields and act on an element's centre instead.
 POINTER_VERSION = (0, 6, 0)
+BUILD_MARK = '__CA_BUILD__'
+# Reads can be repeated after the browser host restarts mid-request; actions cannot.
+READS = ('tabs', 'status', 'read', 'locate', 'wait', 'screenshot', 'label')
 POINTER_FIELDS = ('x', 'y', 'button', 'count', 'modifiers', 'frame', 'path', 'delta', 'axis')
 MODIFIERS = {'shift': 'Shift', 'control': 'Control', 'ctrl': 'Control', 'alt': 'Alt',
              'option': 'Alt', 'opt': 'Alt', 'meta': 'Meta', 'cmd': 'Meta', 'command': 'Meta',
@@ -130,6 +135,24 @@ def add_command(commands):
     open_.add_argument('url')
     open_.add_argument('--window', type=int, help='Window ID (default: the last focused)')
     open_.add_argument('--owner', help='Name shown on the claim (default: ca)')
+    open_.add_argument(
+        '--agent-window',
+        action='store_true',
+        help="Open in the agents' own unfocused window, created on first use; its tabs render "
+        'like visible ones and never appear in your windows',
+    )
+    target(
+        'reload',
+        'Load the installed extension files after ca browser install; claims are kept',
+        tab=False,
+    )
+    cleanup = target(
+        'cleanup',
+        'Close tabs this user opened as OWNER and release its claims, using the leases ca '
+        'recorded; other owners are untouched',
+        tab=False,
+    )
+    cleanup.add_argument('--owner', required=True, help='Owner name used with open or claim')
     claim = target('claim', 'Claim an existing tab for agent actions')
     claim.add_argument('--owner', help='Name shown on the claim (default: ca)')
     target('release', 'Release a claimed tab', lease=True)
@@ -208,7 +231,11 @@ def add_command(commands):
     press = target('press', 'Press a key such as Enter, Escape or Backspace', lease=True)
     element(press, required=False)
     press.add_argument('key')
-    shot = target('screenshot', 'Capture the visible tab to a new PNG')
+    shot = target(
+        'screenshot',
+        'Capture a tab to a new PNG: the active tab as shown, any other tab rendered in the '
+        'background without switching to it',
+    )
     shot.add_argument('output', type=Path, help='New PNG file; existing files are not overwritten')
 
 
@@ -235,6 +262,10 @@ def operate(args):
         problems = []
         instances = bridge.live_instances(problems=problems)
         return {'ok': True, 'instances': instances, 'unreachable': problems}
+    if action == 'cleanup':
+        return cleanup(args)
+    if action == 'reload':
+        return reload(args)
     wanted = args.instance
     tab = None
     if getattr(args, 'tab', None) is not None:
@@ -253,17 +284,173 @@ def operate(args):
     request.update(pointer_fields(args, action))
     if any(name in request for name in POINTER_FIELDS) or action in ('move', 'drag', 'scroll'):
         require_version(instance, POINTER_VERSION, action)
+    if getattr(args, 'agent_window', False):
+        require_capability(instance, 'agent_window', action)
+        request['agent_window'] = True
     if action == 'select':
         request['value'] = args.value
     if action == 'type':
         request['input'] = args.value
     if action in ('open', 'claim') and not request.get('owner'):
         request['owner'] = os.environ.get('CA_BROWSER_OWNER', 'ca')
-    reply = bridge.call(instance, request, args.timeout)
+    reply = call_with_recovery(instance, request, args.timeout, action in READS)
     reply = with_handles(instance['instance'], reply)
     if action == 'screenshot' and reply.get('ok'):
         reply = save_png(reply, args.output)
+    if reply.get('ok') and action in ('open', 'claim'):
+        journal(instance['instance'], reply.get('tab'), reply.get('lease'), reply, action)
+    elif reply.get('ok') and action in ('release', 'close'):
+        forget(instance['instance'], tab, request.get('lease'))
     return {'instance': instance['instance'], **reply}
+
+
+def call_with_recovery(instance, request, timeout, repeatable):
+    """Send once; if the browser host restarted, wait for it and send again when safe.
+
+    A request that never reached the extension (refused connection, or the host says it
+    was not delivered) may be resent once the extension reconnects. One that may have
+    arrived is resent only for reads, since an action may already have happened.
+    """
+    try:
+        reply = bridge.call(instance, request, timeout)
+        if reply.get('error') != 'instance_disconnected':
+            return reply
+        if reply.get('delivered', True) and not repeatable:
+            return reply
+        failure = reply
+    except bridge.BrowserError as error:
+        unsent = error.code == 'instance_unavailable'
+        if not (unsent or (repeatable and error.code == 'instance_disconnected')):
+            raise
+        failure = error
+    deadline = time.monotonic() + 8
+    while time.monotonic() < deadline:
+        time.sleep(0.4)
+        found = [i for i in bridge.live_instances() if i['instance'] == instance['instance']]
+        if found and found[0].get('address') != instance.get('address'):
+            return bridge.call(found[0], request, timeout)
+    if isinstance(failure, dict):
+        return failure
+    raise failure
+
+
+def reload(args):
+    """Ask a running extension to load the installed build, then wait for it to return."""
+    problems = []
+    instance = bridge.select_instance(
+        bridge.live_instances(problems=problems), args.instance, problems
+    )
+    installed = installed_build(bridge.data_dir() / 'chrome-extension')
+    if instance.get('build') == installed:
+        return {'ok': True, 'instance': instance['instance'], 'build': installed, 'reloaded': False}
+    if 'reload' not in (instance.get('capabilities') or []):
+        return {'ok': False, 'error': 'manual_reload_needed', 'instance': instance['instance'],
+                'detail': f'Extension {instance.get("extension_version")} cannot reload itself; press '
+                'the reload button on the Computer Artist card in chrome://extensions once.'}  # fmt: skip
+    reply = bridge.call(instance, {'op': 'reload'}, 10)
+    if not reply.get('ok'):
+        return {'instance': instance['instance'], **reply}
+    deadline = time.monotonic() + max(args.timeout, 10)
+    while time.monotonic() < deadline:
+        time.sleep(0.5)
+        for found in bridge.live_instances():
+            if found['instance'] == instance['instance'] and found.get('pid') != instance.get(
+                'pid'
+            ):
+                ok = found.get('build') == installed
+                return {'ok': ok, 'instance': found['instance'], 'reloaded': True,
+                        'previous_build': reply.get('previous_build'), 'build': found.get('build'),
+                        **({} if ok else {'error': 'extension_outdated', 'detail': 'Chrome loaded '
+                           'another build; run ca browser install and reload again'})}  # fmt: skip
+    return {'ok': False, 'error': 'timeout', 'instance': instance['instance'],
+            'detail': 'The extension did not come back. Developer mode must stay on for unpacked '
+            'extensions; run ca browser doctor.'}  # fmt: skip
+
+
+def lease_dir():
+    return bridge.private_dir(bridge.data_dir() / 'leases')
+
+
+def lease_file(instance, tab, lease):
+    # One file per lease, so ending one claim never touches another owner's record.
+    return lease_dir() / f'{instance}-{tab}-{lease}.json'
+
+
+def journal(instance, tab, lease, reply, action):
+    """Remember leases this user holds, so cleanup can end them after an agent forgets them."""
+    if not lease or not re.fullmatch(r'[0-9a-f]{8,64}', str(lease)):
+        return
+    record = {'instance': instance, 'tab': tab, 'lease': lease,
+              'owner': (reply.get('claim') or {}).get('owner'), 'opened': action == 'open'}  # fmt: skip
+    path = lease_file(instance, tab, lease)
+    temp = path.with_name(f'.{path.name}.{os.getpid()}')
+    fd = os.open(temp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, 'w', encoding='utf-8') as stream:
+        json.dump(record, stream)
+    os.replace(temp, path)
+
+
+def forget(instance, tab, lease):
+    if lease and re.fullmatch(r'[0-9a-f]{8,64}', str(lease)):
+        lease_file(instance, tab, lease).unlink(missing_ok=True)
+
+
+def cleanup(args):
+    """Close or release this owner's recorded tabs; a lease that no longer holds is dropped."""
+    problems = []
+    instances = {i['instance']: i for i in bridge.live_instances(problems=problems)}
+    results = []
+    for path in sorted(lease_dir().glob('*.json')):
+        try:
+            record = json.loads(path.read_text())
+        except (OSError, ValueError):
+            continue
+        if record.get('owner') != args.owner:
+            continue
+        if args.instance and args.instance not in (record['instance'],
+                                                   instances.get(record['instance'], {}).get('label')):  # fmt: skip
+            continue
+        instance = instances.get(record['instance'])
+        if not instance:
+            results.append({**record, 'lease': None, 'result': 'instance_unavailable'})
+            continue
+        base = {'tab': record['tab'], 'lease': record['lease']}
+        status = bridge.call(instance, {'op': 'status', **base}, args.timeout)
+        if not status.get('ok'):
+            # Unknown, not ended: keep the record for a later cleanup.
+            results.append({'handle': f'{record["instance"]}:{record["tab"]}',
+                            'result': status.get('error', 'failed')})  # fmt: skip
+            continue
+        if not status.get('holds_lease'):
+            # The claim ended elsewhere (human input, closed tab, an older extension's reload).
+            path.unlink(missing_ok=True)
+            results.append({'handle': f'{record["instance"]}:{record["tab"]}', 'result': 'ended',
+                            'tab_open': status.get('exists'), 'stop_reason': status.get('stop_reason')})  # fmt: skip
+            continue
+        op = 'close' if record.get('opened') else 'release'
+        reply = bridge.call(instance, {'op': op, **base}, args.timeout)
+        if reply.get('ok'):
+            path.unlink(missing_ok=True)
+        results.append(
+            {
+                'handle': f'{record["instance"]}:{record["tab"]}',
+                'result': op if reply.get('ok') else reply.get('error'),
+            }
+        )
+    return {'ok': all(r['result'] in ('close', 'release', 'ended') for r in results), 'owner': args.owner,
+            'tabs': results, 'unreachable': problems}  # fmt: skip
+
+
+def require_capability(instance, capability, action):
+    if capability not in (instance.get('capabilities') or []):
+        raise bridge.BrowserError(
+            'extension_outdated',
+            f'{action} with these options needs an extension with {capability}; the browser runs '
+            f'{instance.get("extension_version")}. Run ca browser install, then reload the '
+            'extension card.',
+            instance=instance.get('instance'),
+            running=instance.get('extension_version'),
+        )
 
 
 def pointer_fields(args, action):
@@ -475,6 +662,7 @@ def install(args):
         'dry_run': args.dry_run,
         'extension_id': ident,
         'extension_version': manifest['version'],
+        'build': build_id(),
         'extension_dir': str(extension_dir),
         'host': str(command),
         'hosts': results,
@@ -544,12 +732,37 @@ def registered_manifest(location):
         return None
 
 
+def build_id(root=EXTENSION_SOURCE):
+    """Digest of the extension source, stamped into the installed worker."""
+    digest = hashlib.sha256()
+    for name in extension_files(root):
+        digest.update(name.encode() + b'\0' + (Path(root) / name).read_bytes() + b'\0')
+    return digest.hexdigest()[:12]
+
+
+def stamped(name, data):
+    if name == 'background.js':
+        data = data.replace(f"'{BUILD_MARK}'".encode(), f"'{build_id()}'".encode(), 1)
+    return data
+
+
+def installed_build(extension_dir):
+    try:
+        text = (Path(extension_dir) / 'background.js').read_text()
+    except OSError:
+        return None
+    found = re.search(r"const BUILD = '([^']*)'", text)
+    return found.group(1) if found else None
+
+
 def copy_extension(destination):
     """Replace the installed extension copy as a whole, never merging old files."""
     if destination.exists() and not (destination / 'manifest.json').is_file():
         raise ValueError(f'Refusing to replace an unrelated folder: {destination}')
     staging = destination.with_name(f'.{destination.name}.{uuid.uuid4().hex}')
     shutil.copytree(EXTENSION_SOURCE, staging, ignore=shutil.ignore_patterns('.*'))
+    worker = staging / 'background.js'
+    worker.write_bytes(stamped('background.js', worker.read_bytes()))
     previous = None
     if destination.exists():
         previous = destination.with_name(f'.{destination.name}.old.{uuid.uuid4().hex}')
@@ -575,7 +788,8 @@ def package(output):
                 info = zipfile.ZipInfo(name, date_time=(1980, 1, 1, 0, 0, 0))
                 info.external_attr = 0o644 << 16
                 info.compress_type = zipfile.ZIP_DEFLATED
-                archive.writestr(info, (EXTENSION_SOURCE / name).read_bytes(), compresslevel=9)
+                data = stamped(name, (EXTENSION_SOURCE / name).read_bytes())
+                archive.writestr(info, data, compresslevel=9)
         os.replace(temp, path)
     finally:
         temp.unlink(missing_ok=True)
@@ -608,7 +822,9 @@ def doctor():
 
     installed = extension_dir / 'manifest.json'
     version = json.loads(installed.read_text()).get('version') if installed.is_file() else None
-    check('extension_files', version == manifest['version'], f'{extension_dir}: {version}',
+    build = installed_build(extension_dir)
+    check('extension_files', version == manifest['version'] and build == build_id(),
+          f'{extension_dir}: {version} build {build}',
           'Run ca browser install, then reload the extension card.')  # fmt: skip
     current = all(path.is_file() and path.read_text() == text for path, text in files.items())
     check('host_launcher', current, str(command), 'Run ca browser install.')
@@ -632,10 +848,13 @@ def doctor():
     except bridge.BrowserError as error:
         instances = []
         problems.append(error.as_dict())
+    # The version changes only per release; the build tells which files Chrome loaded.
     warnings = [
-        {'code': 'extension_version', 'instance': i['instance'], 'running': i.get('extension_version'),
-         'bundled': manifest['version'], 'remedy': 'Reload the extension card in the browser.'}
-        for i in instances if i.get('extension_version') != manifest['version']
+        {'code': 'extension_reload_needed', 'instance': i['instance'],
+         'running': f'{i.get("extension_version")} build {i.get("build")}',
+         'installed': f'{version} build {build}',
+         'remedy': 'Reload the Computer Artist card in chrome://extensions to load the installed build.'}
+        for i in instances if (i.get('extension_version'), i.get('build')) != (version, build)
     ]  # fmt: skip
     return {
         'ok': all(c['passed'] for c in checks),
@@ -643,7 +862,10 @@ def doctor():
         'rendezvous': str(bridge.rendezvous_dir()),
         'checks': checks,
         'hosts': hosts,
-        'instances': [bridge.summary(i) for i in instances],
+        'instances': [
+            {**bridge.summary(i), 'build': i.get('build'), 'capabilities': i.get('capabilities')}
+            for i in instances
+        ],  # fmt: skip
         'unreachable': problems,
         'warnings': warnings,
     }

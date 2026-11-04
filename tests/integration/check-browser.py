@@ -163,13 +163,33 @@ def launch(chrome, profile, extension, env):
         '--use-mock-keychain',
         '--no-first-run',
         '--no-default-browser-check',
-        f'--disable-extensions-except={extension}',
-        f'--load-extension={extension}',
+        # Loaded below as "Load unpacked" does, so reloads behave as in a user's browser.
+        '--enable-unsafe-extension-debugging',
         '--remote-debugging-port=0',
         'about:blank',
     ]
     return subprocess.Popen(command, env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                             start_new_session=True)  # fmt: skip
+
+
+def load_unpacked(profile, extension):
+    """Turn on developer mode and load the extension unpacked, like a user would."""
+    port = devtools_port(profile)
+    with urlopen(f'http://127.0.0.1:{port}/json/version') as response:
+        browser = DevTools(json.load(response)['webSocketDebuggerUrl'])
+    with urlopen(
+        Request(f'http://127.0.0.1:{port}/json/new?chrome://extensions', method='PUT')
+    ) as r:
+        page = json.load(r)
+    time.sleep(1)
+    tools = DevTools(page['webSocketDebuggerUrl'])
+    tools.call('Runtime.evaluate', awaitPromise=True,
+               expression='chrome.developerPrivate.updateProfileConfiguration({inDeveloperMode: true})')  # fmt: skip
+    tools.close()
+    with urlopen(f'http://127.0.0.1:{port}/json/close/{page["id"]}') as r:
+        r.read()
+    browser.call('Extensions.loadUnpacked', path=str(extension))
+    browser.close()
 
 
 def wait_instances(env, count, timeout=20, exclude_pid=None):
@@ -196,8 +216,8 @@ def windows_snapshot(env, instance):
 # -------------------------------------------------------- pointer and frames
 
 
-def pen_pixels(path):
-    """Count pixels in the pen's teal name tag (#0a7c60) in an 8-bit RGB(A) PNG."""
+def pen_pixels(path, colour=(10, 124, 96)):
+    """Count pixels near a colour (default: the pen's teal tag) in an 8-bit RGB(A) PNG."""
     data = Path(path).read_bytes()
     width, height, depth, kind = struct.unpack('>IIBB', data[16:26])
     assert depth == 8 and kind in (2, 6), (depth, kind)
@@ -231,7 +251,7 @@ def pen_pixels(path):
                 line[i] = (line[i] + pick) & 255
         for i in range(0, stride, channels):
             r, g, b = line[i], line[i + 1], line[i + 2]
-            if abs(r - 10) < 12 and abs(g - 124) < 12 and abs(b - 96) < 12:
+            if abs(r - colour[0]) < 12 and abs(g - colour[1]) < 12 and abs(b - colour[2]) < 12:
                 count += 1
         previous = line
     return count
@@ -395,6 +415,147 @@ def check_pointer(env, url, work, port):
     ca('close', '--tab', tab, '--lease', lease, env=env)
 
 
+def check_background_work(env, url, work, port, ids):
+    """Background capture, the agent window, cleanup and claims across an extension reload."""
+    before = windows_snapshot(env, 'alpha')
+    opened = ca('open', url + 'draw', '--instance', 'alpha', '--owner', 'viewer', env=env,
+                expect_ok=True)  # fmt: skip
+    tab, lease = opened['handle'], opened['lease']
+    ca('wait', '--tab', tab, '--frame', '#pad', '--selector', 'canvas', env=env, expect_ok=True)
+    ca('move', '--tab', tab, '--lease', lease, '--frame', '#pad', '--selector', 'canvas', env=env)
+    began = time.perf_counter()
+    shot = ca('screenshot', '--tab', tab, str(work / 'background.png'), env=env)
+    seconds = round(time.perf_counter() - began, 3)
+    magenta = pen_pixels(work / 'background.png', (255, 0, 170)) if shot.get('ok') else 0
+    step('background_capture_shows_iframe_canvas', shot.get('ok') and shot.get('method') == 'debugger'
+         and magenta > 500 and windows_snapshot(env, 'alpha') == before, magenta_pixels=magenta,
+         seconds=seconds, scale=shot.get('scale'), bytes=(work / 'background.png').stat().st_size
+         if shot.get('ok') else None)  # fmt: skip
+
+    # Two agents capture their own background tabs at the same time.
+    other = ca('open', url + 'draw', '--instance', 'alpha', '--owner', 'viewer-2', env=env,
+               expect_ok=True)  # fmt: skip
+    ca('wait', '--tab', other['handle'], '--frame', '#pad', '--selector', 'canvas', env=env)
+    shots = {}
+    threads = [threading.Thread(target=lambda h=h, n=n: shots.setdefault(n, ca(
+        'screenshot', '--tab', h, str(work / f'parallel-{n}.png'), env=env)))
+        for n, h in enumerate([tab, other['handle'], tab])]  # fmt: skip
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+    step('concurrent_background_captures', all(r.get('ok') for r in shots.values()),
+         errors=[r.get('error') for r in shots.values()])  # fmt: skip
+
+    # The human works in their own tab while the agent drags: only input in a tab ends its claim.
+    user_tab = next(t for t in ca('tabs', '--instance', 'alpha', env=env)['tabs'] if t['active'])
+    user_target = page_target(port, lambda t: t['url'] == 'about:blank')
+    pending = {}
+    dragging = threading.Thread(target=lambda: pending.setdefault('reply', ca(
+        'drag', '--tab', tab, '--lease', lease, '--frame', '#pad', '--selector', 'canvas',
+        '--from', '10', '10', '--to', '200', '150', '--interval', '0.03', env=env)))  # fmt: skip
+    dragging.start()
+    time.sleep(0.4)
+    human = DevTools(user_target['webSocketDebuggerUrl'])
+    for kind in ('mousePressed', 'mouseReleased'):
+        human.call('Input.dispatchMouseEvent', type=kind, x=5, y=5, button='left', clickCount=1)
+    human.close()
+    dragging.join(30)
+    status = ca('status', '--tab', tab, '--lease', lease, env=env)
+    step('unrelated_human_input_keeps_agent_claim', pending.get('reply', {}).get('ok')
+         and status.get('holds_lease'), drag=pending.get('reply', {}).get('error'),
+         status=status.get('stop_reason'))  # fmt: skip
+
+    # The agents' own window: created unfocused, its tab renders as visible.
+    windowed = ca('open', url + 'pad', '--instance', 'alpha', '--owner', 'viewer',
+                  '--agent-window', env=env)  # fmt: skip
+    second = ca('open', url + 'other', '--instance', 'alpha', '--owner', 'viewer',
+                '--agent-window', env=env)  # fmt: skip
+    after = windows_snapshot(env, 'alpha')
+    shown = ca('screenshot', '--tab', second.get('handle', ''), str(work / 'window.png'), env=env)
+    step('agent_window_unfocused_and_reused', windowed.get('ok') and second.get('ok')
+         and windowed.get('window') == second.get('window') != user_tab['window']
+         and after['focused_windows'] == before['focused_windows'] and second.get('active')
+         and user_tab['tab'] in after['active_tabs'] and shown.get('method') == 'visible_tab',
+         window=windowed.get('window'), focus=after, method=shown.get('method'))  # fmt: skip
+
+    # An agent that lost its leases cleans up only its own tabs.
+    cleaned = ca('cleanup', '--owner', 'viewer-2', env=env)
+    gone = ca('status', '--tab', other['handle'], env=env)
+    mine = ca('status', '--tab', tab, '--lease', lease, env=env)
+    step('cleanup_closes_only_own_tabs', cleaned.get('ok') and not gone.get('exists')
+         and mine.get('holds_lease'), cleaned=cleaned.get('tabs'))  # fmt: skip
+
+    # Simultaneous first opens in another browser share one new agent window.
+    pair = {}
+    openers = [threading.Thread(target=lambda n=n: pair.setdefault(n, ca(
+        'open', url + 'other', '--instance', 'beta', '--owner', 'pair', '--agent-window', env=env)))
+        for n in range(2)]  # fmt: skip
+    for thread in openers:
+        thread.start()
+    for thread in openers:
+        thread.join()
+    step('simultaneous_agent_window_opens_share_one', all(r.get('ok') for r in pair.values())
+         and pair[0].get('window') == pair[1].get('window'),
+         windows=[r.get('window') for r in pair.values()])  # fmt: skip
+    ca('cleanup', '--owner', 'pair', env=env)
+    # A tab opened through a redirect keeps its claim across the reload below.
+    redirected = ca('open', url + 'redirect', '--instance', 'alpha', '--owner', 'viewer', env=env)
+
+    # Reload the extension as the card's button does; claims and the human watch survive.
+    build = next(i for i in ca('instances', env=env)['instances'] if i['label'] == 'alpha').get(
+        'build'
+    )
+    host = next(i for i in ca('instances', env=env)['instances'] if i['label'] == 'alpha')['pid']
+    with urlopen(
+        Request(f'http://127.0.0.1:{port}/json/new?chrome://extensions', method='PUT')
+    ) as r:
+        page = json.load(r)
+    time.sleep(1)
+    tools = DevTools(page['webSocketDebuggerUrl'])
+    extension = browser_commands_id()
+    tools.call('Runtime.evaluate', expression=f'chrome.developerPrivate.reload({json.dumps(extension)}, '
+               '{failQuietly: true})', awaitPromise=True)  # fmt: skip
+    tools.close()
+    with urlopen(f'http://127.0.0.1:{port}/json/close/{page["id"]}') as r:
+        r.read()
+    back = wait_instances(env, 2, timeout=40, exclude_pid=host)
+    # ca's own reload, unneeded with the build already loaded, is a no-op.
+    same = ca('reload', '--instance', 'alpha', env=env)
+    reloaded = next(i for i in back if i['label'] == 'alpha')
+    kept = ca('status', '--tab', tab, '--lease', lease, env=env)
+    acted = ca(
+        'click', '--tab', tab, '--lease', lease, '--frame', '#pad', '--text', 'Dot tool', env=env
+    )
+    after_redirect = ca('status', '--tab', redirected.get('handle', ''), '--lease',
+                        redirected.get('lease', ''), env=env)  # fmt: skip
+    step('claims_survive_extension_reload', reloaded.get('build') == build and kept.get('holds_lease')
+         and acted.get('ok') and same.get('reloaded') is False
+         and after_redirect.get('holds_lease'), build=build, redirect=after_redirect.get('url'),
+         kept=kept.get('holds_lease'), acted=acted.get('error'), noop=same)  # fmt: skip
+    # A trusted click in the agent's tab after the reload still ends that claim.
+    target = page_target(port, lambda t: t['url'].startswith(url + 'draw'))
+    human = DevTools(target['webSocketDebuggerUrl'])
+    for kind in ('mousePressed', 'mouseReleased'):
+        human.call('Input.dispatchMouseEvent', type=kind, x=5, y=5, button='left', clickCount=1)
+    human.close()
+    time.sleep(0.6)
+    revoked = ca('status', '--tab', tab, '--lease', lease, env=env)
+    step('human_watch_live_after_reload', revoked.get('stop_reason') == 'human_input',
+         status=revoked.get('stop_reason'))  # fmt: skip
+    for handle, held in ((windowed.get('handle'), windowed.get('lease')),
+                         (second.get('handle'), second.get('lease'))):  # fmt: skip
+        if handle:
+            ca('close', '--tab', handle, '--lease', held, env=env)
+
+
+def browser_commands_id():
+    sys.path.insert(0, str(ROOT))
+    from computer_artist import browser_commands
+
+    return browser_commands.extension_id(browser_commands.bundled_manifest())
+
+
 # --------------------------------------------------------------------- main
 
 
@@ -437,6 +598,7 @@ def main():
         for count, (name, profile) in enumerate(profiles.items(), 1):
             # Start them one at a time so each new instance gets its profile's label.
             browsers[name] = launch(args.chrome, profile, extension, env)
+            load_unpacked(profile, extension)
             found = wait_instances(env, count)
             ids[name] = next(i['instance'] for i in found if i['instance'] not in ids.values())
             ca('label', name, '--instance', ids[name], env=env, expect_ok=True)
@@ -568,7 +730,10 @@ def main():
         missing = ca('read', '--tab', f'{ids["alpha"]}:999999', env=env)
         step('missing_tab_refused', missing.get('error') == 'target_unavailable')
         hidden = ca('screenshot', '--tab', tab, str(work / 'hidden.png'), env=env)
-        step('background_screenshot_refused', hidden.get('error') == 'tab_not_visible')
+        still = windows_snapshot(env, 'alpha')
+        step('background_screenshot_renders_without_switching', hidden.get('ok')
+             and hidden.get('method') == 'debugger' and hidden.get('width', 0) > 0
+             and still == before, method=hidden.get('method'), error=hidden.get('error'))  # fmt: skip
         unleased = ca('focus', '--tab', tab, '--lease', 'wrong', env=env)
         focused = ca('focus', '--tab', tab, '--lease', lease, env=env)
         held = ca('status', '--tab', tab, '--lease', lease, env=env)
@@ -752,6 +917,7 @@ def main():
         )
 
         check_pointer(env, url, work, port)
+        check_background_work(env, url, work, port, ids)
 
         if args.idle:
             pid = next(

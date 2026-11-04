@@ -243,7 +243,8 @@ if (!globalThis.__caPen) {
     conceal(hidden) {
       if (!host?.isConnected) return Promise.resolve(false);
       host.style.setProperty('visibility', hidden ? 'hidden' : 'visible', 'important');
-      if (!hidden) return Promise.resolve(true);
+      // A hidden tab paints nothing until captured, and its frames never fire.
+      if (!hidden || !visible()) return Promise.resolve(true);
       return new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(() => done(true))));
     },
 

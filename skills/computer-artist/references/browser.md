@@ -14,15 +14,22 @@ browser (`ca env browser`) remains the default.
    mode, Load unpacked, the card's reload button); tell them, never work around it.
    With several instances, pass `--instance` or full `INSTANCE:TAB` handles every time.
 2. Work in a tab you open: `ca browser open URL --owner NAME` returns a background
-   tab `handle` and a `lease`. Claim an existing tab (`ca browser claim --tab H`)
-   only when the user asked you to work in that tab.
+   tab `handle` and a `lease`. Add `--agent-window` to keep agent tabs in their own
+   unfocused window (they render at full speed there). Claim an existing tab
+   (`ca browser claim --tab H`) only when the user asked you to work in that tab.
 3. Observe, then act: `read`, `locate` (returns `ref`s) and `wait`; then `click`,
    `type`, `select`, `press`, `drag`, `move`, `scroll` or `navigate` with
    `--tab H --lease L`. Re-locate after any navigation; refs from an earlier page are
    refused as `stale_element`. `tabs` marks pages Chrome forbids (`scriptable: false`).
 4. Verify the outcome by reading it back, after `navigate --reload` when it must
    persist. A dispatched click is a claim, not proof.
-5. Finish: `close` tabs you opened and `release` tabs you claimed.
+5. Finish: `close` tabs you opened and `release` tabs you claimed. If you lost a
+   lease, `ca browser cleanup --owner NAME` ends your own recorded claims.
+
+Screenshots work on background tabs too: `ca browser screenshot --tab H out.png`
+renders the tab without switching to it (`method: debugger`), so routine visual
+checks need neither `focus` nor the user's attention. Use `focus` only when the user
+should look.
 
 Done when the outcome reads back as expected and every claim you made is closed
 or released.
@@ -31,7 +38,7 @@ or released.
 
 Coordinates are CSS pixels: `--x/--y` (and `drag --from X Y [--via X Y] --to X Y`)
 are offsets from an element's top-left, or viewport points without an element.
-For a canvas, `focus` the tab, take a `screenshot` and divide image pixels by its
+For a canvas, take a `screenshot` (no `focus` needed) and divide image pixels by its
 `scale` to get viewport points, or use offsets from the canvas `locate` rect. Pick
 tools by their tooltip (`--text 'Single bond'`), then click or drag on the canvas.
 Hover-gated toolbars work because clicks send the hover events first.
@@ -69,14 +76,16 @@ visible testing; never for background work.
   happen.
 - `ambiguous_target` lists candidates: choose a `ref`, or pass `--first` only when
   any match is acceptable.
-- `tab_not_visible`: screenshots need the active tab of a visible window. Use
-  `read`/`locate`, or `focus` when the user should see it.
+- `capture_unavailable`: Chrome would not render that tab in the background
+  (another debugger is attached). Use `read`/`locate`, or `focus` if the user agrees.
 - `page_unavailable`: browser pages, the Web Store and (without file access)
   `file://` URLs cannot be scripted; `restriction` says which.
 - `point_outside_viewport`, `cross_origin_frame`, `frame_not_found`: fix the point
   or frame; viewport points are not scrolled.
-- `extension_outdated`: the browser runs an extension older than this CLI. Run
-  `ca browser install` and ask the user to reload the extension card.
+- `extension_outdated`, or a `doctor` warning `extension_reload_needed`: run
+  `ca browser install`, then `ca browser reload` (it keeps claims; it refuses while
+  requests run). `manual_reload_needed` means the running extension predates 0.7.0:
+  ask the user once to press reload on the Computer Artist card.
 
 Events are untrusted (`isTrusted: false`). Sites that demand real gestures (file
 pickers, clipboard, popups, native drag and drop) refuse them; tell the user instead

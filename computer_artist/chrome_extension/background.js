@@ -11,6 +11,12 @@
 const HOST = 'com.computer_artist.browser';
 const PROTOCOL = 1;
 const VERSION = chrome.runtime.getManifest().version;
+// ca browser install stamps the installed files' digest here, so ca can tell which
+// build is running (the version alone does not change between installs).
+const BUILD = '__CA_BUILD__';
+const CAPABILITIES = ['pointer', 'frames', 'background_capture', 'agent_window', 'durable_claims', 'reload'];
+let inFlight = 0; // requests being handled, so a reload never cuts one off
+let reloading = false;
 const BADGE = '#0a7c60'; // Chrome lane teal, shared with pen.js and the popup.
 const GROUP_TITLE = 'CA';
 const GROUP_COLOR = 'green';
@@ -69,6 +75,7 @@ async function hello() {
     label: id.label,
     browser: browserName(),
     extension_version: VERSION,
+    build: BUILD,
   };
 }
 
@@ -130,7 +137,11 @@ function onHostMessage(current, message) {
   } else if (message?.type === 'refused') {
     setConnected(false, message.detail || message.error);
   } else if (message?.type === 'request') {
-    handle(message).then(
+    inFlight++;
+    const work = reloading
+      ? Promise.reject(new Refusal('busy', 'The extension is reloading; try again in a moment'))
+      : handle(message);
+    work.finally(() => inFlight--).then(
       (result) => post(current, { type: 'reply', id: message.id, ok: true, ...result }),
       (error) =>
         post(current, {
@@ -155,10 +166,40 @@ function post(current, message) {
 
 // ------------------------------------------------------------------ claims
 
+// Claims live in local storage so an extension reload or update keeps them. Session
+// storage marks a running browser: when it is empty, Chrome restarted or the
+// extension reloaded, and only claims whose tab still shows the claimed URL survive.
 function state() {
-  statePromise ??= chrome.storage.session
-    .get(['claims', 'revoked'])
-    .then((stored) => ({ claims: stored.claims || {}, revoked: stored.revoked || {} }));
+  statePromise ??= (async () => {
+    const stored = await chrome.storage.local.get(['claims', 'revoked']);
+    const current = { claims: stored.claims || {}, revoked: stored.revoked || {} };
+    const { alive } = await chrome.storage.session.get('alive');
+    if (!alive) {
+      for (const [id, claim] of Object.entries(current.claims)) {
+        const tab = await chrome.tabs.get(Number(id)).catch(() => null);
+        if (!tab || (tab.url || tab.pendingUrl) !== claim.url) delete current.claims[id];
+      }
+      await chrome.storage.local.set({ claims: current.claims, revoked: current.revoked });
+      // Window IDs are reused after a restart: keep the agents' window only while a tab
+      // ca opened there is still claimed.
+      const { agentWindow } = await chrome.storage.local.get('agentWindow');
+      if (agentWindow != null) {
+        const tabs = await Promise.all(
+          Object.entries(current.claims)
+            .filter(([, claim]) => claim.opened)
+            .map(([id]) => chrome.tabs.get(Number(id)).catch(() => null)),
+        );
+        if (!tabs.some((tab) => tab?.windowId === agentWindow)) await chrome.storage.local.remove('agentWindow');
+      }
+      await chrome.storage.session.set({ alive: true });
+      // Documents from before the reload hold an orphaned watcher; give them a live one.
+      for (const [id, claim] of Object.entries(current.claims)) {
+        watchTab(Number(id)).catch(() => {});
+        mark(Number(id), claim);
+      }
+    }
+    return current;
+  })();
   return statePromise;
 }
 
@@ -168,7 +209,7 @@ async function persist() {
     .sort((a, b) => b[1].at - a[1].at)
     .slice(0, 50);
   current.revoked = Object.fromEntries(revoked);
-  await chrome.storage.session.set({ claims: current.claims, revoked: current.revoked });
+  await chrome.storage.local.set({ claims: current.claims, revoked: current.revoked });
 }
 
 function token() {
@@ -282,6 +323,24 @@ chrome.runtime.onMessage.addListener((message, sender) => {
       if (current.claims[sender.tab.id]) endClaim(sender.tab.id, 'human_input');
     });
   }
+});
+
+chrome.tabs.onUpdated.addListener((tabId, change) => {
+  // Track each claimed tab's URL so a reload can tell the same tab from a reused ID.
+  if (!change.url) return;
+  state().then((current) => {
+    const claim = current.claims[tabId];
+    if (claim && claim.url !== change.url) {
+      claim.url = change.url;
+      persist();
+    }
+  });
+});
+
+chrome.windows.onRemoved.addListener((windowId) => {
+  chrome.storage.local.get('agentWindow').then(({ agentWindow }) => {
+    if (agentWindow === windowId) chrome.storage.local.remove('agentWindow');
+  });
 });
 
 chrome.tabs.onRemoved.addListener((tabId) => {
@@ -462,6 +521,55 @@ function timeoutMs(request, fallback) {
   return Math.max(100, Math.min(Number.isFinite(seconds) ? seconds : fallback, 110) * 1000);
 }
 
+// The agents' own window: created unfocused on first use and reused, so agent tabs
+// are visible (rendered at full speed, capturable) without touching the user's windows.
+let agentWindowTurn = Promise.resolve();
+function openInAgentWindow(url) {
+  // One at a time, so simultaneous first opens share one new window.
+  const run = async () => {
+    const { agentWindow } = await chrome.storage.local.get('agentWindow');
+    const existing = agentWindow != null ? await chrome.windows.get(agentWindow).catch(() => null) : null;
+    if (existing) return chrome.tabs.create({ windowId: existing.id, url, active: true });
+    const window = await chrome.windows.create({ url, focused: false, type: 'normal' });
+    await chrome.storage.local.set({ agentWindow: window.id });
+    return window.tabs[0];
+  };
+  const next = agentWindowTurn.then(run, run);
+  agentWindowTurn = next.catch(() => {});
+  return next;
+}
+
+// Background tabs are captured through the debugger protocol, one capture at a time
+// per tab, attached only for the capture. Visible tabs never need it.
+const capturing = new Map();
+function debuggerCapture(tabId) {
+  const run = async () => {
+    const target = { tabId };
+    try {
+      await chrome.debugger.attach(target, '1.3');
+    } catch (error) {
+      throw new Refusal(
+        'capture_unavailable',
+        `Chrome refused to capture background tab ${tabId}: ${error.message}. Use focus to show it, or read and locate.`,
+      );
+    }
+    try {
+      const shot = await Promise.race([
+        chrome.debugger.sendCommand(target, 'Page.captureScreenshot', { format: 'png' }),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('timed out')), 15000)),
+      ]);
+      return `data:image/png;base64,${shot.data}`;
+    } catch (error) {
+      throw new Refusal('capture_unavailable', `Capturing background tab ${tabId} failed: ${error.message}`);
+    } finally {
+      await chrome.debugger.detach(target).catch(() => {});
+    }
+  };
+  const next = (capturing.get(tabId) || Promise.resolve()).then(run, run);
+  capturing.set(tabId, next.catch(() => {}));
+  return next;
+}
+
 async function groupOpenedTab(tab) {
   try {
     const [group] = await chrome.tabGroups.query({ windowId: tab.windowId, title: GROUP_TITLE });
@@ -488,7 +596,9 @@ async function claimTab(tab, owner, opened) {
       restriction: restricted,
     });
   }
-  const claim = { lease: token(), owner, since: Date.now(), opened, title: tab.title || '' };
+  const claim = {
+    lease: token(), owner, since: Date.now(), opened, title: tab.title || '', url: tab.url || tab.pendingUrl,
+  }; // prettier-ignore
   current.claims[tab.id] = claim;
   delete current.revoked[tab.id];
   await persist();
@@ -528,6 +638,9 @@ async function handle(request) {
           label: id.label,
           browser: browserName(),
           extension_version: VERSION,
+          build: BUILD,
+          capabilities: CAPABILITIES,
+          agent_window: (await chrome.storage.local.get('agentWindow')).agentWindow ?? null,
           windows: windows.map((w) => ({ window: w.id, focused: w.focused, state: w.state, type: w.type, incognito: w.incognito })),
           tabs: tabs.length,
           claims: Object.keys(current.claims).length,
@@ -542,6 +655,16 @@ async function handle(request) {
       if (port) port.postMessage(await hello());
       return { instance: id.instance, label };
     }
+    case 'reload': {
+      // Load updated files after ca browser install, like the card's reload button.
+      // Claims are kept in local storage and survive it; requests in progress would not.
+      if (inFlight > 1) {
+        throw new Refusal('busy', `${inFlight - 1} other request(s) are in progress; try again when they finish`);
+      }
+      reloading = true;
+      setTimeout(() => chrome.runtime.reload(), 250);
+      return { reloading: true, previous_version: VERSION, previous_build: BUILD };
+    }
     case 'tabs': {
       const tabs = await chrome.tabs.query({});
       return { tabs: await Promise.all(tabs.map(describeTab)) };
@@ -554,7 +677,7 @@ async function handle(request) {
       let tab;
       const loaded = await waitForLoad(null, timeoutMs(request, 30), async () => {
         try {
-          tab = await chrome.tabs.create(properties);
+          tab = request.agent_window ? await openInAgentWindow(url) : await chrome.tabs.create(properties);
           opening.add(tab.id);
         } catch (error) {
           throw new Refusal('window_unavailable', `Cannot open a background tab: ${error.message}`);
@@ -565,8 +688,8 @@ async function handle(request) {
       let claim;
       let now;
       try {
-        claim = await claimTab(tab, owner, true);
-        now = await getTab(tab.id);
+        now = await getTab(tab.id); // after redirects, so the claim records the URL it shows
+        claim = await claimTab(now, owner, true);
       } catch (error) {
         // Close the failed tab unless the human already switched to it.
         if (!activatedWhileOpening.delete(tab.id) && !inputWhileOpening.has(tab.id)) {
@@ -685,14 +808,13 @@ async function handle(request) {
     case 'screenshot': {
       const tab = await getTab(tabId);
       const window = await chrome.windows.get(tab.windowId);
-      if (!tab.active || window.state === 'minimized') {
-        throw new Refusal(
-          'tab_not_visible',
-          'Chrome can capture only the active tab of a visible window, and ca never switches ' +
-            'tabs by itself. Read or locate this tab instead, or use focus when the user wants to see it.',
-          { active: tab.active, window_state: window.state },
-        );
+      const restricted = await restriction(tab.url || tab.pendingUrl);
+      if (restricted) {
+        throw new Refusal('page_unavailable', `${RESTRICTIONS[restricted]} (tab ${tabId}).`, { restriction: restricted });
       }
+      // The active tab of a shown window is captured as displayed; any other tab is
+      // rendered through the debugger protocol without being shown.
+      const visible = tab.active && window.state !== 'minimized';
       const pen = (hidden) =>
         chrome.scripting
           .executeScript({ target: { tabId }, world: 'ISOLATED', func: (h) => globalThis.__caPen?.conceal(h), args: [hidden] })
@@ -700,12 +822,15 @@ async function handle(request) {
       await pen(true);
       let data;
       try {
-        data = await chrome.tabs.captureVisibleTab(tab.windowId, { format: 'png' });
+        data = visible
+          ? await chrome.tabs.captureVisibleTab(tab.windowId, { format: 'png' })
+          : await debuggerCapture(tabId);
       } finally {
         await pen(false);
       }
-      const after = await getTab(tabId);
-      if (!after.active) throw new Refusal('tab_not_visible', 'The tab was switched during capture');
+      if (visible && !(await getTab(tabId)).active) {
+        throw new Refusal('tab_not_visible', 'The tab was switched during capture; capture again');
+      }
       // The viewport in CSS pixels maps screenshot pixels to pointer coordinates.
       const viewport = await chrome.scripting
         .executeScript({
@@ -714,7 +839,7 @@ async function handle(request) {
           func: () => ({ width: innerWidth, height: innerHeight, scroll_x: scrollX, scroll_y: scrollY }),
         })
         .then((results) => results?.[0]?.result ?? null, () => null);
-      return { tab: tabId, format: 'png', data_url: data, viewport };
+      return { tab: tabId, format: 'png', data_url: data, viewport, method: visible ? 'visible_tab' : 'debugger' };
     }
     default:
       throw new Refusal('unknown_operation', `Unknown operation ${request.op}`);
@@ -1211,9 +1336,21 @@ async function pageAction(request) {
   };
   // Visible tabs move at frame rate so the page and the watcher see the stroke;
   // background tabs yield through a message, which Chrome does not throttle.
-  const pace = () => {
+  const yieldTask = () =>
+    new Promise((done) => {
+      const channel = new MessageChannel();
+      channel.port1.onmessage = () => done();
+      channel.port2.postMessage(0);
+    });
+  const pace = async () => {
     const interval = Number(request.interval) || 0;
-    if (interval > 0) return new Promise((done) => setTimeout(done, interval * 1000));
+    if (interval > 0) {
+      // Chrome throttles timers in hidden tabs to once a second; messages are not.
+      if (document.visibilityState === 'visible') return new Promise((done) => setTimeout(done, interval * 1000));
+      const until = performance.now() + interval * 1000;
+      while (performance.now() < until) await yieldTask();
+      return undefined;
+    }
     if (document.visibilityState === 'visible') {
       return new Promise((done) => {
         const timer = setTimeout(done, 50);
@@ -1223,11 +1360,7 @@ async function pageAction(request) {
         });
       });
     }
-    return new Promise((done) => {
-      const channel = new MessageChannel();
-      channel.port1.onmessage = () => done();
-      channel.port2.postMessage(0);
-    });
+    return yieldTask();
   };
   const inView = (doc, x, y) => {
     const view = viewOf(doc);

@@ -43,13 +43,20 @@ Then load the extension once in each browser:
 2. Choose **Load unpacked** and select the `extension_dir` that install printed.
 3. Run `ca browser instances`. Each connected profile lists its instance ID.
 
-After updating Computer Artist, run `ca browser install` again and press the
-reload button on the extension card. The extension's ID is fixed by the `key` in
-its manifest (`fbbljgpbpgepkaimgbpcpemjdllnname`), so the host registration keeps
-matching across reinstalls.
+After updating Computer Artist, run `ca browser install` again, then
+`ca browser reload`: the running extension loads the installed files and comes
+back within a second, keeping every claim. It refuses while another request is in
+progress. Extensions older than 0.7.0 cannot reload themselves; press the reload
+button on the extension card once. Keep **Developer mode** on: with it off, Chrome
+disables an unpacked extension when it reloads. The extension's ID is fixed by the
+`key` in its manifest (`fbbljgpbpgepkaimgbpcpemjdllnname`), so the host
+registration keeps matching across reinstalls.
 
 `ca browser doctor` checks the installed files, host registrations and connected
-instances without changing anything. A red **!** badge on the toolbar icon means
+instances without changing anything. Install stamps a **build** (a digest of the
+extension files) into the installed copy; `instances` and `doctor` report the
+build each browser runs and warn `extension_reload_needed` when it differs from
+the installed one, even when the version number is the same. A red **!** badge on the toolbar icon means
 the extension cannot reach the native host; its tooltip gives Chrome's reason.
 
 ### Uninstall
@@ -164,6 +171,31 @@ Pointer coordinates, gestures and frames need extension 0.6.0. With an older
 extension running, the CLI refuses them as `extension_outdated` instead of letting
 the old extension click an element's centre.
 
+### Screenshots without switching tabs
+
+`ca browser screenshot --tab H out.png` captures any scriptable tab. The active tab
+of a shown window is captured as displayed (`method: visible_tab`). Any other tab,
+in the background or in a minimized window, is rendered through Chrome's debugger
+protocol without being shown (`method: debugger`): the extension attaches to that
+one tab, asks Chrome for a fresh rendering of its viewport, including canvases and
+iframes, and detaches, in about 0.05 s. It never sends input that way. The user's
+tab and window stay in front. A tab Chrome will not attach to (another extension's
+debugger is attached, or a browser page) is refused as `capture_unavailable`.
+
+This uses the `debugger` permission, listed by Chrome as "Access the page debugger
+backend". While attached, Chrome may show that Computer Artist is debugging the
+browser; in Chrome for Testing 153 the user's tab kept its exact viewport during
+captures. Adding the permission to an unpacked extension needs one reload of the
+card and no further prompt.
+
+### The agents' window
+
+`ca browser open URL --agent-window` opens the tab in a window of its own, created
+unfocused on first use and reused for later tabs. Chrome keeps the user's window
+focused and active tab unchanged. Agent tabs there are the active tab of a shown
+window, so they render at full speed (timers and animation frames run) and capture
+as displayed. Closing the window's last tab closes it.
+
 ### Focusing a tab
 
 `ca browser focus --tab H --lease L` activates a claimed tab and focuses its
@@ -199,8 +231,20 @@ is refused with `ownership_revoked` (`human_input`) instead of performed.
 A revoked lease is refused with `ownership_revoked` and its stop reason. A
 different lease is refused with `lease_mismatch`, and a second claim with
 `tab_claimed`. `ca browser status --tab H --lease L` reports which of these
-applies. ca only closes tabs it opened. Claims live in the extension's session
-storage: they survive the native host restarting and end when the browser exits.
+applies. ca only closes tabs it opened. Claims live in the extension's local
+storage: they survive the native host restarting and the extension reloading or
+updating (the human-input watcher is renewed in claimed tabs), and end when the
+browser exits. A claim is restored only for a tab that still shows the URL it was
+claimed at.
+
+The CLI records each lease it receives in an owner-only folder
+(`~/.local/share/computer-artist/leases`). An agent that lost track of its tabs runs
+`ca browser cleanup --owner NAME`: tabs that owner opened are closed and tabs it
+claimed are released, through their own leases. Claims that already ended are
+reported as `ended` with whether the tab is still open. Other owners' tabs are never
+touched. If the native host restarts during a command, the CLI waits for it to
+reconnect and resends the request when that is safe: always when it was never
+delivered, and only for reads otherwise.
 
 Human input is detected from trusted page events by `watch.js`. This small content
 script runs at document start in every frame of every page and sends only the
@@ -241,14 +285,13 @@ never acts on tabs. Copy the instance ID from its footer for `--instance`.
   file pickers, refuse them. Keys other than Enter (submit or activate) and
   Backspace/Delete in text fields have no default action, and synthetic events do
   not change CSS `:hover`, open native menus or start native drag and drop. ca does
-  not use the `debugger` permission, so there is no "being debugged" banner and no
-  trusted input. Measured on 4 November 2026, the full mouse model edited Marvin JS
+  use the `debugger` permission only to render background screenshots, never for
+  input, so there is no trusted input. Measured on 4 November 2026, the full mouse model edited Marvin JS
   and the LabServant canvas structure editor exactly like trusted input; see the
   [precise input record](validation/2026-11-04-chrome-precise-input.md).
-- **Screenshots need the active tab of a visible window.** `chrome.tabs.captureVisibleTab`
-  cannot capture background tabs and ca never switches tabs by itself, so
-  `ca browser screenshot` on a background tab is refused as `tab_not_visible`.
-  Use `read` and `locate` there, or `focus` the tab when the user should see it.
+- **Background screenshots render the viewport only**, at the tab's window size,
+  and need the `debugger` permission (0.7.0). Pages that block extension debugging
+  are refused as `capture_unavailable`.
 - **Scriptable pages only.** `chrome://` pages, the Web Store, other extensions'
   pages and, unless you allow file access on the extension card, `file://` URLs
   cannot be claimed or read. Same-origin iframes are reachable with `--frame` and
@@ -266,10 +309,11 @@ ca browser ──(same-user socket, mutual HMAC)──> native host ──(stdio
 
 - **Extension** (Manifest V3, `computer_artist/chrome_extension`). Each action runs
   as one script in the tab's top frame, so a drag of any length is one round trip. Its permissions
-  are `nativeMessaging`, `tabs`, `scripting`, `storage`, `alarms` and `tabGroups`,
+  are `nativeMessaging`, `debugger` (background screenshots only), `tabs`, `scripting`,
+  `storage`, `alarms` and `tabGroups`,
   with host access `<all_urls>` and the `watch.js` content script. `pen.js` is
   injected only into the top frame of a claimed tab before an action. The popup
-  reads bridge and claim state from session storage. The service worker connects to the native host at
+  reads bridge state from session storage and claims from local storage. The service worker connects to the native host at
   startup, and that open port keeps it running. It reconnects with backoff after a
   disconnect and checks every minute from an alarm.
 - **Native host** (`computer_artist/browser_host.py`). Chrome starts one per

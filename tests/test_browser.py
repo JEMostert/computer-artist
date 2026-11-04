@@ -303,6 +303,150 @@ class PointerRequests(unittest.TestCase):
         self.assertEqual((reply['width'], reply['scale']), (2560, 2.0))
 
 
+class Maintenance(unittest.TestCase):
+    """Lease journal cleanup, capability gates, reload decisions and build identity."""
+
+    def setUp(self):
+        self.home = Path(tempfile.mkdtemp(prefix='cab-'))
+        patch = mock.patch.dict(os.environ, {'CA_BROWSER_DATA_DIR': str(self.home / 'data')})
+        patch.start()
+        self.addCleanup(patch.stop)
+
+    def run_cli(self, argv, instances, replies):
+        import argparse
+
+        parser = argparse.ArgumentParser()
+        browser_commands.add_command(parser.add_subparsers(dest='command'))
+        sent = []
+
+        def call(record, request, timeout):
+            sent.append(request)
+            return replies(request)
+
+        with (
+            mock.patch.object(bridge, 'live_instances', return_value=instances),
+            mock.patch.object(bridge, 'call', side_effect=call),
+        ):
+            return browser_commands.dispatch(parser.parse_args(['browser', *argv])), sent
+
+    def test_cleanup_ends_only_the_named_owners_recorded_leases(self):
+        current = {'instance': 'aaaaaaaa', 'extension_version': '0.7.0', 'address': 'unix:x'}
+        for tab, owner, action in ((1, 'mine', 'open'), (2, 'other', 'open'), (3, 'mine', 'claim')):
+            lease = f'{tab:024x}'
+            browser_commands.journal('aaaaaaaa', tab, lease, {'claim': {'owner': owner}}, action)
+        # Another owner's later lease on tab 1 is a separate record that cleanup keeps.
+        browser_commands.journal('aaaaaaaa', 1, 'f' * 24, {'claim': {'owner': 'other'}}, 'claim')
+
+        def replies(request):
+            if request['op'] == 'status':
+                return {'ok': True, 'exists': True, 'holds_lease': request['tab'] != 3}
+            return {'ok': True}
+
+        reply, sent = self.run_cli(['cleanup', '--owner', 'mine'], [current], replies)
+        self.assertTrue(reply['ok'])
+        acted = [(r['op'], r['tab'], r['lease']) for r in sent if r['op'] != 'status']
+        self.assertEqual(acted, [('close', 1, f'{1:024x}')])
+        self.assertEqual(reply['tabs'][1]['result'], 'ended')
+        left = sorted(p.name for p in browser_commands.lease_dir().glob('*.json'))
+        self.assertEqual(left, [f'aaaaaaaa-1-{"f" * 24}.json', f'aaaaaaaa-2-{2:024x}.json'])
+        if os.name != 'nt':  # Windows has no POSIX modes
+            self.assertEqual(oct(browser_commands.lease_dir().stat().st_mode & 0o777), '0o700')
+
+    def test_cleanup_keeps_records_it_could_not_check(self):
+        current = {'instance': 'aaaaaaaa', 'extension_version': '0.7.0', 'address': 'unix:x'}
+        browser_commands.journal('aaaaaaaa', 4, 'a' * 24, {'claim': {'owner': 'mine'}}, 'open')
+        reply, _ = self.run_cli(['cleanup', '--owner', 'mine'], [current],
+                                lambda r: {'ok': False, 'error': 'instance_disconnected'})  # fmt: skip
+        self.assertFalse(reply['ok'])
+        self.assertEqual(len(list(browser_commands.lease_dir().glob('*.json'))), 1)
+
+    def test_agent_window_needs_the_capability(self):
+        old = {'instance': 'aaaaaaaa', 'extension_version': '0.6.0', 'address': 'unix:x'}
+        reply, sent = self.run_cli(['open', 'https://example.com', '--agent-window'], [old],
+                                   lambda r: {'ok': True})  # fmt: skip
+        self.assertEqual(reply['error'], 'extension_outdated')
+        self.assertEqual(sent, [])
+        new = {**old, 'capabilities': ['agent_window']}
+        reply, sent = self.run_cli(['open', 'https://example.com', '--agent-window'], [new],
+                                   lambda r: {'ok': True, 'tab': 7, 'lease': 'L'})  # fmt: skip
+        self.assertTrue(sent[0]['agent_window'])
+
+    def test_reload_is_skipped_manual_or_self(self):
+        browser_commands.copy_extension(self.home / 'data' / 'chrome-extension')
+        built = browser_commands.build_id()
+        self.assertEqual(
+            browser_commands.installed_build(self.home / 'data' / 'chrome-extension'), built
+        )
+        same = {'instance': 'aaaaaaaa', 'build': built, 'address': 'unix:x'}
+        reply, sent = self.run_cli(['reload'], [same], lambda r: {'ok': True})
+        self.assertEqual((reply['reloaded'], sent), (False, []))
+        old = {
+            'instance': 'aaaaaaaa',
+            'build': None,
+            'extension_version': '0.6.0',
+            'address': 'unix:x',
+        }
+        reply, sent = self.run_cli(['reload'], [old], lambda r: {'ok': True})
+        self.assertEqual((reply['error'], sent), ('manual_reload_needed', []))
+        busy = {**old, 'capabilities': ['reload']}
+        reply, _ = self.run_cli(['reload'], [busy], lambda r: {'ok': False, 'error': 'busy'})
+        self.assertEqual(reply['error'], 'busy')
+
+    def test_build_is_stamped_and_reproducible(self):
+        first = browser_commands.package(self.home / 'a')
+        second = browser_commands.package(self.home / 'b')
+        self.assertEqual(first['sha256'], second['sha256'])
+        import zipfile
+
+        with zipfile.ZipFile(first['path']) as archive:
+            worker = archive.read('background.js').decode()
+        self.assertIn(f"const BUILD = '{browser_commands.build_id()}'", worker)
+        source = (browser_commands.EXTENSION_SOURCE / 'background.js').read_text()
+        self.assertIn(f"const BUILD = '{browser_commands.BUILD_MARK}'", source)
+
+    def test_host_restart_resends_only_safe_requests(self):
+        record = {'instance': 'aaaaaaaa', 'address': 'unix:old'}
+        moved = {'instance': 'aaaaaaaa', 'address': 'unix:new'}
+        calls = []
+
+        def call(instance, request, timeout):
+            calls.append(instance['address'])
+            if instance['address'] == 'unix:old':
+                raise bridge.BrowserError('instance_disconnected', 'gone')
+            return {'ok': True}
+
+        with (
+            mock.patch.object(bridge, 'call', side_effect=call),
+            mock.patch.object(bridge, 'live_instances', return_value=[moved]),
+            mock.patch('time.sleep'),
+        ):
+            self.assertTrue(
+                browser_commands.call_with_recovery(record, {'op': 'read'}, 5, True)['ok']
+            )
+            with self.assertRaises(bridge.BrowserError):
+                browser_commands.call_with_recovery(record, {'op': 'click'}, 5, False)
+        self.assertEqual(calls, ['unix:old', 'unix:new', 'unix:old'])
+
+    def test_host_disconnect_replies_resend_only_when_safe(self):
+        record = {'instance': 'aaaaaaaa', 'address': 'unix:old'}
+        moved = {'instance': 'aaaaaaaa', 'address': 'unix:new'}
+
+        def call(instance, request, timeout):
+            if instance['address'] == 'unix:old':
+                return {'ok': False, 'error': 'instance_disconnected', 'delivered': request['sent']}
+            return {'ok': True}
+
+        recover = browser_commands.call_with_recovery
+        with (
+            mock.patch.object(bridge, 'call', side_effect=call),
+            mock.patch.object(bridge, 'live_instances', return_value=[moved]),
+            mock.patch('time.sleep'),
+        ):
+            self.assertTrue(recover(record, {'op': 'read', 'sent': True}, 5, True)['ok'])
+            self.assertTrue(recover(record, {'op': 'click', 'sent': False}, 5, False)['ok'])
+            self.assertFalse(recover(record, {'op': 'click', 'sent': True}, 5, False)['ok'])
+
+
 @unittest.skipIf(os.name == 'nt', 'Windows registers hosts in the registry')
 class Install(unittest.TestCase):
     def setUp(self):
