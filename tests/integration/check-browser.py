@@ -302,11 +302,14 @@ def check_pointer(env, url, work, port):
     contained = [act('scroll', '--selector', '#contained', '--delta', '300') for _ in range(2)]
     off = ca('locate', '--tab', tab, '--selector', '#off', env=env)['elements'][0]['rect']
     disabled = act('click', '--x', str(off['x'] + 5), '--y', str(off['y'] + 5))
-    title = ca('read', '--tab', tab, '--selector', 'title', env=env).get('text')
+    help_link = ca('locate', '--tab', tab, '--selector', '#help', env=env)['elements'][0]['rect']
+    helped = act('click', '--x', str(help_link['x'] + 3), '--y', str(help_link['y'] + 3))
     step('contained_scroll_and_disabled_point', [(c.get('scrolled') or {}).get('to') for c in
          contained] == [40, 40] and disabled.get('error') == 'element_not_interactable'
-         and title != 'clicked', contained=[c.get('scrolled') for c in contained],
-         disabled=disabled.get('error'))  # fmt: skip
+         and helped.get('ok') and ca('status', '--tab', tab, '--lease', lease, env=env)
+         .get('url', '').endswith('#helped'),
+         contained=[c.get('scrolled') for c in contained], disabled=disabled.get('error'),
+         link=helped.get('url') or helped.get('error'))  # fmt: skip
     hover = act('move', '--frame', '#pad', '--text', 'Dot tool')
     step('move_hovers', hover.get('ok') and hover['target']['tag'] == 'span')
 
@@ -322,7 +325,7 @@ def check_pointer(env, url, work, port):
          errors=[r.get('error') for r in (foreign, foreign_point, outside, no_target)])  # fmt: skip
 
     # The human watches, then takes over in the middle of a slow drag.
-    target = page_target(port, lambda t: t['url'] == url + 'draw')
+    target = page_target(port, lambda t: t['url'].startswith(url + 'draw'))
     with urlopen(f'http://127.0.0.1:{port}/json/activate/{target["id"]}') as response:
         response.read()
     # A visible click leaves the pen resting on the canvas; captures leave it out.

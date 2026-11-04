@@ -68,7 +68,8 @@ header:
 - A toolbar button that cancels `pointerdown` was clicked while a field had focus;
   its handler still saw the field focused.
 - A panel with `overscroll-behavior: contain` stopped at its end instead of scrolling
-  the page, and a viewport click on a button in a disabled fieldset was refused.
+  the page; a viewport click on a button in a disabled fieldset was refused while a
+  link in the same fieldset still followed its fragment.
 - A cross-origin frame (by `--frame` and by point), a point outside the viewport and a
   missing target were refused with `cross_origin_frame`, `point_outside_viewport` and
   `invalid_target`.
@@ -99,7 +100,8 @@ editor in the page itself; `--frame '#sketch'` correctly answered `frame_not_fou
 - Structure edit (acetone, never saved): a viewport-point click with the nitrogen tool
   replaced the oxygen, and a drag from a carbon added a bond. Screenshot scale was 2.
 - Medians in the visible tab, including the pen glide: click 0.44 s, drag 0.53 s,
-  screenshot 0.17 s. In background tabs: click 0.09 s, drag of 35 moves 0.14 to 0.17 s.
+  screenshot 0.17 s. In background tabs, after the CLI change below: click 0.055 s, drag of 35 moves
+  0.11 s.
 
 ## Performance
 

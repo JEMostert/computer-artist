@@ -72,7 +72,8 @@ DRAW = """<!doctype html><html><head><meta charset="utf-8"><title>Draw</title>
 #foreign{width:300px;height:120px;margin-top:200px}</style></head><body>
 <div id="panel" style="height:80px;overflow:auto;border:1px solid #999"><div style="height:200px">Panel</div></div>
 <div id="contained" style="height:60px;overflow:auto;overscroll-behavior:contain"><div style="height:100px">Contained</div></div>
-<fieldset disabled style="border:0;padding:0;margin:0"><button id="off" onclick="document.title = 'clicked'">Off</button></fieldset>
+<fieldset disabled style="border:0;padding:0;margin:0"><button id="off" onclick="document.title = 'clicked'">Off</button>
+<a id="help" href="#helped">Help</a></fieldset>
 <div id="spacer">Header</div>
 <div id="stage"><iframe id="pad" src="/pad"></iframe></div>
 <p id="page-events"></p>

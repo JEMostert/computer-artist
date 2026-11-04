@@ -1325,8 +1325,8 @@ async function pageAction(request) {
         });
       }
     }
-    // Chrome never activates a disabled control (including inside a disabled fieldset).
-    const control = first.el.closest?.('button,input,select,textarea,option,optgroup,fieldset');
+    // Chrome never activates a disabled control; :disabled covers disabled fieldsets.
+    const control = first.el.closest?.('button,input,select,textarea,option,optgroup');
     if ((op === 'click' || op === 'drag') && control?.matches(':disabled')) {
       return fail('element_not_interactable', 'The control under that point is disabled', {
         target: describe(control),
