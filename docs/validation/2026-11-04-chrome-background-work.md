@@ -91,6 +91,24 @@ tab, three failed that way. Now only that error falls back to the debugger rende
 the same four captures returned one `visible_tab` and three `debugger` images. Other
 capture errors are reported as before.
 
+Concurrent screenshots of one tab hid and restored the pen independently, so later
+captures in a burst included it (806 to 812 pen pixels in three of four images with
+the earlier worker). Hiding is now shared per tab; the same burst has none.
+
+### Stale visible captures
+
+Another agent reported 0.7.0 `visible_tab` screenshots that stayed byte-identical
+while the page changed. Reproduced in the user's Chrome with an own agent-window tab
+(no focus, no reload) while another application was frontmost: three captures 1.2 s
+apart had the same SHA-256 (`c2397566ab6a`) while the page read `tick 3 visible`,
+`tick 4 hidden`, `tick 6 hidden`. The first frame was current; once Chrome hid the
+covered window it stopped painting and `captureVisibleTab` kept returning that frame.
+Debugger captures of the same page in a background tab differed each time.
+The capture now asks the page for `document.visibilityState` and uses
+`captureVisibleTab` only while it is `visible` (checked again after capturing);
+otherwise it renders through the debugger. Chrome for Testing headless cannot cover a
+window, so the hidden-window path is verified in the user's Chrome after install.
+
 Not proven live in the user's Chrome: whether Chrome shows a debugging notice during
 a capture (the agent cannot see browser UI; viewport heights did not change), and
 human takeover (needs real human input; proven in Chrome for Testing).

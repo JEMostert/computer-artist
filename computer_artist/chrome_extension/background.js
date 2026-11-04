@@ -832,30 +832,33 @@ async function handle(request) {
       if (restricted) {
         throw new Refusal('page_unavailable', `${RESTRICTIONS[restricted]} (tab ${tabId}).`, { restriction: restricted });
       }
-      // The active tab of a shown window is captured as displayed; any other tab is
-      // rendered through the debugger protocol without being shown.
-      const visible = tab.active && window.state !== 'minimized';
+      // Chrome paints a page only while it is shown: a covered window, or one behind
+      // another application on macOS, is hidden and captureVisibleTab then returns its
+      // last painted frame. So the page's own visibility decides; any page that is not
+      // being painted is rendered through the debugger protocol instead.
+      const painted = async () =>
+        tab.active && window.state !== 'minimized' &&
+        (await chrome.scripting
+          .executeScript({ target: { tabId }, world: 'ISOLATED', func: () => document.visibilityState })
+          .then((results) => results?.[0]?.result === 'visible', () => false));
       await concealPen(tabId);
       let data;
-      let method = visible ? 'visible_tab' : 'debugger';
+      let method = 'debugger';
       try {
-        if (visible) {
+        if (await painted()) {
           try {
             data = await chrome.tabs.captureVisibleTab(tab.windowId, { format: 'png' });
+            method = 'visible_tab';
           } catch (error) {
             // Chrome allows about two visible captures a second; render the rest instead.
             if (!/MAX_CAPTURE_VISIBLE_TAB_CALLS_PER_SECOND/.test(String(error?.message))) throw error;
-            data = await debuggerCapture(tabId);
-            method = 'debugger';
           }
-        } else {
-          data = await debuggerCapture(tabId);
+          // Hidden or switched away while capturing: that frame may be stale.
+          if (method === 'visible_tab' && !((await getTab(tabId)).active && (await painted()))) method = 'debugger';
         }
+        if (method === 'debugger') data = await debuggerCapture(tabId);
       } finally {
         await revealPen(tabId);
-      }
-      if (visible && !(await getTab(tabId)).active) {
-        throw new Refusal('tab_not_visible', 'The tab was switched during capture; capture again');
       }
       // The viewport in CSS pixels maps screenshot pixels to pointer coordinates.
       const viewport = await chrome.scripting

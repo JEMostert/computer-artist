@@ -173,9 +173,11 @@ the old extension click an element's centre.
 
 ### Screenshots without switching tabs
 
-`ca browser screenshot --tab H out.png` captures any scriptable tab. The active tab
-of a shown window is captured as displayed (`method: visible_tab`). Any other tab,
-in the background or in a minimized window, is rendered through Chrome's debugger
+`ca browser screenshot --tab H out.png` captures any scriptable tab. A tab Chrome is
+painting (the active tab of a window that is on screen) is captured as displayed
+(`method: visible_tab`). Any other tab, in the background, in a minimized window, or
+in a window that is covered or behind another application (Chrome stops painting
+those and would return a stale frame), is rendered through Chrome's debugger
 protocol without being shown (`method: debugger`): the extension attaches to that
 one tab, asks Chrome for a fresh rendering of its viewport, including canvases and
 iframes, and detaches, in about 0.05 s. It never sends input that way. Chrome allows
