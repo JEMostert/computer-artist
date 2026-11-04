@@ -178,7 +178,12 @@ def serve(store):
                 self.send(200, DRAW, 'text/html; charset=utf-8')
             elif self.path == '/pad':
                 self.send(200, PAD, 'text/html; charset=utf-8')
-            elif self.path == '/other':
+            elif self.path == '/redirect':
+                self.send_response(302)
+                self.send_header('location', '/other?redirected')
+                self.send_header('content-length', '0')
+                self.end_headers()
+            elif self.path.startswith('/other'):
                 self.send(200, OTHER, 'text/html; charset=utf-8')
             elif self.path == '/api/notes':
                 with lock:

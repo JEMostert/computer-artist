@@ -297,31 +297,41 @@ def operate(args):
     reply = with_handles(instance['instance'], reply)
     if action == 'screenshot' and reply.get('ok'):
         reply = save_png(reply, args.output)
-    if reply.get('ok') and action in ('open', 'claim', 'release', 'close'):
-        journal(instance['instance'], reply.get('tab', tab), reply, action)
+    if reply.get('ok') and action in ('open', 'claim'):
+        journal(instance['instance'], reply.get('tab'), reply.get('lease'), reply, action)
+    elif reply.get('ok') and action in ('release', 'close'):
+        forget(instance['instance'], tab, request.get('lease'))
     return {'instance': instance['instance'], **reply}
 
 
 def call_with_recovery(instance, request, timeout, repeatable):
     """Send once; if the browser host restarted, wait for it and send again when safe.
 
-    A refused connection means the request never arrived, so any request may be resent
-    once the extension has reconnected. A connection lost mid-request is resent only
-    for reads, since an action may already have happened.
+    A request that never reached the extension (refused connection, or the host says it
+    was not delivered) may be resent once the extension reconnects. One that may have
+    arrived is resent only for reads, since an action may already have happened.
     """
     try:
-        return bridge.call(instance, request, timeout)
+        reply = bridge.call(instance, request, timeout)
+        if reply.get('error') != 'instance_disconnected':
+            return reply
+        if reply.get('delivered', True) and not repeatable:
+            return reply
+        failure = reply
     except bridge.BrowserError as error:
         unsent = error.code == 'instance_unavailable'
         if not (unsent or (repeatable and error.code == 'instance_disconnected')):
             raise
-        deadline = time.monotonic() + 8
-        while time.monotonic() < deadline:
-            time.sleep(0.4)
-            found = [i for i in bridge.live_instances() if i['instance'] == instance['instance']]
-            if found and found[0].get('address') != instance.get('address'):
-                return bridge.call(found[0], request, timeout)
-        raise
+        failure = error
+    deadline = time.monotonic() + 8
+    while time.monotonic() < deadline:
+        time.sleep(0.4)
+        found = [i for i in bridge.live_instances() if i['instance'] == instance['instance']]
+        if found and found[0].get('address') != instance.get('address'):
+            return bridge.call(found[0], request, timeout)
+    if isinstance(failure, dict):
+        return failure
+    raise failure
 
 
 def reload(args):
@@ -361,17 +371,28 @@ def lease_dir():
     return bridge.private_dir(bridge.data_dir() / 'leases')
 
 
-def journal(instance, tab, reply, action):
+def lease_file(instance, tab, lease):
+    # One file per lease, so ending one claim never touches another owner's record.
+    return lease_dir() / f'{instance}-{tab}-{lease}.json'
+
+
+def journal(instance, tab, lease, reply, action):
     """Remember leases this user holds, so cleanup can end them after an agent forgets them."""
-    path = lease_dir() / f'{instance}-{tab}.json'
-    if action in ('release', 'close'):
-        path.unlink(missing_ok=True)
+    if not lease or not re.fullmatch(r'[0-9a-f]{8,64}', str(lease)):
         return
-    record = {'instance': instance, 'tab': tab, 'lease': reply.get('lease'),
+    record = {'instance': instance, 'tab': tab, 'lease': lease,
               'owner': (reply.get('claim') or {}).get('owner'), 'opened': action == 'open'}  # fmt: skip
-    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    path = lease_file(instance, tab, lease)
+    temp = path.with_name(f'.{path.name}.{os.getpid()}')
+    fd = os.open(temp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     with os.fdopen(fd, 'w', encoding='utf-8') as stream:
         json.dump(record, stream)
+    os.replace(temp, path)
+
+
+def forget(instance, tab, lease):
+    if lease and re.fullmatch(r'[0-9a-f]{8,64}', str(lease)):
+        lease_file(instance, tab, lease).unlink(missing_ok=True)
 
 
 def cleanup(args):

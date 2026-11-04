@@ -16,6 +16,7 @@ const VERSION = chrome.runtime.getManifest().version;
 const BUILD = '__CA_BUILD__';
 const CAPABILITIES = ['pointer', 'frames', 'background_capture', 'agent_window', 'durable_claims', 'reload'];
 let inFlight = 0; // requests being handled, so a reload never cuts one off
+let reloading = false;
 const BADGE = '#0a7c60'; // Chrome lane teal, shared with pen.js and the popup.
 const GROUP_TITLE = 'CA';
 const GROUP_COLOR = 'green';
@@ -137,7 +138,10 @@ function onHostMessage(current, message) {
     setConnected(false, message.detail || message.error);
   } else if (message?.type === 'request') {
     inFlight++;
-    handle(message).finally(() => inFlight--).then(
+    const work = reloading
+      ? Promise.reject(new Refusal('busy', 'The extension is reloading; try again in a moment'))
+      : handle(message);
+    work.finally(() => inFlight--).then(
       (result) => post(current, { type: 'reply', id: message.id, ok: true, ...result }),
       (error) =>
         post(current, {
@@ -508,16 +512,20 @@ function timeoutMs(request, fallback) {
 
 // The agents' own window: created unfocused on first use and reused, so agent tabs
 // are visible (rendered at full speed, capturable) without touching the user's windows.
-async function openInAgentWindow(url) {
-  const { agentWindow } = await chrome.storage.local.get('agentWindow');
-  const existing = agentWindow != null ? await chrome.windows.get(agentWindow).catch(() => null) : null;
-  if (existing) {
-    const tab = await chrome.tabs.create({ windowId: existing.id, url, active: true });
-    return tab;
-  }
-  const window = await chrome.windows.create({ url, focused: false, type: 'normal' });
-  await chrome.storage.local.set({ agentWindow: window.id });
-  return window.tabs[0];
+let agentWindowTurn = Promise.resolve();
+function openInAgentWindow(url) {
+  // One at a time, so simultaneous first opens share one new window.
+  const run = async () => {
+    const { agentWindow } = await chrome.storage.local.get('agentWindow');
+    const existing = agentWindow != null ? await chrome.windows.get(agentWindow).catch(() => null) : null;
+    if (existing) return chrome.tabs.create({ windowId: existing.id, url, active: true });
+    const window = await chrome.windows.create({ url, focused: false, type: 'normal' });
+    await chrome.storage.local.set({ agentWindow: window.id });
+    return window.tabs[0];
+  };
+  const next = agentWindowTurn.then(run, run);
+  agentWindowTurn = next.catch(() => {});
+  return next;
 }
 
 // Background tabs are captured through the debugger protocol, one capture at a time
@@ -642,6 +650,7 @@ async function handle(request) {
       if (inFlight > 1) {
         throw new Refusal('busy', `${inFlight - 1} other request(s) are in progress; try again when they finish`);
       }
+      reloading = true;
       setTimeout(() => chrome.runtime.reload(), 250);
       return { reloading: true, previous_version: VERSION, previous_build: BUILD };
     }
@@ -668,8 +677,8 @@ async function handle(request) {
       let claim;
       let now;
       try {
-        claim = await claimTab(tab, owner, true);
-        now = await getTab(tab.id);
+        now = await getTab(tab.id); // after redirects, so the claim records the URL it shows
+        claim = await claimTab(now, owner, true);
       } catch (error) {
         // Close the failed tab unless the human already switched to it.
         if (!activatedWhileOpening.delete(tab.id) && !inputWhileOpening.has(tab.id)) {

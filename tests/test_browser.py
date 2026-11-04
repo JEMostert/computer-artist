@@ -332,9 +332,10 @@ class Maintenance(unittest.TestCase):
     def test_cleanup_ends_only_the_named_owners_recorded_leases(self):
         current = {'instance': 'aaaaaaaa', 'extension_version': '0.7.0', 'address': 'unix:x'}
         for tab, owner, action in ((1, 'mine', 'open'), (2, 'other', 'open'), (3, 'mine', 'claim')):
-            browser_commands.journal(
-                'aaaaaaaa', tab, {'lease': f'L{tab}', 'claim': {'owner': owner}}, action
-            )
+            lease = f'{tab:024x}'
+            browser_commands.journal('aaaaaaaa', tab, lease, {'claim': {'owner': owner}}, action)
+        # Another owner's later lease on tab 1 is a separate record that cleanup keeps.
+        browser_commands.journal('aaaaaaaa', 1, 'f' * 24, {'claim': {'owner': 'other'}}, 'claim')
 
         def replies(request):
             if request['op'] == 'status':
@@ -344,10 +345,10 @@ class Maintenance(unittest.TestCase):
         reply, sent = self.run_cli(['cleanup', '--owner', 'mine'], [current], replies)
         self.assertTrue(reply['ok'])
         acted = [(r['op'], r['tab'], r['lease']) for r in sent if r['op'] != 'status']
-        self.assertEqual(acted, [('close', 1, 'L1')])
+        self.assertEqual(acted, [('close', 1, f'{1:024x}')])
         self.assertEqual(reply['tabs'][1]['result'], 'ended')
         left = sorted(p.name for p in browser_commands.lease_dir().glob('*.json'))
-        self.assertEqual(left, ['aaaaaaaa-2.json'])
+        self.assertEqual(left, [f'aaaaaaaa-1-{"f" * 24}.json', f'aaaaaaaa-2-{2:024x}.json'])
         self.assertEqual(oct(browser_commands.lease_dir().stat().st_mode & 0o777), '0o700')
 
     def test_agent_window_needs_the_capability(self):
@@ -416,6 +417,25 @@ class Maintenance(unittest.TestCase):
             with self.assertRaises(bridge.BrowserError):
                 browser_commands.call_with_recovery(record, {'op': 'click'}, 5, False)
         self.assertEqual(calls, ['unix:old', 'unix:new', 'unix:old'])
+
+    def test_host_disconnect_replies_resend_only_when_safe(self):
+        record = {'instance': 'aaaaaaaa', 'address': 'unix:old'}
+        moved = {'instance': 'aaaaaaaa', 'address': 'unix:new'}
+
+        def call(instance, request, timeout):
+            if instance['address'] == 'unix:old':
+                return {'ok': False, 'error': 'instance_disconnected', 'delivered': request['sent']}
+            return {'ok': True}
+
+        recover = browser_commands.call_with_recovery
+        with (
+            mock.patch.object(bridge, 'call', side_effect=call),
+            mock.patch.object(bridge, 'live_instances', return_value=[moved]),
+            mock.patch('time.sleep'),
+        ):
+            self.assertTrue(recover(record, {'op': 'read', 'sent': True}, 5, True)['ok'])
+            self.assertTrue(recover(record, {'op': 'click', 'sent': False}, 5, False)['ok'])
+            self.assertFalse(recover(record, {'op': 'click', 'sent': True}, 5, False)['ok'])
 
 
 @unittest.skipIf(os.name == 'nt', 'Windows registers hosts in the registry')

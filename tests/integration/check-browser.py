@@ -486,6 +486,22 @@ def check_background_work(env, url, work, port, ids):
     step('cleanup_closes_only_own_tabs', cleaned.get('ok') and not gone.get('exists')
          and mine.get('holds_lease'), cleaned=cleaned.get('tabs'))  # fmt: skip
 
+    # Simultaneous first opens in another browser share one new agent window.
+    pair = {}
+    openers = [threading.Thread(target=lambda n=n: pair.setdefault(n, ca(
+        'open', url + 'other', '--instance', 'beta', '--owner', 'pair', '--agent-window', env=env)))
+        for n in range(2)]  # fmt: skip
+    for thread in openers:
+        thread.start()
+    for thread in openers:
+        thread.join()
+    step('simultaneous_agent_window_opens_share_one', all(r.get('ok') for r in pair.values())
+         and pair[0].get('window') == pair[1].get('window'),
+         windows=[r.get('window') for r in pair.values()])  # fmt: skip
+    ca('cleanup', '--owner', 'pair', env=env)
+    # A tab opened through a redirect keeps its claim across the reload below.
+    redirected = ca('open', url + 'redirect', '--instance', 'alpha', '--owner', 'viewer', env=env)
+
     # Reload the extension as the card's button does; claims and the human watch survive.
     build = next(i for i in ca('instances', env=env)['instances'] if i['label'] == 'alpha').get(
         'build'
@@ -511,8 +527,11 @@ def check_background_work(env, url, work, port, ids):
     acted = ca(
         'click', '--tab', tab, '--lease', lease, '--frame', '#pad', '--text', 'Dot tool', env=env
     )
+    after_redirect = ca('status', '--tab', redirected.get('handle', ''), '--lease',
+                        redirected.get('lease', ''), env=env)  # fmt: skip
     step('claims_survive_extension_reload', reloaded.get('build') == build and kept.get('holds_lease')
-         and acted.get('ok') and same.get('reloaded') is False, build=build,
+         and acted.get('ok') and same.get('reloaded') is False
+         and after_redirect.get('holds_lease'), build=build, redirect=after_redirect.get('url'),
          kept=kept.get('holds_lease'), acted=acted.get('error'), noop=same)  # fmt: skip
     # A trusted click in the agent's tab after the reload still ends that claim.
     target = page_target(port, lambda t: t['url'].startswith(url + 'draw'))

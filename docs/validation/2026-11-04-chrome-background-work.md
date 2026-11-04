@@ -66,16 +66,18 @@ kept, and `cleanup --owner` closed the open tab and reported the lost one as end
 ## Real Chrome regression
 
 `tests/integration/check-browser.py` now loads the extension the way "Load unpacked"
-does, with Developer mode on, and passed all 57 checks. New ones:
+does, with Developer mode on, and passed all 58 checks. New ones:
 
 - A background tab captured by the debugger without changing the focused window or
   active tab; the iframe canvas mark (900 px) appears in it, in 0.11 s through the CLI.
 - Three captures at once across two agents' tabs all succeeded.
 - A trusted click in the user's own tab during a paced background drag left the
   agent's drag and claim intact.
+- Two simultaneous first `--agent-window` opens in another browser shared one window.
 - Two `--agent-window` tabs shared one new window; the user's focused window and
   active tab were unchanged; the active agent tab captured as `visible_tab`.
 - `cleanup --owner viewer-2` closed that owner's tab and left `viewer`'s claim.
 - After Chrome's own reload of the extension, the instance came back with the same
-  build, the claim held and accepted a click, `ca browser reload` reported no reload
+  build, the claim held and accepted a click, a tab opened through a redirect kept its
+  claim, `ca browser reload` reported no reload
   needed, and a trusted click in the claimed tab still ended its claim.
