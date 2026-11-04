@@ -481,6 +481,9 @@ def check_background_work(env, url, work, port, ids):
 
     # Rapid captures of a shown tab exceed Chrome's captureVisibleTab quota (about two
     # a second); those are rendered through the debugger instead of failing.
+    # The tab shows the pen (a click at rest leaves it), which no capture may include.
+    ca('click', '--tab', second.get('handle', ''), '--lease', second.get('lease', ''), '--text',
+       'Press me', env=env)  # fmt: skip
     burst = {}
     takers = [threading.Thread(target=lambda n=n: burst.setdefault(n, ca(
         'screenshot', '--tab', second.get('handle', ''), str(work / f'burst-{n}.png'), env=env)))
@@ -490,8 +493,10 @@ def check_background_work(env, url, work, port, ids):
     for thread in takers:
         thread.join()
     methods = sorted(r.get('method') or r.get('detail', r.get('error')) for r in burst.values())
+    pens = [pen_pixels(work / f'burst-{n}.png') if burst[n].get('ok') else None for n in range(4)]
     step('rapid_visible_captures_fall_back', all(r.get('ok') for r in burst.values())
-         and 'debugger' in methods and 'visible_tab' in methods, methods=methods)  # fmt: skip
+         and 'debugger' in methods and 'visible_tab' in methods and pens == [0, 0, 0, 0],
+         methods=methods, pen_pixels=pens)  # fmt: skip
 
     # An agent that lost its leases cleans up only its own tabs.
     cleaned = ca('cleanup', '--owner', 'viewer-2', env=env)

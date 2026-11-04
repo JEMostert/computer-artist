@@ -539,6 +539,26 @@ function openInAgentWindow(url) {
   return next;
 }
 
+// Screenshots leave the pen out. Overlapping captures of one tab share the hiding,
+// and the pen returns only when the last of them is done.
+const concealed = new Map();
+function setPen(tabId, hidden) {
+  return chrome.scripting
+    .executeScript({ target: { tabId }, world: 'ISOLATED', func: (h) => globalThis.__caPen?.conceal(h), args: [hidden] })
+    .catch(() => null);
+}
+async function concealPen(tabId) {
+  const count = (concealed.get(tabId) || 0) + 1;
+  concealed.set(tabId, count);
+  await setPen(tabId, true); // also waits until a shown tab has painted without it
+}
+async function revealPen(tabId) {
+  const count = (concealed.get(tabId) || 1) - 1;
+  if (count > 0) return concealed.set(tabId, count);
+  concealed.delete(tabId);
+  await setPen(tabId, false);
+}
+
 // Background tabs are captured through the debugger protocol, one capture at a time
 // per tab, attached only for the capture. Visible tabs never need it.
 const capturing = new Map();
@@ -815,11 +835,7 @@ async function handle(request) {
       // The active tab of a shown window is captured as displayed; any other tab is
       // rendered through the debugger protocol without being shown.
       const visible = tab.active && window.state !== 'minimized';
-      const pen = (hidden) =>
-        chrome.scripting
-          .executeScript({ target: { tabId }, world: 'ISOLATED', func: (h) => globalThis.__caPen?.conceal(h), args: [hidden] })
-          .catch(() => null);
-      await pen(true);
+      await concealPen(tabId);
       let data;
       let method = visible ? 'visible_tab' : 'debugger';
       try {
@@ -836,7 +852,7 @@ async function handle(request) {
           data = await debuggerCapture(tabId);
         }
       } finally {
-        await pen(false);
+        await revealPen(tabId);
       }
       if (visible && !(await getTab(tabId)).active) {
         throw new Refusal('tab_not_visible', 'The tab was switched during capture; capture again');
