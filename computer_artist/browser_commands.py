@@ -416,6 +416,11 @@ def cleanup(args):
             continue
         base = {'tab': record['tab'], 'lease': record['lease']}
         status = bridge.call(instance, {'op': 'status', **base}, args.timeout)
+        if not status.get('ok'):
+            # Unknown, not ended: keep the record for a later cleanup.
+            results.append({'handle': f'{record["instance"]}:{record["tab"]}',
+                            'result': status.get('error', 'failed')})  # fmt: skip
+            continue
         if not status.get('holds_lease'):
             # The claim ended elsewhere (human input, closed tab, an older extension's reload).
             path.unlink(missing_ok=True)

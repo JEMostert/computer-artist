@@ -180,6 +180,17 @@ function state() {
         if (!tab || (tab.url || tab.pendingUrl) !== claim.url) delete current.claims[id];
       }
       await chrome.storage.local.set({ claims: current.claims, revoked: current.revoked });
+      // Window IDs are reused after a restart: keep the agents' window only while a tab
+      // ca opened there is still claimed.
+      const { agentWindow } = await chrome.storage.local.get('agentWindow');
+      if (agentWindow != null) {
+        const tabs = await Promise.all(
+          Object.entries(current.claims)
+            .filter(([, claim]) => claim.opened)
+            .map(([id]) => chrome.tabs.get(Number(id)).catch(() => null)),
+        );
+        if (!tabs.some((tab) => tab?.windowId === agentWindow)) await chrome.storage.local.remove('agentWindow');
+      }
       await chrome.storage.session.set({ alive: true });
       // Documents from before the reload hold an orphaned watcher; give them a live one.
       for (const [id, claim] of Object.entries(current.claims)) {

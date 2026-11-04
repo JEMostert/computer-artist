@@ -351,6 +351,14 @@ class Maintenance(unittest.TestCase):
         self.assertEqual(left, [f'aaaaaaaa-1-{"f" * 24}.json', f'aaaaaaaa-2-{2:024x}.json'])
         self.assertEqual(oct(browser_commands.lease_dir().stat().st_mode & 0o777), '0o700')
 
+    def test_cleanup_keeps_records_it_could_not_check(self):
+        current = {'instance': 'aaaaaaaa', 'extension_version': '0.7.0', 'address': 'unix:x'}
+        browser_commands.journal('aaaaaaaa', 4, 'a' * 24, {'claim': {'owner': 'mine'}}, 'open')
+        reply, _ = self.run_cli(['cleanup', '--owner', 'mine'], [current],
+                                lambda r: {'ok': False, 'error': 'instance_disconnected'})  # fmt: skip
+        self.assertFalse(reply['ok'])
+        self.assertEqual(len(list(browser_commands.lease_dir().glob('*.json'))), 1)
+
     def test_agent_window_needs_the_capability(self):
         old = {'instance': 'aaaaaaaa', 'extension_version': '0.6.0', 'address': 'unix:x'}
         reply, sent = self.run_cli(['open', 'https://example.com', '--agent-window'], [old],
