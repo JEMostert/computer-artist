@@ -1,5 +1,6 @@
 """Browser bridge transport, native host relay, discovery and installation."""
 
+import base64
 import json
 import os
 import socket
@@ -200,6 +201,106 @@ class Discovery(unittest.TestCase):
         with self.assertRaises(bridge.BrowserError) as raised:
             bridge.parse_tab('aaaaaaaa:12', 'bbbbbbbb')
         self.assertEqual(raised.exception.code, 'wrong_instance')
+
+
+class PointerRequests(unittest.TestCase):
+    """CLI-side validation and request shape for coordinates, gestures and frames."""
+
+    def operate(self, *argv, version='0.6.0'):
+        import argparse
+
+        parser = argparse.ArgumentParser()
+        browser_commands.add_command(parser.add_subparsers(dest='command'))
+        args = parser.parse_args(['browser', *argv])
+        sent = []
+        instance = {'instance': 'aaaaaaaa', 'extension_version': version, 'address': 'unix:x'}
+
+        def call(record, request, timeout):
+            sent.append(request)
+            return {'ok': True}
+
+        with (
+            mock.patch.object(bridge, 'live_instances', return_value=[instance]),
+            mock.patch.object(bridge, 'call', side_effect=call),
+        ):
+            reply = browser_commands.dispatch(args)
+        return reply, (sent[0] if sent else None)
+
+    def test_point_click_inside_a_frame(self):
+        reply, request = self.operate(
+            'click', '--tab', 'aaaaaaaa:5', '--lease', 'L', '--frame', '#sketch',
+            '--selector', 'canvas', '--x', '12.5', '--y', '40', '--count', '2',
+            '--button', 'right', '--modifiers', 'shift+Ctrl',
+        )  # fmt: skip
+        self.assertTrue(reply['ok'])
+        self.assertEqual(request['frame'], ['#sketch'])
+        self.assertEqual((request['x'], request['y'], request['count']), (12.5, 40.0, 2))
+        self.assertEqual(request['button'], 'right')
+        self.assertEqual(request['modifiers'], ['Control', 'Shift'])
+
+    def test_zero_coordinates_are_sent(self):
+        reply, request = self.operate(
+            'click', '--tab', 'aaaaaaaa:5', '--lease', 'L', '--selector', 'canvas',
+            '--x', '0', '--y', '0', version='0.5.3',
+        )  # fmt: skip
+        self.assertEqual(reply['error'], 'extension_outdated')
+        _, request = self.operate(
+            'move', '--tab', 'aaaaaaaa:5', '--lease', 'L', '--x', '0', '--y', '9'
+        )
+        self.assertEqual((request['x'], request['y']), (0.0, 9.0))
+
+    def test_drag_path_keeps_order(self):
+        _, request = self.operate(
+            'drag', '--tab', 'aaaaaaaa:5', '--lease', 'L', '--from', '1', '2',
+            '--via', '3', '4', '--via', '5', '6', '--to', '7', '8',
+        )  # fmt: skip
+        self.assertEqual(request['path'], [[1, 2], [3, 4], [5, 6], [7, 8]])
+
+    def test_invalid_input_is_refused_before_the_browser(self):
+        cases = [
+            (('click', '--tab', 'aaaaaaaa:5', '--lease', 'L'), 'invalid_target'),
+            (('click', '--tab', 'aaaaaaaa:5', '--lease', 'L', '--x', '3'), 'invalid_point'),
+            (('move', '--tab', 'aaaaaaaa:5', '--lease', 'L', '--x', 'nan', '--y', '1'),
+             'invalid_point'),
+            (('click', '--tab', 'aaaaaaaa:5', '--lease', 'L', '--text', 'Go', '--modifiers',
+              'hyper'), 'invalid_modifier'),
+        ]  # fmt: skip
+        for argv, code in cases:
+            reply, request = self.operate(*argv)
+            self.assertEqual(reply['error'], code, argv)
+            self.assertIsNone(request)
+
+    def test_scroll_needs_no_target(self):
+        _, request = self.operate('scroll', '--tab', 'aaaaaaaa:5', '--lease', 'L', '--delta', '300')
+        self.assertEqual((request['op'], request['delta']), ('scroll', 300.0))
+
+    def test_older_extensions_refuse_new_options_but_keep_plain_clicks(self):
+        reply, request = self.operate(
+            'click', '--tab', 'aaaaaaaa:5', '--lease', 'L', '--text', 'Go', '--x', '1', '--y', '1',
+            version='0.5.3',
+        )  # fmt: skip
+        self.assertEqual((reply['error'], reply['required']), ('extension_outdated', '0.6.0'))
+        self.assertIsNone(request)
+        reply, request = self.operate(
+            'drag', '--tab', 'aaaaaaaa:5', '--lease', 'L', '--from', '1', '1', '--to', '2', '2',
+            version='0.5.3',
+        )  # fmt: skip
+        self.assertEqual(reply['error'], 'extension_outdated')
+        reply, request = self.operate(
+            'click', '--tab', 'aaaaaaaa:5', '--lease', 'L', '--text', 'Go', version='0.5.3'
+        )
+        self.assertTrue(reply['ok'])
+        self.assertEqual(set(request), {'op', 'tab', 'lease', 'text'})
+
+    def test_screenshot_reports_scale(self):
+        png = b'\x89PNG\r\n\x1a\n' + struct.pack('>I4sII', 13, b'IHDR', 2560, 1323)
+        folder = Path(tempfile.mkdtemp(prefix='cab-'))
+        reply = browser_commands.save_png(
+            {'ok': True, 'data_url': 'data:image/png;base64,' + base64.b64encode(png).decode(),
+             'viewport': {'width': 1280, 'height': 661}},
+            folder / 'shot.png',
+        )  # fmt: skip
+        self.assertEqual((reply['width'], reply['scale']), (2560, 2.0))
 
 
 @unittest.skipIf(os.name == 'nt', 'Windows registers hosts in the registry')

@@ -238,6 +238,23 @@ if (!globalThis.__caPen) {
       animate(splash, [{ opacity: 1 }, { opacity: 1 }], { duration: 650 });
     },
 
+    // Screenshots leave the pen out, like native window captures. Hiding waits two
+    // frames so the capture shows the page without it.
+    conceal(hidden) {
+      if (!host?.isConnected) return Promise.resolve(false);
+      host.style.setProperty('visibility', hidden ? 'hidden' : 'visible', 'important');
+      if (!hidden) return Promise.resolve(true);
+      return new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(() => done(true))));
+    },
+
+    // Follow a drag: the nib moves with each pointer move and leaves its ink trail.
+    trace(x, y) {
+      if (!at || !visible()) return;
+      ({ x, y } = clamp(x, y));
+      rest(false);
+      place(x, y);
+    },
+
     // After typing, the pen writes along the field; this does not delay ca.
     write(length, characters) {
       if (!at || !visible() || !motion() || length < 4) return;

@@ -451,7 +451,21 @@ def route_environment(args, explicit_lane):
         os.environ['CA_ACCESSIBILITY_BUS'] = f'unix:path={info["bus"]}'
 
 
+def browser_main(argv):
+    """ca browser needs none of the desktop commands, so skip building and importing them."""
+    from .browser_commands import add_command, dispatch
+
+    argument_parser = argparse.ArgumentParser(prog='ca')
+    add_command(argument_parser.add_subparsers(dest='command', required=True))
+    reply = dispatch(argument_parser.parse_args(argv))
+    print(json.dumps(reply, indent=2))
+    return 0 if reply.get('ok') else 1
+
+
 def main(argv=None):
+    raw = list(sys.argv[1:] if argv is None else argv)
+    if raw[:1] == ['browser']:
+        return browser_main(raw)
     argument_parser = parser()
     args, extra = argument_parser.parse_known_args(argv)
     if extra and not (

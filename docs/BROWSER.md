@@ -5,8 +5,9 @@ Chromium windows you already have open, in your own profile, while you keep usin
 the browser. Each browser profile with the extension installed becomes a
 **browser instance** that `ca` can discover, select and drive.
 
-Actions are DOM operations inside the page. `ca browser` never moves your pointer,
-never sends operating-system input, and never activates a tab or focuses a window.
+Actions are DOM events inside the page, including a full mouse model for canvases
+and drawing editors. `ca browser` never moves your pointer, never sends
+operating-system input, and never activates a tab or focuses a window.
 Agents normally work in background tabs that they open themselves. This is
 separation by design, not a security sandbox. The extension can read and change any
 page it is allowed to script, and anything running as your user can reach the local
@@ -86,6 +87,7 @@ ca browser type  --tab 1a2b3c4d:812 --lease LEASE --ref k3x9q2-1 "hello"
 ca browser click --tab 1a2b3c4d:812 --lease LEASE --text "Save"
 ca browser wait  --tab 1a2b3c4d:812 --text "Saved"
 ca browser read  --tab 1a2b3c4d:812 --selector main
+ca browser drag  --tab 1a2b3c4d:812 --lease LEASE --selector canvas --from 40 60 --to 160 60
 ca browser navigate --tab 1a2b3c4d:812 --lease LEASE --reload
 ca browser close --tab 1a2b3c4d:812 --lease LEASE
 ```
@@ -112,6 +114,56 @@ same lease, pen and human-interruption guard as other actions. Missing/ambiguous
 values, disabled options/optgroups/controls and multiple selects are refused.
 Events remain untrusted; trusted-gesture requirements are unchanged.
 
+### Pointer, coordinates and frames
+
+`click`, `move` (hover), `drag` and `scroll` act at an element's centre or at a
+point. All coordinates are CSS pixels:
+
+- With an element (`--ref`, `--selector`, `--text`, `--role`), `--x`/`--y` and the
+  `drag` points are offsets from the element's rendered top-left corner. ca scrolls
+  the point into view first.
+- Without an element they are top-viewport coordinates, which must be inside the
+  viewport (`point_outside_viewport` otherwise).
+- `ca browser screenshot` reports `viewport` and `scale`, the screenshot pixels per CSS
+  pixel (device pixel ratio times browser zoom). A point at image pixel (px, py) is
+  `--x px/scale --y py/scale`. `locate` rects are top-viewport CSS pixels as well.
+
+```bash
+ca browser click --tab H --lease L --selector canvas --x 120 --y 80
+ca browser click --tab H --lease L --x 640 --y 312 --count 2          # viewport point, double
+ca browser click --tab H --lease L --text Item --button right --modifiers Shift
+ca browser drag  --tab H --lease L --selector canvas --from 20 30 --via 100 30 --to 150 120
+ca browser scroll --tab H --lease L --selector '#list' --delta 400   # wheel; positive is down
+ca browser move  --tab H --lease L --text Menu                       # hover only
+```
+
+The events follow a real mouse: pointer and mouse boundary events as the pointer
+enters elements (many toolbars ignore a press without a preceding hover), a move
+before each press, `pointerdown`/`mousedown`, focus, `pointerup`/`mouseup`, and
+`click` on the common ancestor, with `dblclick`, `contextmenu` and `auxclick` where
+a real mouse sends them. A cancelled `pointerdown` suppresses the compatibility mouse
+events and keeps focus where it was, as in Chrome. Drags move in steps of at most 8 CSS pixels, at frame rate in a
+visible tab and without throttling in a background tab (`--interval` sets a delay).
+An unhandled wheel scrolls the nearest box under the point that can still move that
+way, or the page, and stops at a box with `overscroll-behavior: contain`. Clicks and
+drags on disabled controls are refused, as Chrome never activates them.
+
+Points hit-test through same-origin iframes, CSS-scaled frames and open shadow roots
+to the element a real pointer would reach. `--frame SELECTOR` (repeatable for nested
+frames) finds `--text`, `--selector` and other targets inside a same-origin iframe
+for any command, including `read`, `locate` and `wait`. When a target exists only in
+a frame, `locate` lists the frames that match and actions refuse with the `--frame`
+flags to pass. Frames from another origin are refused as `cross_origin_frame`.
+Elements named only by a tooltip (`title`) or `aria-label`, like icon toolbar
+buttons, match `--text`.
+
+When the user takes over in the middle of a drag, ca sends `pointercancel`, releases
+nothing else and refuses with `ownership_revoked` and `gesture: cancelled`.
+
+Pointer coordinates, gestures and frames need extension 0.6.0. With an older
+extension running, the CLI refuses them as `extension_outdated` instead of letting
+the old extension click an element's centre.
+
 ### Focusing a tab
 
 `ca browser focus --tab H --lease L` activates a claimed tab and focuses its
@@ -125,7 +177,10 @@ background work. Activation keeps every lease, like the user switching tabs.
 A tab must be claimed before ca changes it: `open` claims the new tab, and `claim`
 takes an existing one. The claim returns a **lease** that `navigate`, `click`,
 `type`, `select`, `press`, `focus`, `release` and `close` require. Reads (`tabs`, `read`, `locate`,
-`wait`, `screenshot`) need only the tab handle. A claimed tab shows a teal **CA**
+`wait`, `screenshot`) need only the tab handle. `tabs` marks pages Chrome does not
+let extensions script with `scriptable: false` and a `restriction`
+(`browser_page`, `web_store`, `file_access_off`, `unsupported_url`); `claim` refuses
+them as `page_unavailable` with the same reason. A claimed tab shows a teal **CA**
 badge on the extension icon. Tabs that ca opened also sit in a green **CA** tab group.
 
 | Lease ends | `stop_reason` |
@@ -165,7 +220,8 @@ The pen glides to each target before ca clicks, types or presses a key, splashes
 on clicks, writes along fields and drips at rest. When the claim ends, it shows
 **Back to you** and lifts away. In a background tab ca acts without the glide. If
 you switch to that tab, its agent keeps working and you can watch the pen. The pen is drawn above the page's dialogs, ignores the pointer and holds no
-page text, so `read`, `locate` and the obscured-click check do not see it. With
+page text, so `read`, `locate` and the obscured-click check do not see it.
+`ca browser screenshot` hides it during the capture, like native window captures. With
 reduced motion turned on, it moves without animation.
 
 ![The teal Chrome pen splashing on a click, with its owner tag](evidence/chrome-extension/pen-click.png)
@@ -183,16 +239,20 @@ never acts on tabs. Copy the instance ID from its footer for `--instance`.
 - **Input is untrusted DOM events.** Page scripts see `isTrusted: false`. Sites
   that require trusted gestures, such as popups, clipboard access, fullscreen or
   file pickers, refuse them. Keys other than Enter (submit or activate) and
-  Backspace/Delete in text fields have no default action. ca does not use the
-  `debugger` permission, so there is no "being debugged" banner and no trusted
-  input.
+  Backspace/Delete in text fields have no default action, and synthetic events do
+  not change CSS `:hover`, open native menus or start native drag and drop. ca does
+  not use the `debugger` permission, so there is no "being debugged" banner and no
+  trusted input. Measured on 4 November 2026, the full mouse model edited Marvin JS
+  and the LabServant canvas structure editor exactly like trusted input; see the
+  [precise input record](validation/2026-11-04-chrome-precise-input.md).
 - **Screenshots need the active tab of a visible window.** `chrome.tabs.captureVisibleTab`
   cannot capture background tabs and ca never switches tabs by itself, so
   `ca browser screenshot` on a background tab is refused as `tab_not_visible`.
   Use `read` and `locate` there, or `focus` the tab when the user should see it.
 - **Scriptable pages only.** `chrome://` pages, the Web Store, other extensions'
   pages and, unless you allow file access on the extension card, `file://` URLs
-  cannot be claimed or read. Only the top frame is read; iframes are not.
+  cannot be claimed or read. Same-origin iframes are reachable with `--frame` and
+  by point; frames from another origin are not.
 - **Branded Chrome 137 and later** ignore the `--load-extension` command-line flag.
   Load the extension through the extensions page as described above.
 - Requests are capped at about 900 KB (Chrome's 1 MB native-message limit), typed
@@ -204,7 +264,8 @@ never acts on tabs. Copy the instance ID from its footer for `--instance`.
 ca browser ──(same-user socket, mutual HMAC)──> native host ──(stdio)──> extension service worker ──> tab
 ```
 
-- **Extension** (Manifest V3, `computer_artist/chrome_extension`). Its permissions
+- **Extension** (Manifest V3, `computer_artist/chrome_extension`). Each action runs
+  as one script in the tab's top frame, so a drag of any length is one round trip. Its permissions
   are `nativeMessaging`, `tabs`, `scripting`, `storage`, `alarms` and `tabGroups`,
   with host access `<all_urls>` and the `watch.js` content script. `pen.js` is
   injected only into the top frame of a claimed tab before an action. The popup
