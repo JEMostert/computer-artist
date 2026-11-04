@@ -66,7 +66,7 @@ kept, and `cleanup --owner` closed the open tab and reported the lost one as end
 ## Real Chrome regression
 
 `tests/integration/check-browser.py` now loads the extension the way "Load unpacked"
-does, with Developer mode on, and passed all 58 checks. New ones:
+does, with Developer mode on, and passed all 59 checks. New ones:
 
 - A background tab captured by the debugger without changing the focused window or
   active tab; the iframe canvas mark (900 px) appears in it, in 0.11 s through the CLI.
@@ -81,3 +81,41 @@ does, with Developer mode on, and passed all 58 checks. New ones:
   build, the claim held and accepted a click, a tab opened through a redirect kept its
   claim, `ca browser reload` reported no reload
   needed, and a trusted click in the claimed tab still ended its claim.
+
+## Follow-up: visible capture quota (0.7.1)
+
+In the user's Chrome, two back-to-back screenshots of a shown tab failed with
+Chrome's `MAX_CAPTURE_VISIBLE_TAB_CALLS_PER_SECOND` quota (about two a second).
+Reproduced in Chrome for Testing: of four simultaneous captures of the agent-window
+tab, three failed that way. Now only that error falls back to the debugger render;
+the same four captures returned one `visible_tab` and three `debugger` images. Other
+capture errors are reported as before.
+
+Concurrent screenshots of one tab hid and restored the pen independently, so later
+captures in a burst included it (806 to 812 pen pixels in three of four images with
+the earlier worker). Hiding is now shared per tab; the same burst has none.
+
+### Stale visible captures
+
+Another agent reported 0.7.0 `visible_tab` screenshots that stayed byte-identical
+while the page changed. Reproduced in the user's Chrome with an own agent-window tab
+(no focus, no reload) while another application was frontmost: three captures 1.2 s
+apart had the same SHA-256 (`c2397566ab6a`) while the page read `tick 3 visible`,
+`tick 4 hidden`, `tick 6 hidden`. The first frame was current; once Chrome hid the
+covered window it stopped painting and `captureVisibleTab` kept returning that frame.
+Debugger captures of the same page in a background tab differed each time.
+The capture now asks the page for `document.visibilityState` and uses
+`captureVisibleTab` only while it is `visible` (checked again after capturing);
+otherwise it renders through the debugger. Chrome for Testing headless cannot cover a
+window, so the hidden-window path is verified in the user's Chrome after install.
+
+The other agent's own run (issue 2256, 0.7.0) matched: an `--agent-window` tab in an
+unfocused window returned one identical PNG (SHA-256 `08bc5bfa…`) for the grid, an
+opened editor and the settled editor while the DOM changed, and the next
+`visible_tab` screenshot, after a dialog opened, timed out after 30 s. That hang was
+not reproduced here; a visible capture now gives up after 5 s and renders through the
+debugger instead.
+
+Not proven live in the user's Chrome: whether Chrome shows a debugging notice during
+a capture (the agent cannot see browser UI; viewport heights did not change), and
+human takeover (needs real human input; proven in Chrome for Testing).

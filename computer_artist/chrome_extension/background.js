@@ -539,6 +539,26 @@ function openInAgentWindow(url) {
   return next;
 }
 
+// Screenshots leave the pen out. Overlapping captures of one tab share the hiding,
+// and the pen returns only when the last of them is done.
+const concealed = new Map();
+function setPen(tabId, hidden) {
+  return chrome.scripting
+    .executeScript({ target: { tabId }, world: 'ISOLATED', func: (h) => globalThis.__caPen?.conceal(h), args: [hidden] })
+    .catch(() => null);
+}
+async function concealPen(tabId) {
+  const count = (concealed.get(tabId) || 0) + 1;
+  concealed.set(tabId, count);
+  await setPen(tabId, true); // also waits until a shown tab has painted without it
+}
+async function revealPen(tabId) {
+  const count = (concealed.get(tabId) || 1) - 1;
+  if (count > 0) return concealed.set(tabId, count);
+  concealed.delete(tabId);
+  await setPen(tabId, false);
+}
+
 // Background tabs are captured through the debugger protocol, one capture at a time
 // per tab, attached only for the capture. Visible tabs never need it.
 const capturing = new Map();
@@ -812,24 +832,39 @@ async function handle(request) {
       if (restricted) {
         throw new Refusal('page_unavailable', `${RESTRICTIONS[restricted]} (tab ${tabId}).`, { restriction: restricted });
       }
-      // The active tab of a shown window is captured as displayed; any other tab is
-      // rendered through the debugger protocol without being shown.
-      const visible = tab.active && window.state !== 'minimized';
-      const pen = (hidden) =>
-        chrome.scripting
-          .executeScript({ target: { tabId }, world: 'ISOLATED', func: (h) => globalThis.__caPen?.conceal(h), args: [hidden] })
-          .catch(() => null);
-      await pen(true);
+      // Chrome paints a page only while it is shown: a covered window, or one behind
+      // another application on macOS, is hidden and captureVisibleTab then returns its
+      // last painted frame. So the page's own visibility decides; any page that is not
+      // being painted is rendered through the debugger protocol instead.
+      const painted = async () =>
+        tab.active && window.state !== 'minimized' &&
+        (await chrome.scripting
+          .executeScript({ target: { tabId }, world: 'ISOLATED', func: () => document.visibilityState })
+          .then((results) => results?.[0]?.result === 'visible', () => false));
+      await concealPen(tabId);
       let data;
+      let method = 'debugger';
       try {
-        data = visible
-          ? await chrome.tabs.captureVisibleTab(tab.windowId, { format: 'png' })
-          : await debuggerCapture(tabId);
+        if (await painted()) {
+          try {
+            // A window Chrome stops painting can leave this waiting for a frame that never
+            // comes (seen once for 30 s); after 5 s the debugger renders instead.
+            data = await Promise.race([
+              chrome.tabs.captureVisibleTab(tab.windowId, { format: 'png' }),
+              new Promise((_, reject) => setTimeout(() => reject(new Error('capture_stalled')), 5000)),
+            ]);
+            method = 'visible_tab';
+          } catch (error) {
+            // Chrome allows about two visible captures a second; render the rest instead.
+            const message = String(error?.message);
+            if (!/MAX_CAPTURE_VISIBLE_TAB_CALLS_PER_SECOND|^capture_stalled$/.test(message)) throw error;
+          }
+          // Hidden or switched away while capturing: that frame may be stale.
+          if (method === 'visible_tab' && !((await getTab(tabId)).active && (await painted()))) method = 'debugger';
+        }
+        if (method === 'debugger') data = await debuggerCapture(tabId);
       } finally {
-        await pen(false);
-      }
-      if (visible && !(await getTab(tabId)).active) {
-        throw new Refusal('tab_not_visible', 'The tab was switched during capture; capture again');
+        await revealPen(tabId);
       }
       // The viewport in CSS pixels maps screenshot pixels to pointer coordinates.
       const viewport = await chrome.scripting
@@ -839,7 +874,7 @@ async function handle(request) {
           func: () => ({ width: innerWidth, height: innerHeight, scroll_x: scrollX, scroll_y: scrollY }),
         })
         .then((results) => results?.[0]?.result ?? null, () => null);
-      return { tab: tabId, format: 'png', data_url: data, viewport, method: visible ? 'visible_tab' : 'debugger' };
+      return { tab: tabId, format: 'png', data_url: data, viewport, method };
     }
     default:
       throw new Refusal('unknown_operation', `Unknown operation ${request.op}`);
