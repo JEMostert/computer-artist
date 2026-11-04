@@ -3,6 +3,7 @@
 import base64
 import hashlib
 import json
+import math
 import os
 import shutil
 import struct
@@ -35,8 +36,15 @@ BROWSERS = {
 }
 
 OPERATIONS = ('instances', 'label', 'tabs', 'open', 'claim', 'release', 'status', 'close',
-              'focus', 'navigate', 'read', 'locate', 'wait', 'click', 'type', 'select', 'press',
-              'screenshot')  # fmt: skip
+              'focus', 'navigate', 'read', 'locate', 'wait', 'click', 'move', 'drag', 'scroll',
+              'type', 'select', 'press', 'screenshot')  # fmt: skip
+# Pointer coordinates, gestures and frames need this extension; older ones would
+# ignore the new fields and act on an element's centre instead.
+POINTER_VERSION = (0, 6, 0)
+POINTER_FIELDS = ('x', 'y', 'button', 'count', 'modifiers', 'frame', 'path', 'delta', 'axis')
+MODIFIERS = {'shift': 'Shift', 'control': 'Control', 'ctrl': 'Control', 'alt': 'Alt',
+             'option': 'Alt', 'opt': 'Alt', 'meta': 'Meta', 'cmd': 'Meta', 'command': 'Meta',
+             'super': 'Meta', 'win': 'Meta'}  # fmt: skip
 
 
 def add_command(commands):
@@ -90,6 +98,29 @@ def add_command(commands):
         group.add_argument('--role', help='ARIA role, optionally with --name')
         sub.add_argument('--name', help='Accessible name used with --role')
         sub.add_argument('--first', action='store_true', help='Use the first of several matches')
+        sub.add_argument(
+            '--frame',
+            action='append',
+            metavar='SELECTOR',
+            help='Find the element inside this same-origin iframe (repeat for nested frames)',
+        )
+
+    def pointer(sub, button=True):
+        sub.add_argument(
+            '--x',
+            type=float,
+            help='CSS pixels from the left of the element, or of the viewport without one',
+        )
+        sub.add_argument(
+            '--y',
+            type=float,
+            help='CSS pixels from the top of the element, or of the viewport without one',
+        )
+        if button:
+            sub.add_argument('--button', choices=('left', 'middle', 'right'), default=None)
+        sub.add_argument(
+            '--modifiers', help='Keys held during the action, e.g. Shift or Control+Shift'
+        )
 
     target('instances', 'List connected browser instances', tab=False)
     label = target('label', 'Name a browser instance for later selection', tab=False)
@@ -124,8 +155,49 @@ def add_command(commands):
     wait = target('wait', 'Wait until an element or text appears')
     element(wait)
     wait.set_defaults(timeout=10.0)
-    click = target('click', 'Click an element with DOM events', lease=True)
-    element(click)
+    click = target(
+        'click',
+        'Click an element, a point in it (--x/--y) or a viewport point with DOM pointer events',
+        lease=True,
+    )
+    element(click, required=False)
+    pointer(click)
+    click.add_argument('--count', type=int, choices=(1, 2, 3), help='2 = double, 3 = triple')
+    move = target('move', 'Hover: move the pointer to an element or point', lease=True)
+    element(move, required=False)
+    pointer(move, button=False)
+    drag = target(
+        'drag',
+        'Press, move through points and release; points are relative to the element or viewport',
+        lease=True,
+    )
+    element(drag, required=False)
+    drag.add_argument(
+        '--from', dest='start', nargs=2, type=float, required=True, metavar=('X', 'Y')
+    )
+    drag.add_argument(
+        '--via',
+        nargs=2,
+        type=float,
+        action='append',
+        metavar=('X', 'Y'),
+        help='Intermediate point (repeatable, in order)',
+    )
+    drag.add_argument('--to', dest='end', nargs=2, type=float, required=True, metavar=('X', 'Y'))
+    drag.add_argument('--button', choices=('left', 'middle', 'right'), default=None)
+    drag.add_argument('--modifiers', help='Keys held during the drag, e.g. Shift')
+    drag.add_argument(
+        '--interval',
+        type=float,
+        help='Seconds between moves (default: frame rate in a visible tab, no delay otherwise)',
+    )
+    scroll = target('scroll', 'Scroll with a wheel event at an element or point', lease=True)
+    element(scroll, required=False)
+    pointer(scroll, button=False)
+    scroll.add_argument(
+        '--delta', type=float, required=True, help='CSS pixels; positive is down or right'
+    )
+    scroll.add_argument('--axis', choices=('vertical', 'horizontal'), default=None)
     type_ = target('type', 'Type text into a field with DOM events', lease=True)
     element(type_)
     type_.add_argument('--clear', action='store_true', help='Replace the current value')
@@ -173,10 +245,14 @@ def operate(args):
     if tab is not None:
         request['tab'] = tab
     for name in ('lease', 'url', 'reload', 'window', 'owner', 'ref', 'selector', 'text', 'role',
-                 'name', 'first', 'max_chars', 'limit', 'clear', 'key', 'label'):  # fmt: skip
+                 'name', 'first', 'max_chars', 'limit', 'clear', 'key', 'label', 'frame', 'x', 'y',
+                 'button', 'count', 'delta', 'axis', 'interval'):  # fmt: skip
         value = getattr(args, name, None)
         if value not in (None, False):
             request[name] = value
+    request.update(pointer_fields(args, action))
+    if any(name in request for name in POINTER_FIELDS) or action in ('move', 'drag', 'scroll'):
+        require_version(instance, POINTER_VERSION, action)
     if action == 'select':
         request['value'] = args.value
     if action == 'type':
@@ -188,6 +264,56 @@ def operate(args):
     if action == 'screenshot' and reply.get('ok'):
         reply = save_png(reply, args.output)
     return {'instance': instance['instance'], **reply}
+
+
+def pointer_fields(args, action):
+    """Validate point, path and modifier options before anything reaches the browser."""
+    fields = {}
+    if getattr(args, 'modifiers', None):
+        names = [part.strip().lower() for part in args.modifiers.replace(',', '+').split('+')]
+        unknown = [name for name in names if name not in MODIFIERS]
+        if unknown or not names:
+            raise bridge.BrowserError(
+                'invalid_modifier',
+                f'Unknown modifier {", ".join(unknown) or args.modifiers!r}; use Shift, Control, '
+                'Alt or Meta, joined with +',
+            )
+        fields['modifiers'] = sorted({MODIFIERS[name] for name in names})
+    if action in ('click', 'move', 'scroll'):
+        point = (getattr(args, 'x', None), getattr(args, 'y', None))
+        if (point[0] is None) != (point[1] is None):
+            raise bridge.BrowserError('invalid_point', 'Pass --x and --y together')
+        targeted = any(getattr(args, name, None) for name in ('ref', 'selector', 'text', 'role'))
+        if action != 'scroll' and point[0] is None and not targeted:
+            raise bridge.BrowserError(
+                'invalid_target',
+                'Pass an element (--ref, --selector, --text or --role), --x and --y, or both',
+            )
+    if action == 'drag':
+        fields['path'] = [list(args.start), *(list(p) for p in args.via or ()), list(args.end)]
+    points = fields.get('path') or [[getattr(args, 'x', None) or 0, getattr(args, 'y', None) or 0]]
+    for point in points:
+        if not all(math.isfinite(value) for value in point):
+            raise bridge.BrowserError('invalid_point', 'Coordinates must be finite numbers')
+    return fields
+
+
+def require_version(instance, minimum, action):
+    running = instance.get('extension_version') or '0'
+    try:
+        version = tuple(int(part) for part in running.split('.')[:3])
+    except ValueError:
+        version = (0,)
+    if version < minimum:
+        wanted = '.'.join(map(str, minimum))
+        raise bridge.BrowserError(
+            'extension_outdated',
+            f'{action} with these options needs Computer Artist extension {wanted} or later; '
+            f'the browser runs {running}. Run ca browser install, then reload the extension card.',
+            instance=instance.get('instance'),
+            running=running,
+            required=wanted,
+        )
 
 
 def with_handles(instance, reply):
@@ -215,7 +341,13 @@ def save_png(reply, output):
     with open(output, 'xb') as stream:
         stream.write(data)
     width, height = struct.unpack('>II', data[16:24])
-    return {**reply, 'path': str(output.resolve()), 'width': width, 'height': height}
+    shot = {**reply, 'path': str(output.resolve()), 'width': width, 'height': height}
+    viewport = reply.get('viewport') or {}
+    if viewport.get('width'):
+        # Screenshot pixels per CSS pixel (device pixel ratio times browser zoom):
+        # divide an image position by it to get --x/--y for pointer commands.
+        shot['scale'] = round(width / viewport['width'], 4)
+    return shot
 
 
 # -------------------------------------------------------------------- install

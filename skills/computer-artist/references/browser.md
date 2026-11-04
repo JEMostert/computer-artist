@@ -2,8 +2,8 @@
 
 `ca browser` operates tabs in the user's running Chrome/Chromium through the
 Computer Artist extension, on any operating system and without a desktop backend.
-Actions are DOM events inside the page: no pointer, no keyboard device, and no
-tab switching unless you ask for `focus`. Use it when the user wants work done in
+Actions are DOM events inside the page, with a full mouse model for canvases: no
+OS pointer, no keyboard device, and no tab switching unless you ask for `focus`. Use it when the user wants work done in
 their own browser. For testing a web app in isolation, a private environment
 browser (`ca env browser`) remains the default.
 
@@ -17,14 +17,31 @@ browser (`ca env browser`) remains the default.
    tab `handle` and a `lease`. Claim an existing tab (`ca browser claim --tab H`)
    only when the user asked you to work in that tab.
 3. Observe, then act: `read`, `locate` (returns `ref`s) and `wait`; then `click`,
-   `type`, `select`, `press` or `navigate` with `--tab H --lease L`. Re-locate after
-   any navigation; refs from an earlier page are refused as `stale_element`.
+   `type`, `select`, `press`, `drag`, `move`, `scroll` or `navigate` with
+   `--tab H --lease L`. Re-locate after any navigation; refs from an earlier page are
+   refused as `stale_element`. `tabs` marks pages Chrome forbids (`scriptable: false`).
 4. Verify the outcome by reading it back, after `navigate --reload` when it must
    persist. A dispatched click is a claim, not proof.
 5. Finish: `close` tabs you opened and `release` tabs you claimed.
 
 Done when the outcome reads back as expected and every claim you made is closed
 or released.
+
+## Canvases, drawing and coordinates
+
+Coordinates are CSS pixels: `--x/--y` (and `drag --from X Y [--via X Y] --to X Y`)
+are offsets from an element's top-left, or viewport points without an element.
+For a canvas, `focus` the tab, take a `screenshot` and divide image pixels by its
+`scale` to get viewport points, or use offsets from the canvas `locate` rect. Pick
+tools by their tooltip (`--text 'Single bond'`), then click or drag on the canvas.
+Hover-gated toolbars work because clicks send the hover events first.
+
+Editors inside a same-origin iframe: pass `--frame '#id'` to find their controls;
+points reach into the frame by themselves. When a target is only inside a frame,
+`locate` and the refusal name the `--frame` to pass. Cross-origin frames are refused.
+
+Verify each edit with a fresh screenshot (the pen is left out of captures) or page
+text that reflects it, such as search results. Do not save shared records to test.
 
 ## Native selects
 
@@ -55,10 +72,15 @@ visible testing; never for background work.
 - `tab_not_visible`: screenshots need the active tab of a visible window. Use
   `read`/`locate`, or `focus` when the user should see it.
 - `page_unavailable`: browser pages, the Web Store and (without file access)
-  `file://` URLs cannot be scripted.
+  `file://` URLs cannot be scripted; `restriction` says which.
+- `point_outside_viewport`, `cross_origin_frame`, `frame_not_found`: fix the point
+  or frame; viewport points are not scrolled.
+- `extension_outdated`: the browser runs an extension older than this CLI. Run
+  `ca browser install` and ask the user to reload the extension card.
 
 Events are untrusted (`isTrusted: false`). Sites that demand real gestures (file
-pickers, clipboard, popups) refuse them; tell the user instead of retrying. Every
+pickers, clipboard, popups, native drag and drop) refuse them; tell the user instead
+of retrying. Every
 reply is JSON; refusals use `{"ok": false, "error": CODE, "detail": ...}` and exit
 with status 1. See [docs/BROWSER.md](../../../docs/BROWSER.md) for installation,
 transport and platform limits.

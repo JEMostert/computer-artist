@@ -313,6 +313,39 @@ async function getTab(tabId) {
   }
 }
 
+// Chrome lets no extension script its own pages, other extensions or the Web Store;
+// file URLs need "Allow access to file URLs" on the extension card.
+async function restriction(url) {
+  url ||= 'about:blank';
+  let parsed;
+  try {
+    parsed = new URL(url);
+  } catch (error) {
+    return 'unsupported_url';
+  }
+  if (parsed.protocol === 'file:') {
+    return (await chrome.extension.isAllowedFileSchemeAccess()) ? null : 'file_access_off';
+  }
+  if (!['http:', 'https:'].includes(parsed.protocol)) {
+    if (url === 'about:blank') return null;
+    const browser = ['chrome:', 'chrome-extension:', 'chrome-untrusted:', 'chrome-search:', 'devtools:',
+      'about:', 'view-source:', 'edge:', 'brave:', 'vivaldi:', 'opera:'];
+    return browser.includes(parsed.protocol) ? 'browser_page' : 'unsupported_url';
+  }
+  if (parsed.hostname === 'chromewebstore.google.com' ||
+      (parsed.hostname === 'chrome.google.com' && parsed.pathname.startsWith('/webstore'))) {
+    return 'web_store';
+  }
+  return null;
+}
+
+const RESTRICTIONS = {
+  browser_page: 'Chrome does not let extensions script browser pages (chrome://, the new tab page, other extensions)',
+  web_store: 'Chrome does not let extensions script the Chrome Web Store',
+  file_access_off: 'File URLs need "Allow access to file URLs" on the Computer Artist extension card',
+  unsupported_url: 'Chrome does not let extensions script data:, blob: or other non-web URLs',
+};
+
 function checkUrl(url) {
   let parsed;
   try {
@@ -330,6 +363,7 @@ async function describeTab(tab) {
   const current = await state();
   const claim = current.claims[tab.id];
   const revoked = current.revoked[tab.id];
+  const restricted = await restriction(tab.url || tab.pendingUrl);
   return {
     tab: tab.id,
     window: tab.windowId,
@@ -340,6 +374,8 @@ async function describeTab(tab) {
     status: tab.status,
     group: tab.groupId >= 0 ? tab.groupId : null,
     claim: claim ? { owner: claim.owner, since: claim.since, opened: claim.opened } : null,
+    scriptable: !restricted,
+    ...(restricted ? { restriction: restricted } : {}),
     ...(revoked && !claim ? { last_stop_reason: revoked.reason } : {}),
   };
 }
@@ -404,10 +440,14 @@ async function inPage(tabId, request, claim = null) {
       args: [request],
     });
   } catch (error) {
+    const tab = await chrome.tabs.get(tabId).catch(() => null);
+    const restricted = await restriction(tab?.url);
     throw new Refusal(
       'page_unavailable',
-      `Cannot script tab ${tabId}: ${error.message}. Browser pages, the web store and other ` +
-        'extensions cannot be scripted; file URLs need "Allow access to file URLs".',
+      restricted
+        ? `${RESTRICTIONS[restricted]} (tab ${tabId}).`
+        : `Cannot script tab ${tabId}: ${error.message}`,
+      restricted ? { restriction: restricted } : {},
     );
   }
   const result = results?.[0]?.result;
@@ -440,6 +480,12 @@ async function claimTab(tab, owner, opened) {
   if (existing) {
     throw new Refusal('tab_claimed', `Tab ${tab.id} is already claimed by ${existing.owner}`, {
       owner: existing.owner,
+    });
+  }
+  const restricted = await restriction(tab.url || tab.pendingUrl);
+  if (restricted) {
+    throw new Refusal('page_unavailable', `${RESTRICTIONS[restricted]}; ca cannot claim tab ${tab.id}.`, {
+      restriction: restricted,
     });
   }
   const claim = { lease: token(), owner, since: Date.now(), opened, title: tab.title || '' };
@@ -607,6 +653,9 @@ async function handle(request) {
       }
     }
     case 'click':
+    case 'move':
+    case 'drag':
+    case 'scroll':
     case 'type':
     case 'press':
     case 'select': {
@@ -644,10 +693,28 @@ async function handle(request) {
           { active: tab.active, window_state: window.state },
         );
       }
-      const data = await chrome.tabs.captureVisibleTab(tab.windowId, { format: 'png' });
+      const pen = (hidden) =>
+        chrome.scripting
+          .executeScript({ target: { tabId }, world: 'ISOLATED', func: (h) => globalThis.__caPen?.conceal(h), args: [hidden] })
+          .catch(() => null);
+      await pen(true);
+      let data;
+      try {
+        data = await chrome.tabs.captureVisibleTab(tab.windowId, { format: 'png' });
+      } finally {
+        await pen(false);
+      }
       const after = await getTab(tabId);
       if (!after.active) throw new Refusal('tab_not_visible', 'The tab was switched during capture');
-      return { tab: tabId, format: 'png', data_url: data };
+      // The viewport in CSS pixels maps screenshot pixels to pointer coordinates.
+      const viewport = await chrome.scripting
+        .executeScript({
+          target: { tabId },
+          world: 'ISOLATED',
+          func: () => ({ width: innerWidth, height: innerHeight, scroll_x: scrollX, scroll_y: scrollY }),
+        })
+        .then((results) => results?.[0]?.result ?? null, () => null);
+      return { tab: tabId, format: 'png', data_url: data, viewport };
     }
     default:
       throw new Refusal('unknown_operation', `Unknown operation ${request.op}`);
@@ -691,10 +758,11 @@ async function pageAction(request) {
     },
   };
   const roleOf = (el) => el.getAttribute('role') || roles[el.tagName]?.(el) || (el.isContentEditable ? 'textbox' : '');
+  const viewOf = (node) => (node.ownerDocument || node).defaultView || window;
   const nameOf = (el) => {
     const labelled = el.getAttribute('aria-labelledby');
     const fromIds = labelled
-      ? labelled.split(/\s+/).map((id) => document.getElementById(id)?.innerText || '').join(' ')
+      ? labelled.split(/\s+/).map((id) => el.ownerDocument.getElementById(id)?.innerText || '').join(' ')
       : '';
     const labels = el.labels ? Array.from(el.labels, (l) => l.innerText).join(' ') : '';
     return clip(
@@ -707,7 +775,7 @@ async function pageAction(request) {
   };
   const isVisible = (el) => {
     const rect = el.getBoundingClientRect();
-    const style = getComputedStyle(el);
+    const style = viewOf(el).getComputedStyle(el);
     return rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none';
   };
   const refOf = (el) => {
@@ -719,8 +787,73 @@ async function pageAction(request) {
     }
     return ref;
   };
-  const describe = (el) => {
+
+  // Frames from the page's own origin are reachable from this world; others are not.
+  // Coordinates are CSS pixels of the top viewport unless a name says local.
+  const isFrame = (el) => el?.tagName === 'IFRAME' || el?.tagName === 'FRAME';
+  const inner = (frame) => {
+    try {
+      return frame.contentDocument || null;
+    } catch (error) {
+      return null;
+    }
+  };
+  const parentFrame = (doc) => {
+    try {
+      return doc.defaultView?.frameElement || null;
+    } catch (error) {
+      return null;
+    }
+  };
+  const originOf = (frame) => {
+    try {
+      return new URL(frame.src, frame.baseURI).origin;
+    } catch (error) {
+      return 'another origin';
+    }
+  };
+  const frameBox = (frame) => {
+    const rect = frame.getBoundingClientRect();
+    const style = viewOf(frame).getComputedStyle(frame);
+    const sx = frame.offsetWidth ? rect.width / frame.offsetWidth : 1;
+    const sy = frame.offsetHeight ? rect.height / frame.offsetHeight : 1;
+    return {
+      x: rect.left + (frame.clientLeft + parseFloat(style.paddingLeft)) * sx,
+      y: rect.top + (frame.clientTop + parseFloat(style.paddingTop)) * sy,
+      sx,
+      sy,
+    };
+  };
+  const framesOf = (doc) => {
+    const frames = [];
+    for (let frame = parentFrame(doc); frame; frame = parentFrame(frame.ownerDocument)) frames.unshift(frame);
+    return frames;
+  };
+  const toTop = (doc, x, y) => {
+    for (const frame of framesOf(doc).reverse()) {
+      const box = frameBox(frame);
+      x = box.x + x * box.sx;
+      y = box.y + y * box.sy;
+    }
+    return { x, y };
+  };
+  const fromTop = (doc, x, y) => {
+    for (const frame of framesOf(doc)) {
+      const box = frameBox(frame);
+      x = (x - box.x) / box.sx;
+      y = (y - box.y) / box.sy;
+    }
+    return { x, y };
+  };
+  const topRect = (el) => {
     const rect = el.getBoundingClientRect();
+    const a = toTop(el.ownerDocument, rect.left, rect.top);
+    const b = toTop(el.ownerDocument, rect.right, rect.bottom);
+    return { x: a.x, y: a.y, width: b.x - a.x, height: b.y - a.y };
+  };
+  const round = (value) => Math.round(value * 10) / 10;
+  const describe = (el) => {
+    const rect = topRect(el);
     const info = {
       ref: refOf(el),
       tag: el.tagName.toLowerCase(),
@@ -730,6 +863,7 @@ async function pageAction(request) {
       disabled: Boolean(el.disabled || el.getAttribute('aria-disabled') === 'true'),
       rect: { x: Math.round(rect.x), y: Math.round(rect.y), width: Math.round(rect.width), height: Math.round(rect.height) },
     };
+    if (el.ownerDocument !== document) info.in_frame = true;
     if ('value' in el && ['INPUT', 'TEXTAREA', 'SELECT'].includes(el.tagName)) {
       info.value = el.type === 'password' ? '[hidden]' : clip(el.value, 200);
     }
@@ -745,18 +879,18 @@ async function pageAction(request) {
   };
   const interactive =
     'a[href],button,input,textarea,select,summary,label,[role],[tabindex],[contenteditable=""],[contenteditable=true],[onclick]';
-  const find = (target) => {
+  const find = (target, doc) => {
     let nodes;
     if (target.selector) {
       try {
-        nodes = Array.from(document.querySelectorAll(target.selector));
+        nodes = Array.from(doc.querySelectorAll(target.selector));
       } catch (error) {
         return fail('invalid_selector', `Invalid CSS selector: ${target.selector}`);
       }
     } else if (target.text || target.role) {
       const wanted = String(target.text || target.name || '').replace(/\s+/g, ' ').trim().toLowerCase();
       const match = (selector, label) => {
-        const candidates = Array.from(document.querySelectorAll(selector))
+        const candidates = Array.from(doc.querySelectorAll(selector))
           .slice(0, 5000)
           .filter((el) => isVisible(el) && (!target.role || roleOf(el) === target.role));
         const scored = candidates
@@ -775,12 +909,62 @@ async function pageAction(request) {
         // Fall back to any visible text, such as list items and paragraphs.
         nodes = match('body *', (el) => clip(el.innerText, 400));
       }
+      if (!nodes.length && !target.role) {
+        // Then to tooltips and labels, which name icon-only toolbar buttons.
+        nodes = match('body [title], body [aria-label]', nameOf);
+      }
     } else {
       return fail('invalid_target', 'Pass a ref, selector, text or role');
     }
     return nodes;
   };
-  const resolve = (target) => {
+  // --frame selectors, outermost first, choose the document that targets are found in.
+  const scopeOf = (frames) => {
+    let doc = document;
+    for (const selector of frames || []) {
+      let matches;
+      try {
+        matches = Array.from(doc.querySelectorAll(selector)).filter(isFrame);
+      } catch (error) {
+        return fail('invalid_selector', `Invalid CSS selector: ${selector}`);
+      }
+      if (!matches.length) return fail('frame_not_found', `No iframe matches ${selector}`);
+      if (matches.length > 1) {
+        return fail('ambiguous_target', `${matches.length} iframes match ${selector}`, {
+          candidates: matches.slice(0, 5).map(describe),
+        });
+      }
+      const next = inner(matches[0]);
+      if (!next) {
+        return fail('cross_origin_frame', `The iframe ${selector} shows ${originOf(matches[0])}; ca acts only in frames from the page's own origin`);
+      }
+      doc = next;
+    }
+    return doc;
+  };
+  const frameSelector = (frame) => {
+    if (frame.id) return `#${CSS.escape(frame.id)}`;
+    const quote = (value) => JSON.stringify(value);
+    if (frame.name) return `${frame.tagName.toLowerCase()}[name=${quote(frame.name)}]`;
+    return `${frame.tagName.toLowerCase()}[src=${quote(frame.getAttribute('src') || '')}]`;
+  };
+  // Where a target is missing from the page itself, say which same-origin frames hold it.
+  const frameHint = (target) => {
+    const found = [];
+    const visit = (doc, path) => {
+      for (const frame of doc.querySelectorAll('iframe,frame')) {
+        const sub = inner(frame);
+        if (!sub || found.length >= 5) continue;
+        const route = [...path, frameSelector(frame)];
+        const nodes = find(target, sub);
+        if (Array.isArray(nodes) && nodes.length) found.push({ frame: route, matches: nodes.length });
+        if (route.length < 4) visit(sub, route);
+      }
+    };
+    visit(document, []);
+    return found;
+  };
+  const resolve = (target, doc) => {
     if (target.ref) {
       const ref = String(target.ref);
       const el = ref.split('-')[0] === ca.doc ? ca.refs.get(ref)?.deref() : null;
@@ -789,9 +973,16 @@ async function pageAction(request) {
       }
       return el;
     }
-    const nodes = find(target);
+    const nodes = find(target, doc);
     if (!Array.isArray(nodes)) return nodes;
-    if (!nodes.length) return fail('element_not_found', 'No element matches the target');
+    if (!nodes.length) {
+      const frames = target.frame?.length ? [] : frameHint(target);
+      if (frames.length) {
+        const flags = frames[0].frame.map((selector) => `--frame '${selector}'`).join(' ');
+        return fail('element_not_found', `No element in the page matches, but ${frames.length} frame(s) do; pass ${flags}`, { frames });
+      }
+      return fail('element_not_found', 'No element matches the target');
+    }
     if (nodes.length > 1 && !target.first) {
       return fail('ambiguous_target', `${nodes.length} elements match; pass a ref or --first`, {
         candidates: nodes.slice(0, 5).map(describe),
@@ -799,17 +990,10 @@ async function pageAction(request) {
     }
     return nodes[0];
   };
-  const eventInit = (el, extra = {}) => {
-    const rect = el.getBoundingClientRect();
-    return {
-      bubbles: true,
-      cancelable: true,
-      composed: true,
-      view: window,
-      clientX: rect.x + rect.width / 2,
-      clientY: rect.y + rect.height / 2,
-      ...extra,
-    };
+  const deepActive = () => {
+    let el = document.activeElement;
+    while (isFrame(el) && inner(el)?.activeElement) el = inner(el).activeElement;
+    return el;
   };
   const editable = (el) =>
     el.isContentEditable ||
@@ -821,11 +1005,11 @@ async function pageAction(request) {
   };
   const insert = (el, text) => {
     if (el.isContentEditable) {
-      if (!document.execCommand('insertText', false, text)) {
-        const selection = getSelection();
-        const range = selection.rangeCount ? selection.getRangeAt(0) : document.createRange();
+      if (!el.ownerDocument.execCommand('insertText', false, text)) {
+        const selection = viewOf(el).getSelection();
+        const range = selection.rangeCount ? selection.getRangeAt(0) : el.ownerDocument.createRange();
         range.deleteContents();
-        range.insertNode(document.createTextNode(text));
+        range.insertNode(el.ownerDocument.createTextNode(text));
         range.collapse(false);
         el.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: text }));
       }
@@ -842,10 +1026,7 @@ async function pageAction(request) {
   // or a claim that ends while it moves refuses the action instead of performing it.
   const started = performance.now();
   const pen = request.pen ? globalThis.__caPen : null;
-  const arrive = async (el, spot) => {
-    if (!pen || el === document.body || el === document.documentElement) return null;
-    const { x, y } = spot(el.getBoundingClientRect());
-    await pen.to(x, y, request.pen);
+  const interrupted = () => {
     if ((globalThis.__caHumanAt ?? -Infinity) > started) {
       return fail('ownership_revoked', 'Your input took the tab back before ca acted', {
         stop_reason: 'human_input',
@@ -860,6 +1041,16 @@ async function pageAction(request) {
     }
     return null;
   };
+  const arriveAt = async (x, y) => {
+    if (!pen) return null;
+    await pen.to(x, y, request.pen);
+    return interrupted();
+  };
+  const arrive = async (el, spot) => {
+    if (!pen || el === el.ownerDocument.body || el === el.ownerDocument.documentElement) return null;
+    const { x, y } = spot(topRect(el));
+    return arriveAt(x, y);
+  };
   const centre = (rect) => ({ x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 });
   const key = (el, type, name, modifiers) =>
     el.dispatchEvent(
@@ -873,56 +1064,378 @@ async function pageAction(request) {
       }),
     );
 
+  // ------------------------------------------------------------- pointer
+  // A mouse as pages see it: hover transitions, move before press, pointer then
+  // compatibility mouse events, focus on press and click on the common ancestor.
+  const MASK = { left: 1, right: 2, middle: 4 };
+  const CODE = { left: 0, middle: 1, right: 2 };
+  const FOCUSABLE =
+    'a[href],area[href],button,input,select,textarea,summary,iframe,[tabindex],[contenteditable]:not([contenteditable="false"])';
+  const modifiers = request.modifiers || [];
+  const held = {
+    ctrlKey: modifiers.includes('Control'),
+    shiftKey: modifiers.includes('Shift'),
+    altKey: modifiers.includes('Alt'),
+    metaKey: modifiers.includes('Meta'),
+  };
+  const mouse = (ca.mouse ??= { buttons: 0, suppress: false, down: null, hover: null });
+  const hitTest = (x, y) => {
+    let doc = document;
+    let lx = x;
+    let ly = y;
+    for (let depth = 0; depth < 10; depth++) {
+      let el = doc.elementFromPoint(lx, ly);
+      while (el?.shadowRoot) {
+        const deeper = el.shadowRoot.elementFromPoint(lx, ly);
+        if (!deeper || deeper === el) break;
+        el = deeper;
+      }
+      if (!el) return null;
+      if (!isFrame(el)) return { el, x, y };
+      const sub = inner(el);
+      if (!sub) return { el, x, y, foreign: originOf(el) };
+      const box = frameBox(el);
+      lx = (lx - box.x) / box.sx;
+      ly = (ly - box.y) / box.sy;
+      doc = sub;
+    }
+    return null;
+  };
+  const up = (node) =>
+    node.parentElement || node.parentNode?.host || (node.parentNode?.nodeType === 9 ? parentFrame(node.parentNode) : null);
+  const chainOf = (el) => {
+    const chain = [];
+    for (let node = el; node; node = up(node)) chain.push(node);
+    return chain;
+  };
+  const fire = (el, type, at, extra = {}) => {
+    const view = viewOf(el);
+    const local = el.ownerDocument === document ? at : fromTop(el.ownerDocument, at.x, at.y);
+    const init = {
+      bubbles: true,
+      cancelable: true,
+      composed: true,
+      view,
+      clientX: local.x,
+      clientY: local.y,
+      screenX: window.screenX + at.x,
+      screenY: window.screenY + (window.outerHeight - window.innerHeight) + at.y,
+      button: 0,
+      buttons: mouse.buttons,
+      ...held,
+      ...extra,
+    };
+    let event;
+    if (type.startsWith('pointer')) {
+      event = new PointerEvent(type, {
+        pointerId: 1, pointerType: 'mouse', isPrimary: true, width: 1, height: 1,
+        pressure: mouse.buttons ? 0.5 : 0, ...init,
+      }); // prettier-ignore
+    } else if (type === 'wheel') {
+      event = new WheelEvent(type, init);
+    } else {
+      event = new MouseEvent(type, init);
+    }
+    return el.dispatchEvent(event);
+  };
+  const hoverTo = (at) => {
+    const previous = mouse.hover?.deref();
+    const next = at.el;
+    if (previous === next) return;
+    const was = previous?.isConnected ? chainOf(previous) : [];
+    const now = chainOf(next);
+    const left = was.filter((node) => !now.includes(node));
+    const entered = now.filter((node) => !was.includes(node)).reverse();
+    const related = (a, b) => (b && a.ownerDocument === b.ownerDocument ? b : null);
+    const quiet = { bubbles: false, cancelable: false };
+    if (was.length) {
+      fire(previous, 'pointerout', at, { relatedTarget: related(previous, next), button: -1 });
+      for (const node of left) fire(node, 'pointerleave', at, { ...quiet, relatedTarget: related(node, next), button: -1 });
+      fire(previous, 'mouseout', at, { relatedTarget: related(previous, next) });
+      for (const node of left) fire(node, 'mouseleave', at, { ...quiet, relatedTarget: related(node, next) });
+    }
+    const from = was.length ? previous : null;
+    fire(next, 'pointerover', at, { relatedTarget: from && related(next, from), button: -1 });
+    for (const node of entered) fire(node, 'pointerenter', at, { ...quiet, relatedTarget: from && related(node, from), button: -1 });
+    fire(next, 'mouseover', at, { relatedTarget: from && related(next, from) });
+    for (const node of entered) fire(node, 'mouseenter', at, { ...quiet, relatedTarget: from && related(node, from) });
+    mouse.hover = new WeakRef(next);
+  };
+  const moveTo = (at) => {
+    hoverTo(at);
+    fire(at.el, 'pointermove', at, { button: -1 });
+    if (!mouse.suppress) fire(at.el, 'mousemove', at);
+  };
+  const focusAt = (el) => {
+    const doc = el.ownerDocument;
+    const target = chainOf(el).find((node) => node.ownerDocument === doc && node.matches?.(FOCUSABLE) && !node.disabled);
+    if (target) {
+      target.focus({ preventScroll: true });
+    } else if (doc.activeElement && doc.activeElement !== doc.body) {
+      doc.activeElement.blur?.();
+    }
+  };
+  const press = (at, button, count) => {
+    mouse.buttons |= MASK[button];
+    mouse.down = at.el;
+    // A cancelled pointerdown suppresses the compatibility mouse events, as in Chrome.
+    mouse.suppress = !fire(at.el, 'pointerdown', at, { button: CODE[button] });
+    if (mouse.suppress || fire(at.el, 'mousedown', at, { button: CODE[button], detail: count })) focusAt(at.el);
+    if (button === 'right') fire(at.el, 'contextmenu', at, { button: 2 });
+  };
+  const release = (at, button, count) => {
+    mouse.buttons &= ~MASK[button];
+    fire(at.el, 'pointerup', at, { button: CODE[button] });
+    if (!mouse.suppress) fire(at.el, 'mouseup', at, { button: CODE[button], detail: count });
+    mouse.suppress = false;
+    const down = mouse.down;
+    mouse.down = null;
+    if (!down?.isConnected) return;
+    const pressed = chainOf(down);
+    const target = chainOf(at.el).find((node) => pressed.includes(node) && node.ownerDocument === at.el.ownerDocument);
+    if (!target) return;
+    if (button === 'left') {
+      fire(target, 'click', at, { detail: count });
+      if (count === 2) fire(target, 'dblclick', at, { detail: 2 });
+    } else {
+      fire(target, 'auxclick', at, { button: CODE[button], detail: count });
+    }
+  };
+  const cancel = (at) => {
+    if (!mouse.buttons) return;
+    fire(at.el, 'pointercancel', at, { button: -1, cancelable: false });
+    mouse.buttons = 0;
+    mouse.suppress = false;
+    mouse.down = null;
+  };
+  // Visible tabs move at frame rate so the page and the watcher see the stroke;
+  // background tabs yield through a message, which Chrome does not throttle.
+  const pace = () => {
+    const interval = Number(request.interval) || 0;
+    if (interval > 0) return new Promise((done) => setTimeout(done, interval * 1000));
+    if (document.visibilityState === 'visible') {
+      return new Promise((done) => {
+        const timer = setTimeout(done, 50);
+        requestAnimationFrame(() => {
+          clearTimeout(timer);
+          done();
+        });
+      });
+    }
+    return new Promise((done) => {
+      const channel = new MessageChannel();
+      channel.port1.onmessage = () => done();
+      channel.port2.postMessage(0);
+    });
+  };
+  const inView = (doc, x, y) => {
+    const view = viewOf(doc);
+    return x >= 0 && y >= 0 && x < view.innerWidth && y < view.innerHeight;
+  };
+  // Scroll each document so a point offset from an element's corner is in view.
+  const reveal = (el, offset) => {
+    if (!offset) {
+      el.scrollIntoView({ block: 'center', inline: 'center', behavior: 'instant' });
+      return;
+    }
+    el.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'instant' });
+    const rect = el.getBoundingClientRect();
+    let point = { x: rect.left + offset[0], y: rect.top + offset[1] };
+    let doc = el.ownerDocument;
+    for (;;) {
+      const view = viewOf(doc);
+      if (!inView(doc, point.x, point.y)) {
+        const dx = point.x < 0 || point.x >= view.innerWidth ? point.x - view.innerWidth / 2 : 0;
+        const dy = point.y < 0 || point.y >= view.innerHeight ? point.y - view.innerHeight / 2 : 0;
+        const [sx, sy] = [view.scrollX, view.scrollY];
+        view.scrollBy({ left: dx, top: dy, behavior: 'instant' });
+        point = { x: point.x - (view.scrollX - sx), y: point.y - (view.scrollY - sy) };
+      }
+      const frame = parentFrame(doc);
+      if (!frame) return;
+      const box = frameBox(frame);
+      point = { x: box.x + point.x * box.sx, y: box.y + point.y * box.sy };
+      doc = frame.ownerDocument;
+    }
+  };
+  const pointerOp = async (targeted, scope) => {
+    const op = request.op;
+    const button = request.button || 'left';
+    if (!(button in MASK)) return fail('invalid_button', 'Use the left, middle or right button');
+    const count = Number(request.count ?? 1);
+    if (![1, 2, 3].includes(count)) return fail('invalid_count', 'Click count is 1, 2 or 3');
+    if (modifiers.some((name) => !['Shift', 'Control', 'Alt', 'Meta'].includes(name))) {
+      return fail('invalid_modifier', 'Modifiers are Shift, Control, Alt and Meta');
+    }
+    let offsets = null;
+    if (op === 'drag') offsets = request.path;
+    else if (request.x != null || request.y != null) offsets = [[request.x, request.y]];
+    if (offsets) {
+      const valid = Array.isArray(offsets) && offsets.every((p) => Array.isArray(p) && p.length === 2 && p.every(Number.isFinite));
+      if (!valid) return fail('invalid_point', 'Points are pairs of finite numbers');
+      if (op === 'drag' && (offsets.length < 2 || offsets.length > 1000)) {
+        return fail('invalid_point', 'A drag needs 2 to 1000 points');
+      }
+    }
+    let el = null;
+    let points;
+    if (targeted) {
+      el = resolve(request, scope);
+      if (el.ok === false) return el;
+      if (el.disabled && op !== 'scroll') return fail('element_not_interactable', 'The element is disabled');
+      if (!isVisible(el)) return fail('element_not_interactable', 'The element is not visible');
+      reveal(el, offsets?.[0]);
+      const rect = el.getBoundingClientRect();
+      points = (offsets || [[rect.width / 2, rect.height / 2]]).map(([x, y]) =>
+        toTop(el.ownerDocument, rect.left + x, rect.top + y),
+      );
+    } else if (offsets) {
+      points = offsets.map(([x, y]) => ({ x, y }));
+    } else if (op === 'scroll') {
+      points = [{ x: innerWidth / 2, y: innerHeight / 2 }];
+    } else {
+      return fail('invalid_target', 'Pass an element (--ref, --selector, --text or --role) or --x and --y');
+    }
+    const outside = points.find((p) => !inView(document, p.x, p.y));
+    if (outside) {
+      return fail('point_outside_viewport', `Point ${round(outside.x)},${round(outside.y)} is outside the ${innerWidth}x${innerHeight} viewport`, {
+        viewport: { width: innerWidth, height: innerHeight },
+      });
+    }
+    const stopped = await arriveAt(points[0].x, points[0].y);
+    if (stopped) return stopped;
+    if (el && !el.isConnected) return fail('stale_element', 'The element was removed while the pen moved');
+    const first = hitTest(points[0].x, points[0].y);
+    if (!first) return fail('element_not_found', 'Nothing is under that point');
+    if (first.foreign) {
+      return fail('cross_origin_frame', `The point is inside a frame from ${first.foreign}; ca acts only in frames from the page's own origin`, {
+        frame: describe(first.el),
+      });
+    }
+    if (el) {
+      const rect = topRect(el);
+      const within = points[0].x >= rect.x && points[0].x <= rect.x + rect.width &&
+        points[0].y >= rect.y && points[0].y <= rect.y + rect.height; // prettier-ignore
+      if (within && !chainOf(first.el).includes(el) && !first.el.contains(el)) {
+        return fail('element_obscured', `Another element covers the target: ${first.el.tagName.toLowerCase()} ${clip(first.el.innerText, 60)}`, {
+          covering: describe(first.el),
+        });
+      }
+    }
+    const point = { x: round(first.x), y: round(first.y) };
+    const url = location.href;
+    if (op === 'move') {
+      moveTo(first);
+      return { ok: true, point, target: describe(first.el), url };
+    }
+    if (op === 'click') {
+      moveTo(first);
+      for (let n = 1; n <= count; n++) {
+        press(first, button, n);
+        release(first, button, n);
+      }
+      pen?.tap('click');
+      return { ok: true, clicked: describe(el || first.el), target: describe(first.el), point, url };
+    }
+    if (op === 'scroll') {
+      const delta = Number(request.delta);
+      if (!Number.isFinite(delta)) return fail('invalid_delta', 'Pass a finite --delta');
+      const horizontal = request.axis === 'horizontal';
+      moveTo(first);
+      const allowed = fire(first.el, 'wheel', first, {
+        deltaX: horizontal ? delta : 0, deltaY: horizontal ? 0 : delta, deltaMode: 0,
+      }); // prettier-ignore
+      pen?.tap('press');
+      if (!allowed) return { ok: true, point, target: describe(first.el), handled_by_page: true, url };
+      // Untrusted wheel events have no default action, so scroll what a wheel would.
+      const doc = first.el.ownerDocument;
+      let box = null;
+      for (let node = first.el; node && node.ownerDocument === doc; node = node.parentElement) {
+        const style = viewOf(node).getComputedStyle(node);
+        const overflow = horizontal ? style.overflowX : style.overflowY;
+        const room = horizontal ? node.scrollWidth > node.clientWidth : node.scrollHeight > node.clientHeight;
+        if (room && /auto|scroll|overlay/.test(overflow) && node !== doc.body && node !== doc.documentElement) {
+          box = node;
+          break;
+        }
+      }
+      const scroller = box || doc.scrollingElement || doc.documentElement;
+      const before = horizontal ? scroller.scrollLeft : scroller.scrollTop;
+      scroller.scrollBy({ left: horizontal ? delta : 0, top: horizontal ? 0 : delta, behavior: 'instant' });
+      const after = horizontal ? scroller.scrollLeft : scroller.scrollTop;
+      return {
+        ok: true, point, target: describe(first.el), handled_by_page: false,
+        scrolled: { element: box ? describe(box) : 'page', from: round(before), to: round(after) }, url,
+      }; // prettier-ignore
+    }
+    // drag: press at the first point, move through every point in small steps, release.
+    const path = [points[0]];
+    for (let i = 1; i < points.length; i++) {
+      const a = points[i - 1];
+      const b = points[i];
+      const steps = Math.max(1, Math.ceil(Math.hypot(b.x - a.x, b.y - a.y) / 8));
+      for (let s = 1; s <= steps; s++) path.push({ x: a.x + ((b.x - a.x) * s) / steps, y: a.y + ((b.y - a.y) * s) / steps });
+    }
+    moveTo(first);
+    press(first, button, 1);
+    pen?.tap('press');
+    let last = first;
+    for (let i = 1; i < path.length; i++) {
+      await pace();
+      const stop = interrupted();
+      if (stop) {
+        cancel(last);
+        stop.extra = { ...stop.extra, gesture: 'cancelled', moved: i - 1 };
+        return stop;
+      }
+      last = hitTest(path[i].x, path[i].y) || { ...last, x: path[i].x, y: path[i].y };
+      if (!last.el.isConnected) last = { ...last, el: last.el.ownerDocument?.body || document.body };
+      moveTo(last);
+      pen?.trace(path[i].x, path[i].y);
+    }
+    release(last, button, 1);
+    if (pen) await pen.to(last.x, last.y, request.pen);
+    return {
+      ok: true, from: point, to: { x: round(last.x), y: round(last.y) }, moves: path.length - 1,
+      target: describe(first.el), end_target: describe(last.el), url,
+    }; // prettier-ignore
+  };
+
   try {
+    const scope = scopeOf(request.frame);
+    if (scope.ok === false) return scope;
     if (request.op === 'read') {
-      let root = document.body || document.documentElement;
+      let root = scope.body || scope.documentElement;
       if (request.selector || request.ref || request.text || request.role) {
-        root = resolve(request);
+        root = resolve(request, scope);
         if (root.ok === false) return root;
       }
       const text = root.innerText ?? root.textContent ?? '';
       const max = request.max_chars;
       return {
         ok: true,
-        title: document.title,
-        url: location.href,
+        title: scope.title,
+        url: scope.location?.href ?? location.href,
         text: text.slice(0, max),
         length: text.length,
         truncated: text.length > max,
       };
     }
     if (request.op === 'locate') {
-      const nodes = find(request);
+      const nodes = find(request, scope);
       if (!Array.isArray(nodes)) return nodes;
       const limit = Math.min(Math.max(Number(request.limit) || 20, 1), 100);
-      return { ok: true, url: location.href, count: nodes.length, elements: nodes.slice(0, limit).map(describe) };
+      const reply = { ok: true, url: location.href, count: nodes.length, elements: nodes.slice(0, limit).map(describe) };
+      if (!nodes.length && !request.frame?.length) {
+        const frames = frameHint(request);
+        if (frames.length) reply.frames = frames;
+      }
+      return reply;
     }
     const targeted = request.ref || request.selector || request.text || request.role;
-    const el = targeted ? resolve(request) : document.activeElement;
+    if (['click', 'move', 'drag', 'scroll'].includes(request.op)) return await pointerOp(targeted, scope);
+    const el = targeted ? resolve(request, scope) : deepActive();
     if (!el || el.ok === false) return el || fail('element_not_found', 'No focused element');
-    if (request.op === 'click') {
-      if (el.disabled) return fail('element_not_interactable', 'The element is disabled');
-      el.scrollIntoView({ block: 'center', inline: 'center', behavior: 'instant' });
-      if (!isVisible(el)) return fail('element_not_interactable', 'The element is not visible');
-      const stopped = await arrive(el, centre);
-      if (stopped) return stopped;
-      if (!el.isConnected) return fail('stale_element', 'The element was removed while the pen moved');
-      const init = eventInit(el);
-      const hit = document.elementFromPoint(init.clientX, init.clientY);
-      if (hit && hit !== el && !el.contains(hit) && !hit.contains(el)) {
-        return fail('element_obscured', `Another element covers the target: ${hit.tagName.toLowerCase()} ${clip(hit.innerText, 60)}`, {
-          covering: describe(hit),
-        });
-      }
-      el.dispatchEvent(new PointerEvent('pointerdown', { ...init, pointerType: 'mouse', isPrimary: true }));
-      el.dispatchEvent(new MouseEvent('mousedown', { ...init, button: 0, buttons: 1 }));
-      if (typeof el.focus === 'function') el.focus({ preventScroll: true });
-      el.dispatchEvent(new PointerEvent('pointerup', { ...init, pointerType: 'mouse', isPrimary: true }));
-      el.dispatchEvent(new MouseEvent('mouseup', { ...init, button: 0 }));
-      el.click();
-      pen?.tap('click');
-      return { ok: true, clicked: describe(el), url: location.href };
-    }
     if (request.op === 'select') {
       if (el.tagName !== 'SELECT' || el.multiple) {
         return fail('unsupported_control', 'Select requires a native single-select control');
@@ -957,17 +1470,18 @@ async function pageAction(request) {
     if (request.op === 'type') {
       if (!editable(el)) return fail('element_not_editable', `A ${el.tagName.toLowerCase()} does not accept text`);
       if (el.disabled || el.readOnly) return fail('element_not_interactable', 'The field is disabled or read-only');
-      const field = el.getBoundingClientRect();
+      const field = topRect(el);
       const stopped = await arrive(el, (rect) => ({ x: rect.x + Math.min(14, rect.width / 2), y: rect.y + rect.height / 2 }));
       if (stopped) return stopped;
       if (!el.isConnected) return fail('stale_element', 'The field was removed while the pen moved');
       el.focus({ preventScroll: true });
       if (el.isContentEditable) {
-        const range = document.createRange();
+        const range = el.ownerDocument.createRange();
         range.selectNodeContents(el);
         range.collapse(false);
-        getSelection().removeAllRanges();
-        getSelection().addRange(range);
+        const selection = viewOf(el).getSelection();
+        selection.removeAllRanges();
+        selection.addRange(range);
       }
       if (request.clear) {
         if (el.isContentEditable) {

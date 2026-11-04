@@ -27,9 +27,10 @@ import sys
 import tempfile
 import threading
 import time
+import zlib
 from pathlib import Path
 from urllib.parse import urlparse
-from urllib.request import urlopen
+from urllib.request import Request, urlopen
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -192,6 +193,187 @@ def windows_snapshot(env, instance):
     }
 
 
+# -------------------------------------------------------- pointer and frames
+
+
+def pen_pixels(path):
+    """Count pixels in the pen's teal name tag (#0a7c60) in an 8-bit RGB(A) PNG."""
+    data = Path(path).read_bytes()
+    width, height, depth, kind = struct.unpack('>IIBB', data[16:26])
+    assert depth == 8 and kind in (2, 6), (depth, kind)
+    chunks, at = b'', 8
+    while at < len(data):
+        size, name = struct.unpack('>I4s', data[at : at + 8])
+        if name == b'IDAT':
+            chunks += data[at + 8 : at + 8 + size]
+        at += size + 12
+    raw = zlib.decompress(chunks)
+    channels = 3 if kind == 2 else 4
+    stride = width * channels
+    previous = bytearray(stride)
+    count = 0
+    for row in range(height):
+        start = row * (stride + 1)
+        mode, line = raw[start], bytearray(raw[start + 1 : start + 1 + stride])
+        for i in range(stride):
+            left = line[i - channels] if i >= channels else 0
+            up, corner = previous[i], previous[i - channels] if i >= channels else 0
+            if mode == 1:
+                line[i] = (line[i] + left) & 255
+            elif mode == 2:
+                line[i] = (line[i] + up) & 255
+            elif mode == 3:
+                line[i] = (line[i] + (left + up) // 2) & 255
+            elif mode == 4:
+                guess = left + up - corner
+                pick = min((abs(guess - left), 0, left), (abs(guess - up), 1, up),
+                           (abs(guess - corner), 2, corner))[2]  # fmt: skip
+                line[i] = (line[i] + pick) & 255
+        for i in range(0, stride, channels):
+            r, g, b = line[i], line[i + 1], line[i + 2]
+            if abs(r - 10) < 12 and abs(g - 124) < 12 and abs(b - 96) < 12:
+                count += 1
+        previous = line
+    return count
+
+
+def check_pointer(env, url, work, port):
+    """Coordinates, gestures and frames on the drawing fixture, as an editor needs them."""
+    opened = ca('open', url + 'draw', '--instance', 'alpha', '--owner', 'painter', env=env,
+                expect_ok=True)  # fmt: skip
+    tab, lease = opened['handle'], opened['lease']
+
+    def act(action, *rest):
+        began = time.perf_counter()
+        reply = ca(action, '--tab', tab, '--lease', lease, *rest, env=env)
+        reply['_seconds'] = round(time.perf_counter() - began, 3)
+        return reply
+
+    def pad(selector):
+        return ca('read', '--tab', tab, '--frame', '#pad', '--selector', selector, env=env)
+
+    hint = ca('locate', '--tab', tab, '--text', 'Line tool', env=env)
+    missing = act('click', '--text', 'Line tool')
+    step('frame_hint', hint.get('count') == 0 and (hint.get('frames') or [{}])[0].get('frame')
+         == ['#pad'] and missing.get('error') == 'element_not_found'
+         and "--frame '#pad'" in missing.get('detail', ''), frames=hint.get('frames'))  # fmt: skip
+    tool = act('click', '--frame', '#pad', '--text', 'Line tool')
+    step('hover_gated_toolbar_in_frame', tool.get('ok') and pad('#tool').get('text') == 'line',
+         reply=tool.get('error') or tool.get('target'))  # fmt: skip
+    drag = act('drag', '--frame', '#pad', '--selector', 'canvas', '--from', '20', '30',
+               '--via', '100', '30', '--to', '150', '120')  # fmt: skip
+    strokes = pad('#strokes').get('text', '')
+    step('drag_in_scrolled_scaled_frame', drag.get('ok') and 'line 20,30 150,120' in strokes
+         and drag.get('moves', 0) >= 20, strokes=strokes, moves=drag.get('moves'),
+         seconds=drag['_seconds'])  # fmt: skip
+
+    act('click', '--frame', '#pad', '--text', 'Dot tool')
+    canvas = ca('locate', '--tab', tab, '--frame', '#pad', '--selector', 'canvas', env=env)
+    rect = canvas['elements'][0]['rect']
+    viewport = act('click', '--x', str(rect['x'] + 1.5 * 50), '--y', str(rect['y'] + 1.5 * 40))
+    strokes = pad('#strokes').get('text', '')
+    step('viewport_point_through_scaled_frame', viewport.get('ok') and 'dot 50,40 50,40' in strokes
+         and abs(rect['width'] - 450) <= 1, rect=rect, strokes=strokes)  # fmt: skip
+    double = act('click', '--frame', '#pad', '--selector', 'canvas', '--x', '60', '--y', '50',
+                 '--count', '2')  # fmt: skip
+    right = act('click', '--frame', '#pad', '--selector', 'canvas', '--x', '70', '--y', '50',
+                '--button', 'right')  # fmt: skip
+    shifted = act('click', '--frame', '#pad', '--selector', 'canvas', '--x', '80', '--y', '50',
+                  '--modifiers', 'shift')  # fmt: skip
+    wheel = act('scroll', '--frame', '#pad', '--selector', 'canvas', '--delta', '-120')
+    log = pad('#log').get('text', '')
+    step('double_right_modifier_and_wheel', double.get('ok') and right.get('ok') and shifted.get('ok')
+         and 'dblclick@60,50' in log and 'contextmenu' in log and 'shift' in log
+         and 'wheel-120' in log and wheel.get('handled_by_page') is True, log=log)  # fmt: skip
+    page = act('scroll', '--x', '5', '--y', '5', '--delta', '300')
+    scrolled = page.get('scrolled') or {}
+    step('scroll_page', page.get('ok') and scrolled.get('element') == 'page'
+         and scrolled.get('to', 0) - scrolled.get('from', 0) == 300, scrolled=scrolled)  # fmt: skip
+    hover = act('move', '--frame', '#pad', '--text', 'Dot tool')
+    step('move_hovers', hover.get('ok') and hover['target']['tag'] == 'span')
+
+    foreign = act('click', '--frame', '#foreign', '--text', 'Press me')
+    foreign_point = act('click', '--selector', '#foreign', '--x', '20', '--y', '20')
+    outside = act('click', '--x', '5000', '--y', '5')
+    no_target = act('click')
+    old_style = act('click', '--frame', '#pad', '--text', 'Line tool')
+    step('refusals_and_compatibility', foreign.get('error') == 'cross_origin_frame'
+         and foreign_point.get('error') == 'cross_origin_frame'
+         and outside.get('error') == 'point_outside_viewport'
+         and no_target.get('error') == 'invalid_target' and old_style.get('ok'),
+         errors=[r.get('error') for r in (foreign, foreign_point, outside, no_target)])  # fmt: skip
+
+    # The human watches, then takes over in the middle of a slow drag.
+    target = page_target(port, lambda t: t['url'] == url + 'draw')
+    with urlopen(f'http://127.0.0.1:{port}/json/activate/{target["id"]}') as response:
+        response.read()
+    # A visible click leaves the pen resting on the canvas; captures leave it out.
+    act('click', '--frame', '#pad', '--selector', 'canvas', '--x', '150', '--y', '100')
+    shot = ca('screenshot', '--tab', tab, str(work / 'draw.png'), env=env)
+    teal = pen_pixels(work / 'draw.png') if shot.get('ok') else None
+    step('screenshot_reports_scale_without_pen', shot.get('ok') and shot.get('scale', 0) > 0
+         and shot.get('viewport', {}).get('width') and teal == 0, scale=shot.get('scale'),
+         viewport=shot.get('viewport'), pen_pixels=teal, bytes=(work / 'draw.png').stat().st_size
+         if shot.get('ok') else None)  # fmt: skip
+    before = pad('#strokes').get('text', '')
+    pending = {}
+    slow = threading.Thread(target=lambda: pending.setdefault('reply', act(
+        'drag', '--frame', '#pad', '--selector', 'canvas', '--from', '10', '10', '--to', '290',
+        '190', '--interval', '0.05')))  # fmt: skip
+    slow.start()
+    time.sleep(1.2)
+    human = DevTools(target['webSocketDebuggerUrl'])
+    for kind in ('mousePressed', 'mouseReleased'):
+        human.call('Input.dispatchMouseEvent', type=kind, x=5, y=5, button='left', clickCount=1)
+    human.close()
+    slow.join(30)
+    taken = pending.get('reply', {})
+    after = pad('#strokes').get('text', '')
+    step('human_takeover_cancels_drag', taken.get('error') == 'ownership_revoked'
+         and taken.get('gesture') == 'cancelled' and after == before
+         and 'cancel' in pad('#log').get('text', ''), reply={k: taken.get(k) for k in
+         ('error', 'gesture', 'moved', 'stop_reason')})  # fmt: skip
+
+    # Browser pages are listed as unscriptable and refused with the reason.
+    request = Request(f'http://127.0.0.1:{port}/json/new?chrome://version', method='PUT')
+    with urlopen(request) as response:
+        internal = json.load(response)
+    time.sleep(0.5)
+    tabs = ca('tabs', '--instance', 'alpha', env=env)['tabs']
+    listed = next((t for t in tabs if str(t.get('url', '')).startswith('chrome://version')), {})
+    refused = ca('claim', '--tab', listed.get('handle', ''), env=env)
+    step('browser_page_marked_and_refused', listed.get('scriptable') is False
+         and listed.get('restriction') == 'browser_page'
+         and refused.get('error') == 'page_unavailable'
+         and refused.get('restriction') == 'browser_page', detail=refused.get('detail'))  # fmt: skip
+    with urlopen(f'http://127.0.0.1:{port}/json/close/{internal["id"]}') as response:
+        response.read()
+
+    timings = {}
+    for name, command in (
+        (
+            'read',
+            lambda: ca('read', '--tab', tab, '--frame', '#pad', '--selector', '#tool', env=env),
+        ),
+        ('click', lambda: act('click', '--frame', '#pad', '--text', 'Dot tool')),
+        (
+            'point_click',
+            lambda: act(
+                'click', '--frame', '#pad', '--selector', 'canvas', '--x', '30', '--y', '30'
+            ),
+        ),
+        ('tabs', lambda: ca('tabs', '--instance', 'alpha', env=env)),
+    ):
+        samples = []
+        for _ in range(5):
+            began = time.perf_counter()
+            command()
+            samples.append(time.perf_counter() - began)
+        timings[name] = round(sorted(samples)[2], 3)
+    step('pointer_timings', True, median_seconds=timings, drag_seconds=drag['_seconds'])
+    ca('close', '--tab', tab, '--lease', lease, env=env)
+
+
 # --------------------------------------------------------------------- main
 
 
@@ -302,16 +484,35 @@ def main():
         after = windows_snapshot(env, 'alpha')
         step('no_tab_or_window_focus_change', before == after, before=before, after=after)
 
-        options = ca('locate', '--tab', tab, '--selector', '#colour', env=env, expect_ok=True)['elements'][0]
-        selected = ca('select', '--tab', tab, '--lease', lease, '--selector', '#colour', 'blue', env=env)
-        unchanged = ca('select', '--tab', tab, '--lease', lease, '--selector', '#colour', 'blue', env=env)
-        after_select = ca('locate', '--tab', tab, '--selector', '#colour', env=env, expect_ok=True)['elements'][0]
-        events = ca('read', '--tab', tab, '--selector', '#select-events', env=env, expect_ok=True)['text']
-        step('select_readback_and_events', options['value'] == 'red' and len(options['options']) == 6
-             and selected.get('changed') is True and unchanged.get('changed') is False
-             and after_select['value'] == 'blue' and after_select['options'][1]['selected']
-             and after_select['options'][2]['disabled'] and after_select['options'][3]['disabled']
-             and events == 'input,change', events=events, options=after_select['options'])
+        options = ca('locate', '--tab', tab, '--selector', '#colour', env=env, expect_ok=True)[
+            'elements'
+        ][0]
+        selected = ca(
+            'select', '--tab', tab, '--lease', lease, '--selector', '#colour', 'blue', env=env
+        )
+        unchanged = ca(
+            'select', '--tab', tab, '--lease', lease, '--selector', '#colour', 'blue', env=env
+        )
+        after_select = ca('locate', '--tab', tab, '--selector', '#colour', env=env, expect_ok=True)[
+            'elements'
+        ][0]
+        events = ca('read', '--tab', tab, '--selector', '#select-events', env=env, expect_ok=True)[
+            'text'
+        ]
+        step(
+            'select_readback_and_events',
+            options['value'] == 'red'
+            and len(options['options']) == 6
+            and selected.get('changed') is True
+            and unchanged.get('changed') is False
+            and after_select['value'] == 'blue'
+            and after_select['options'][1]['selected']
+            and after_select['options'][2]['disabled']
+            and after_select['options'][3]['disabled']
+            and events == 'input,change',
+            events=events,
+            options=after_select['options'],
+        )
         for selector, value, error in [
             ('#colour', 'missing', 'option_not_found'),
             ('#colour', 'disabled', 'element_not_interactable'),
@@ -321,9 +522,15 @@ def main():
             ('#multiple', 'x', 'unsupported_control'),
             ('#title', 'x', 'unsupported_control'),
         ]:
-            result = ca('select', '--tab', tab, '--lease', lease, '--selector', selector, value, env=env)
-            step('select_refuses_' + selector[1:] + '_' + value, result.get('error') == error,
-                 expected=error, actual=result.get('error'))
+            result = ca(
+                'select', '--tab', tab, '--lease', lease, '--selector', selector, value, env=env
+            )
+            step(
+                'select_refuses_' + selector[1:] + '_' + value,
+                result.get('error') == error,
+                expected=error,
+                actual=result.get('error'),
+            )
 
         stale = ca('click', '--tab', tab, '--lease', lease, '--ref',
                    alpha['fields']['elements'][0]['ref'], env=env)  # fmt: skip
@@ -412,9 +619,15 @@ def main():
             response.read()
         time.sleep(0.5)
         status = ca('status', '--tab', tab, '--lease', lease, env=env)
-        action = ca('type', '--tab', tab, '--lease', lease, '--selector', '#title', 'watchable', env=env)
-        step('human_activation_preserves_lease', status.get('holds_lease') and action.get('ok'),
-             status=status, action=action.get('error'))
+        action = ca(
+            'type', '--tab', tab, '--lease', lease, '--selector', '#title', 'watchable', env=env
+        )
+        step(
+            'human_activation_preserves_lease',
+            status.get('holds_lease') and action.get('ok'),
+            status=status,
+            action=action.get('error'),
+        )
 
         # Activation during a slow open also preserves ownership.
         pending = {}
@@ -433,15 +646,34 @@ def main():
                 response.read()
         opener.join(30)
         reply = pending.get('reply', {})
-        slow_action = ca('click', '--tab', reply.get('handle', ''), '--lease', reply.get('lease', ''),
-                         '--text', 'Press me', env=env) if reply.get('ok') else {}
-        step('activation_while_opening_preserves_lease', reply.get('ok') and slow_action.get('ok'),
-             error=reply.get('error'), action=slow_action.get('error'))
+        slow_action = (
+            ca(
+                'click',
+                '--tab',
+                reply.get('handle', ''),
+                '--lease',
+                reply.get('lease', ''),
+                '--text',
+                'Press me',
+                env=env,
+            )
+            if reply.get('ok')
+            else {}
+        )
+        step(
+            'activation_while_opening_preserves_lease',
+            reply.get('ok') and slow_action.get('ok'),
+            error=reply.get('error'),
+            action=slow_action.get('error'),
+        )
 
         # Input after the document exists but before its slow subresource loads.
         loading_reply = {}
-        loading_opener = threading.Thread(target=lambda: loading_reply.setdefault(
-            'reply', ca('open', url + 'loading', '--instance', 'alpha', env=env)))
+        loading_opener = threading.Thread(
+            target=lambda: loading_reply.setdefault(
+                'reply', ca('open', url + 'loading', '--instance', 'alpha', env=env)
+            )
+        )
         loading_opener.start()
         loading = None
         deadline = time.time() + 10
@@ -459,9 +691,11 @@ def main():
         human.close()
         loading_opener.join(30)
         taken = loading_reply.get('reply', {})
-        step('human_input_while_opening_refuses_ownership',
-             taken.get('error') == 'ownership_revoked' and taken.get('stop_reason') == 'human_input',
-             result=taken)
+        step(
+            'human_input_while_opening_refuses_ownership',
+            taken.get('error') == 'ownership_revoked' and taken.get('stop_reason') == 'human_input',
+            result=taken,
+        )
         with urlopen(f'http://127.0.0.1:{port}/json/activate/{agent_page["id"]}') as response:
             response.read()
 
@@ -473,11 +707,30 @@ def main():
         human.close()
         time.sleep(0.5)
         revoked = ca('status', '--tab', tab, '--lease', lease, env=env)
-        sibling = ca('click', '--tab', third['handle'], '--lease', third['lease'], '--text', 'Press me', env=env)
-        slow_status = ca('status', '--tab', reply.get('handle', ''), '--lease', reply.get('lease', ''), env=env)
-        step('human_input_only_revokes_relevant_tab', revoked.get('stop_reason') == 'human_input'
-             and sibling.get('ok') and slow_status.get('holds_lease'), revoked=revoked.get('stop_reason'),
-             sibling=sibling.get('error'), slow=slow_status.get('holds_lease'))
+        sibling = ca(
+            'click',
+            '--tab',
+            third['handle'],
+            '--lease',
+            third['lease'],
+            '--text',
+            'Press me',
+            env=env,
+        )
+        slow_status = ca(
+            'status', '--tab', reply.get('handle', ''), '--lease', reply.get('lease', ''), env=env
+        )
+        step(
+            'human_input_only_revokes_relevant_tab',
+            revoked.get('stop_reason') == 'human_input'
+            and sibling.get('ok')
+            and slow_status.get('holds_lease'),
+            revoked=revoked.get('stop_reason'),
+            sibling=sibling.get('error'),
+            slow=slow_status.get('holds_lease'),
+        )
+
+        check_pointer(env, url, work, port)
 
         if args.idle:
             pid = next(

@@ -51,6 +51,7 @@ your pointer or switch your tabs. Your own input in a claimed tab takes it back.
 ca browser install                       # native host; then Load unpacked the printed folder
 ca browser open http://localhost:5173    # background tab, returns handle and lease
 ca browser type --tab HANDLE --lease LEASE --text Name "Ada"
+ca browser drag --tab HANDLE --lease LEASE --selector canvas --from 20 30 --to 150 120
 ```
 
 ## Remember and reuse workflows
