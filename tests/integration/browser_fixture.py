@@ -70,6 +70,7 @@ DRAW = """<!doctype html><html><head><meta charset="utf-8"><title>Draw</title>
 #stage{transform:scale(1.5);transform-origin:0 0;width:420px;height:300px;margin:20px}
 #pad{width:400px;height:280px;border:4px solid #888;padding:6px}
 #foreign{width:300px;height:120px;margin-top:200px}</style></head><body>
+<div id="panel" style="height:80px;overflow:auto;border:1px solid #999"><div style="height:200px">Panel</div></div>
 <div id="spacer">Header</div>
 <div id="stage"><iframe id="pad" src="/pad"></iframe></div>
 <p id="page-events"></p>
@@ -83,7 +84,9 @@ PAD = """<!doctype html><html><head><meta charset="utf-8"><title>Pad</title>
 <style>body{margin:0;font:12px sans-serif} .tool{display:inline-block;padding:4px 8px;border:1px solid #999}
 canvas{display:block;width:300px;height:200px;border:0;margin:4px 0 0 10px}</style></head><body>
 <div><span class="tool" title="Line tool"><span>Line</span></span>
-<span class="tool" title="Dot tool"><span>Dot</span></span> <b id="tool">none</b></div>
+<span class="tool" title="Dot tool"><span>Dot</span></span> <b id="tool">none</b>
+<input id="label" value="label"><button id="bold" onpointerdown="event.preventDefault()"
+onclick="document.getElementById('log').textContent += 'bold:' + document.activeElement.id + ' '">B</button></div>
 <canvas width="600" height="400"></canvas>
 <ol id="strokes"></ol><p id="log"></p>
 <script>

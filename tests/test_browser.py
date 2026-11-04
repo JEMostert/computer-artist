@@ -238,6 +238,17 @@ class PointerRequests(unittest.TestCase):
         self.assertEqual(request['button'], 'right')
         self.assertEqual(request['modifiers'], ['Control', 'Shift'])
 
+    def test_zero_coordinates_are_sent(self):
+        reply, request = self.operate(
+            'click', '--tab', 'aaaaaaaa:5', '--lease', 'L', '--selector', 'canvas',
+            '--x', '0', '--y', '0', version='0.5.3',
+        )  # fmt: skip
+        self.assertEqual(reply['error'], 'extension_outdated')
+        _, request = self.operate(
+            'move', '--tab', 'aaaaaaaa:5', '--lease', 'L', '--x', '0', '--y', '9'
+        )
+        self.assertEqual((request['x'], request['y']), (0.0, 9.0))
+
     def test_drag_path_keeps_order(self):
         _, request = self.operate(
             'drag', '--tab', 'aaaaaaaa:5', '--lease', 'L', '--from', '1', '2',

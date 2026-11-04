@@ -289,6 +289,16 @@ def check_pointer(env, url, work, port):
     scrolled = page.get('scrolled') or {}
     step('scroll_page', page.get('ok') and scrolled.get('element') == 'page'
          and scrolled.get('to', 0) - scrolled.get('from', 0) == 300, scrolled=scrolled)  # fmt: skip
+    # A toolbar that cancels pointerdown keeps focus in the field, as in Chrome.
+    act('click', '--frame', '#pad', '--selector', '#label')
+    act('click', '--frame', '#pad', '--selector', '#bold')
+    kept = 'bold:label' in pad('#log').get('text', '')
+    # A wheel over an exhausted panel scrolls the page instead.
+    inner = act('scroll', '--selector', '#panel', '--delta', '500')
+    outer = act('scroll', '--selector', '#panel', '--delta', '200')
+    step('focus_kept_and_scroll_chains', kept and (inner.get('scrolled') or {}).get('element', {})
+         != 'page' and (outer.get('scrolled') or {}).get('element') == 'page',
+         inner=inner.get('scrolled'), outer=outer.get('scrolled'), log=pad('#log').get('text'))  # fmt: skip
     hover = act('move', '--frame', '#pad', '--text', 'Dot tool')
     step('move_hovers', hover.get('ok') and hover['target']['tag'] == 'span')
 

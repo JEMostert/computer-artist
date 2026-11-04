@@ -53,7 +53,7 @@ and a synthetic drag drew the same bonds as trusted input. Trusted input (the
 
 ## Real Chrome regression
 
-`tests/integration/check-browser.py` passed all 48 checks against two disposable
+`tests/integration/check-browser.py` passed all 49 checks against two disposable
 Chrome for Testing 153 instances (`TMPDIR=/tmp`). The new checks, on a fixture with a
 hover-gated toolbar and a canvas inside a same-origin iframe scaled 1.5x below a tall
 header:
@@ -63,7 +63,10 @@ header:
   35 moves after scrolling; a viewport point through the scaled frame recorded
   `dot 50,40`.
 - Double click, right click, Shift click and canvas wheel were each recorded; a page
-  wheel scrolled the page by exactly 300 px.
+  wheel scrolled the page by exactly 300 px, and a wheel over an exhausted panel
+  scrolled the page instead (0 to 120 in the panel, then 0 to 200 on the page).
+- A toolbar button that cancels `pointerdown` was clicked while a field had focus;
+  its handler still saw the field focused.
 - A cross-origin frame (by `--frame` and by point), a point outside the viewport and a
   missing target were refused with `cross_origin_frame`, `point_outside_viewport` and
   `invalid_target`.

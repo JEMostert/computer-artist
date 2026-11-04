@@ -1178,9 +1178,10 @@ async function pageAction(request) {
   const press = (at, button, count) => {
     mouse.buttons |= MASK[button];
     mouse.down = at.el;
-    // A cancelled pointerdown suppresses the compatibility mouse events, as in Chrome.
+    // A cancelled pointerdown suppresses the compatibility mouse events and, like a
+    // cancelled mousedown, keeps focus where it is (toolbars rely on this), as in Chrome.
     mouse.suppress = !fire(at.el, 'pointerdown', at, { button: CODE[button] });
-    if (mouse.suppress || fire(at.el, 'mousedown', at, { button: CODE[button], detail: count })) focusAt(at.el);
+    if (!mouse.suppress && fire(at.el, 'mousedown', at, { button: CODE[button], detail: count })) focusAt(at.el);
     if (button === 'right') fire(at.el, 'contextmenu', at, { button: 2 });
   };
   const release = (at, button, count) => {
@@ -1347,14 +1348,19 @@ async function pageAction(request) {
       }); // prettier-ignore
       pen?.tap('press');
       if (!allowed) return { ok: true, point, target: describe(first.el), handled_by_page: true, url };
-      // Untrusted wheel events have no default action, so scroll what a wheel would.
+      // Untrusted wheel events have no default action, so scroll what a wheel would:
+      // the nearest box that can still move that way, else the page.
       const doc = first.el.ownerDocument;
+      const canMove = (node) => {
+        const position = horizontal ? node.scrollLeft : node.scrollTop;
+        const limit = horizontal ? node.scrollWidth - node.clientWidth : node.scrollHeight - node.clientHeight;
+        return delta > 0 ? position < limit - 0.5 : position > 0.5;
+      };
       let box = null;
       for (let node = first.el; node && node.ownerDocument === doc; node = node.parentElement) {
+        if (node === doc.body || node === doc.documentElement) break;
         const style = viewOf(node).getComputedStyle(node);
-        const overflow = horizontal ? style.overflowX : style.overflowY;
-        const room = horizontal ? node.scrollWidth > node.clientWidth : node.scrollHeight > node.clientHeight;
-        if (room && /auto|scroll|overlay/.test(overflow) && node !== doc.body && node !== doc.documentElement) {
+        if (/auto|scroll|overlay/.test(horizontal ? style.overflowX : style.overflowY) && canMove(node)) {
           box = node;
           break;
         }

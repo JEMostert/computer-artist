@@ -248,7 +248,7 @@ def operate(args):
                  'name', 'first', 'max_chars', 'limit', 'clear', 'key', 'label', 'frame', 'x', 'y',
                  'button', 'count', 'delta', 'axis', 'interval'):  # fmt: skip
         value = getattr(args, name, None)
-        if value not in (None, False):
+        if value is not None and value is not False:  # keeps coordinate 0
             request[name] = value
     request.update(pointer_fields(args, action))
     if any(name in request for name in POINTER_FIELDS) or action in ('move', 'drag', 'scroll'):

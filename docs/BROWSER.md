@@ -142,9 +142,10 @@ enters elements (many toolbars ignore a press without a preceding hover), a move
 before each press, `pointerdown`/`mousedown`, focus, `pointerup`/`mouseup`, and
 `click` on the common ancestor, with `dblclick`, `contextmenu` and `auxclick` where
 a real mouse sends them. A cancelled `pointerdown` suppresses the compatibility mouse
-events, as in Chrome. Drags move in steps of at most 8 CSS pixels, at frame rate in a
+events and keeps focus where it was, as in Chrome. Drags move in steps of at most 8 CSS pixels, at frame rate in a
 visible tab and without throttling in a background tab (`--interval` sets a delay).
-An unhandled wheel scrolls the scrollable box under the point, or the page.
+An unhandled wheel scrolls the nearest box under the point that can still move that
+way, or the page.
 
 Points hit-test through same-origin iframes, CSS-scaled frames and open shadow roots
 to the element a real pointer would reach. `--frame SELECTOR` (repeatable for nested
