@@ -1283,7 +1283,9 @@ async function pageAction(request) {
     if (targeted) {
       el = resolve(request, scope);
       if (el.ok === false) return el;
-      if (el.disabled && op !== 'scroll') return fail('element_not_interactable', 'The element is disabled');
+      if (op !== 'scroll' && (el.disabled || el.matches(':disabled'))) {
+        return fail('element_not_interactable', 'The element is disabled');
+      }
       if (!isVisible(el)) return fail('element_not_interactable', 'The element is not visible');
       reveal(el, offsets?.[0]);
       const rect = el.getBoundingClientRect();
@@ -1323,6 +1325,13 @@ async function pageAction(request) {
         });
       }
     }
+    // Chrome never activates a disabled control (including inside a disabled fieldset).
+    const control = first.el.closest?.('button,input,select,textarea,option,optgroup,fieldset');
+    if ((op === 'click' || op === 'drag') && control?.matches(':disabled')) {
+      return fail('element_not_interactable', 'The control under that point is disabled', {
+        target: describe(control),
+      });
+    }
     const point = { x: round(first.x), y: round(first.y) };
     const url = location.href;
     if (op === 'move') {
@@ -1349,7 +1358,8 @@ async function pageAction(request) {
       pen?.tap('press');
       if (!allowed) return { ok: true, point, target: describe(first.el), handled_by_page: true, url };
       // Untrusted wheel events have no default action, so scroll what a wheel would:
-      // the nearest box that can still move that way, else the page.
+      // the nearest box that can still move that way, else the page, unless a box
+      // contains its overscroll.
       const doc = first.el.ownerDocument;
       const canMove = (node) => {
         const position = horizontal ? node.scrollLeft : node.scrollTop;
@@ -1360,7 +1370,9 @@ async function pageAction(request) {
       for (let node = first.el; node && node.ownerDocument === doc; node = node.parentElement) {
         if (node === doc.body || node === doc.documentElement) break;
         const style = viewOf(node).getComputedStyle(node);
-        if (/auto|scroll|overlay/.test(horizontal ? style.overflowX : style.overflowY) && canMove(node)) {
+        if (!/auto|scroll|overlay/.test(horizontal ? style.overflowX : style.overflowY)) continue;
+        const contained = /contain|none/.test(horizontal ? style.overscrollBehaviorX : style.overscrollBehaviorY);
+        if (canMove(node) || contained) {
           box = node;
           break;
         }

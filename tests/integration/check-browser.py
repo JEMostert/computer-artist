@@ -299,6 +299,14 @@ def check_pointer(env, url, work, port):
     step('focus_kept_and_scroll_chains', kept and (inner.get('scrolled') or {}).get('element', {})
          != 'page' and (outer.get('scrolled') or {}).get('element') == 'page',
          inner=inner.get('scrolled'), outer=outer.get('scrolled'), log=pad('#log').get('text'))  # fmt: skip
+    contained = [act('scroll', '--selector', '#contained', '--delta', '300') for _ in range(2)]
+    off = ca('locate', '--tab', tab, '--selector', '#off', env=env)['elements'][0]['rect']
+    disabled = act('click', '--x', str(off['x'] + 5), '--y', str(off['y'] + 5))
+    title = ca('read', '--tab', tab, '--selector', 'title', env=env).get('text')
+    step('contained_scroll_and_disabled_point', [(c.get('scrolled') or {}).get('to') for c in
+         contained] == [40, 40] and disabled.get('error') == 'element_not_interactable'
+         and title != 'clicked', contained=[c.get('scrolled') for c in contained],
+         disabled=disabled.get('error'))  # fmt: skip
     hover = act('move', '--frame', '#pad', '--text', 'Dot tool')
     step('move_hovers', hover.get('ok') and hover['target']['tag'] == 'span')
 

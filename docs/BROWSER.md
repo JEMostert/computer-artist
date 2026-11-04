@@ -145,7 +145,8 @@ a real mouse sends them. A cancelled `pointerdown` suppresses the compatibility 
 events and keeps focus where it was, as in Chrome. Drags move in steps of at most 8 CSS pixels, at frame rate in a
 visible tab and without throttling in a background tab (`--interval` sets a delay).
 An unhandled wheel scrolls the nearest box under the point that can still move that
-way, or the page.
+way, or the page, and stops at a box with `overscroll-behavior: contain`. Clicks and
+drags on disabled controls are refused, as Chrome never activates them.
 
 Points hit-test through same-origin iframes, CSS-scaled frames and open shadow roots
 to the element a real pointer would reach. `--frame SELECTOR` (repeatable for nested
