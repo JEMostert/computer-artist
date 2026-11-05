@@ -79,9 +79,14 @@ ca browser drag --tab HANDLE --lease LEASE --viewport 1700x1291 \
 ca browser release --tab HANDLE --lease LEASE        # hand the tab over to you
 ```
 
-Actions are DOM events inside the page: `ca browser` never moves your pointer,
-switches your tabs or starts a browser. Your own click, key or scroll in a
-claimed tab takes it back. See [the browser extension](docs/BROWSER.md).
+Actions are DOM events inside the page: `ca browser` never moves your pointer or
+starts a browser, and switches tabs only for an explicit `ca browser focus`, which
+also takes window focus. Your own click, key or scroll in a claimed tab takes it
+back. On Linux with Wayland (tested with Chrome for Testing 153), background tabs
+could not be rendered, so a screenshot needs the tab on screen: open it with
+`--agent-window` or `focus` it (see the
+[Kleki gallery record](docs/validation/2026-11-05-kleki-gallery.md)). See
+[the browser extension](docs/BROWSER.md).
 
 ## Where the agent works
 

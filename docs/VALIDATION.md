@@ -52,7 +52,7 @@ same day with headless Chrome for Testing on macOS 27; see the
 On 5 November 2026, five models each painted a commission in Kleki through `ca
 browser`, each in its own tab of one Chrome for Testing 153 on a private KWin desktop
 on Fedora, with extension 0.9.0. A coordinator filmed all five tabs at once (7,394
-captures, every one with the pen in frame) and judged and sent back weak results.
+captures, 7,387 of them with the pen included) and judged and sent back weak results.
 See the [Kleki gallery record](validation/2026-11-05-kleki-gallery.md) for counts,
 send-backs, every CA error and Kleki quirk. It found that background tabs cannot be
 rendered in headed Chrome on Linux/Wayland, that long drags time out while still
