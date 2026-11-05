@@ -347,6 +347,13 @@ async function watchTab(tabId) {
 }
 
 chrome.runtime.onMessage.addListener((message, sender) => {
+  if (message?.type === 'ca-document-ready' && sender.id === chrome.runtime.id && sender.tab && sender.frameId === 0) {
+    // A new document of a claimed tab gets its pen as soon as it is parsed.
+    state().then((current) => {
+      const claim = current.claims[sender.tab.id];
+      if (claim) showPen(sender.tab.id, claim);
+    });
+  }
   if (message?.type === 'ca-human-input' && sender.id === chrome.runtime.id && sender.tab) {
     if (opening.has(sender.tab.id)) inputWhileOpening.add(sender.tab.id);
     state().then((current) => {
@@ -362,8 +369,8 @@ chrome.runtime.onMessage.addListener((message, sender) => {
 });
 
 chrome.tabs.onUpdated.addListener((tabId, change) => {
-  // Track each claimed tab's URL so a reload can tell the same tab from a reused ID,
-  // and put the pen back on each new document of a claimed tab.
+  // Track each claimed tab's URL so a reload can tell the same tab from a reused ID.
+  // watch.js reports each new document once parsed; 'complete' covers any it missed.
   if (!change.url && change.status !== 'complete') return;
   state().then((current) => {
     const claim = current.claims[tabId];
@@ -608,8 +615,9 @@ async function revealPen(tabId) {
 // stays attached until its claim ends (release, close, cleanup, human input, tab closed
 // or replaced) or until DEBUGGER_IDLE_MS pass without any request in that claim, which
 // covers agents that crash or forget to close. Chrome detaches by itself when the
-// extension reloads or the browser exits; startup detaches leftovers it cannot account
-// for. Unclaimed tabs are never attached.
+// extension reloads or the browser exits. Session storage remembers attached tabs, so a
+// restarted worker adopts those of live claims and detaches the rest. Unclaimed tabs
+// are never attached.
 const DEBUGGER_IDLE_MS = 5 * 60 * 1000;
 const DEBUGGER_SETTLE_MS = 400; // the bar resizes windows after the first attach
 const sessions = new Map(); // tabId -> { lease, used, ready }
@@ -637,19 +645,21 @@ async function endIdleSessions() {
   scheduleIdleCheck();
 }
 
+// Chrome's target list does not say which extension attached a debugger, so this worker
+// keeps its own record across worker restarts.
+function rememberSessions() {
+  chrome.storage.session.set({ debuggerTabs: [...sessions.keys()] }).catch(() => {});
+}
+
 async function endSession(tabId) {
   const session = sessions.get(tabId);
   if (!session) return false;
   sessions.delete(tabId);
+  rememberSessions();
   scheduleIdleCheck();
   await session.ready.catch(() => {});
   await chrome.debugger.detach({ tabId }).catch(() => {}); // closed tabs are already detached
   return true;
-}
-
-async function ourTarget(tabId) {
-  const targets = await chrome.debugger.getTargets().catch(() => []);
-  return targets.some((t) => t.tabId === tabId && t.attached && t.extensionId === chrome.runtime.id);
 }
 
 const holds = async (tabId, claim) => (await state()).claims[tabId]?.lease === claim.lease;
@@ -676,8 +686,6 @@ async function openSession(tabId, claim) {
       try {
         await chrome.debugger.attach(target, '1.3');
       } catch (error) {
-        // A worker restart can leave this extension's own session in place: adopt it.
-        if (await ourTarget(tabId)) return;
         throw new Refusal(
           'capture_unavailable',
           `Chrome refused to capture background tab ${tabId}: ${error.message}. Use focus to show it, or read and locate.`,
@@ -687,8 +695,11 @@ async function openSession(tabId, claim) {
     })();
     session = { lease: claim.lease, used: Date.now(), ready };
     sessions.set(tabId, session);
+    rememberSessions();
     ready.catch(() => {
-      if (sessions.get(tabId) === session) sessions.delete(tabId);
+      if (sessions.get(tabId) !== session) return;
+      sessions.delete(tabId);
+      rememberSessions();
     });
   }
   await session.ready;
@@ -704,24 +715,30 @@ chrome.debugger.onDetach.addListener((source, reason) => {
   const session = sessions.get(source.tabId);
   if (!session) return;
   sessions.delete(source.tabId);
+  rememberSessions();
   if (reason === 'canceled_by_user') cancelledLeases.add(session.lease);
   scheduleIdleCheck();
 });
 
-// After a worker restart: keep sessions of live claims (their idle clock restarts) and
-// detach any other target this extension still holds.
+// After a worker restart (not an extension reload, which detaches everything and clears
+// session storage): keep the sessions of live claims, with a fresh idle clock, and
+// detach the rest.
 async function adoptSessions() {
   const current = await state();
-  const targets = await chrome.debugger.getTargets().catch(() => []);
-  for (const t of targets) {
-    if (!t.attached || t.extensionId !== chrome.runtime.id || t.tabId == null || sessions.has(t.tabId)) continue;
-    const claim = current.claims[t.tabId];
+  const { debuggerTabs = [] } = await chrome.storage.session.get('debuggerTabs');
+  const attached = new Set(
+    (await chrome.debugger.getTargets().catch(() => [])).filter((t) => t.attached).map((t) => t.tabId),
+  );
+  for (const tabId of debuggerTabs) {
+    if (sessions.has(tabId) || !attached.has(tabId)) continue;
+    const claim = current.claims[tabId];
     if (claim) {
-      sessions.set(t.tabId, { lease: claim.lease, used: Date.now(), ready: Promise.resolve() });
+      sessions.set(tabId, { lease: claim.lease, used: Date.now(), ready: Promise.resolve() });
     } else {
-      await chrome.debugger.detach({ tabId: t.tabId }).catch(() => {});
+      await chrome.debugger.detach({ tabId }).catch(() => {});
     }
   }
+  rememberSessions();
   scheduleIdleCheck();
 }
 
