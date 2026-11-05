@@ -3,33 +3,56 @@
 `ca browser` operates tabs in the user's running Chrome/Chromium through the
 Computer Artist extension, on any operating system and without a desktop backend.
 Actions are DOM events inside the page, with a full mouse model for canvases: no
-OS pointer, no keyboard device, and no tab switching unless you ask for `focus`. Use it when the user wants work done in
-their own browser. For testing a web app in isolation, a private environment
-browser (`ca env browser`) remains the default.
+OS pointer, no keyboard device, and no tab switching unless you ask for `focus`. It is
+the first choice for web pages: work in the Chrome the user already runs, in your own
+tabs next to theirs. Use a private environment browser (`ca env browser`) only when
+the user asks for an isolated browser.
 
 ## Steps
 
-1. `ca browser instances`. With none connected, run `ca browser doctor` and report
-   its remedy. Installing or reloading the extension needs the user (Developer
-   mode, Load unpacked, the card's reload button); tell them, never work around it.
-   With several instances, pass `--instance` or full `INSTANCE:TAB` handles every time.
-2. Work in a tab you open: `ca browser open URL --owner NAME` returns a background
-   tab `handle` and a `lease`. Add `--agent-window` to keep agent tabs in their own
-   unfocused window (they render at full speed there). Claim an existing tab
+1. `ca browser instances` first, every time. When an instance is connected, work
+   there. Never start another Chrome, a new profile, Chrome for Testing or a private
+   browser for this work. With none connected, run `ca browser doctor` and tell the
+   user plainly that no Chrome with the extension is running; start a new browser
+   only after saying so and with their agreement, never silently. Installing or
+   reloading the extension needs the user (Developer mode, Load unpacked, the card's
+   reload button); tell them, never work around it. With several instances, pass
+   `--instance` or full `INSTANCE:TAB` handles every time.
+2. Open your session: `ca browser open URL --owner NAME` returns a background tab
+   `handle` and a `lease`. Use a distinct owner per agent. Add `--agent-window` to
+   keep agent tabs in their own unfocused window. Claim an existing tab
    (`ca browser claim --tab H`) only when the user asked you to work in that tab.
+   Never act in, capture or close the user's own tabs.
 3. Observe, then act: `read`, `locate` (returns `ref`s) and `wait`; then `click`,
    `type`, `select`, `press`, `drag`, `move`, `scroll` or `navigate` with
    `--tab H --lease L`. Re-locate after any navigation; refs from an earlier page are
    refused as `stale_element`. `tabs` marks pages Chrome forbids (`scriptable: false`).
 4. Verify the outcome by reading it back, after `navigate --reload` when it must
    persist. A dispatched click is a claim, not proof.
-5. Finish: `close` tabs you opened and `release` tabs you claimed. If you lost a
-   lease, `ca browser cleanup --owner NAME` ends your own recorded claims.
+5. Close your session as soon as you are done: `close` tabs you opened and
+   `release` tabs you claimed. If you lost a lease, `ca browser cleanup --owner NAME`
+   ends your own recorded claims.
 
-Screenshots work on background tabs too: `ca browser screenshot --tab H out.png`
-renders the tab without switching to it (`method: debugger`), so routine visual
-checks need neither `focus` nor the user's attention. Use `focus` only when the user
-should look.
+## Sessions, screenshots and the pen
+
+A claim is your session on the tab. While it lasts, your teal pen with your owner
+name stays on the page, so the user knows an agent works there; no pen means the tab
+is theirs again.
+
+`ca browser screenshot --tab H out.png` works on your background tabs without
+switching to them (`method: debugger`), so routine visual checks need neither
+`focus` nor the user's attention. The first one attaches Chrome's debugger for the
+rest of the session, which shows "Computer Artist started debugging this browser" in
+every window until the last agent's session ends; that is expected and appears once.
+Screenshots taken before and after the bar appears can differ in viewport height:
+use each reply's `viewport` and `scale`. Keep
+sessions short and close them: an idle session detaches after 5 minutes without a
+request, but the bar moves the user's page while it shows. Unclaimed background tabs
+are refused (`claim_required`).
+
+A screenshot of a tab on screen includes your pen (`pen: included`, `pen_rect` gives
+its box); ignore those pixels. Background renderings leave it out (`pen: excluded`).
+Use `focus` only when the user should look.
 
 Done when the outcome reads back as expected and every claim you made is closed
 or released.
@@ -47,8 +70,8 @@ Editors inside a same-origin iframe: pass `--frame '#id'` to find their controls
 points reach into the frame by themselves. When a target is only inside a frame,
 `locate` and the refusal name the `--frame` to pass. Cross-origin frames are refused.
 
-Verify each edit with a fresh screenshot (the pen is left out of captures) or page
-text that reflects it, such as search results. Do not save shared records to test.
+Verify each edit with a fresh screenshot (mind `pen: included`) or page text that
+reflects it, such as search results. Do not save shared records to test.
 
 ## Native selects
 
@@ -77,7 +100,11 @@ visible testing; never for background work.
 - `ambiguous_target` lists candidates: choose a `ref`, or pass `--first` only when
   any match is acceptable.
 - `capture_unavailable`: Chrome would not render that tab in the background
-  (another debugger is attached). Use `read`/`locate`, or `focus` if the user agrees.
+  (another debugger is attached, or `stop_reason: debugging_cancelled` because the
+  user pressed Cancel on the debugging bar; do not retry for that claim). Use
+  `read`/`locate`, or `focus` if the user agrees.
+- `claim_required`: background screenshots need your claim on the tab.
+- `no_instances`: no Chrome with the extension runs; tell the user (step 1).
 - `page_unavailable`: browser pages, the Web Store and (without file access)
   `file://` URLs cannot be scripted; `restriction` says which.
 - `point_outside_viewport`, `cross_origin_frame`, `frame_not_found`: fix the point

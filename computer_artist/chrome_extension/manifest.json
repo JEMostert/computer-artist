@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Computer Artist",
-  "version": "0.7.1",
+  "version": "0.8.0",
   "description": "Lets the local ca CLI read and operate tabs it claims, without moving your pointer or switching tabs unless asked to.",
   "minimum_chrome_version": "116",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA4iBTed4UEmnCc45ovJJQMJL2ulGkFArGcPneYA3dDJzSKuAPbnXiQG/lwAKjacSs3X7M84A28zAnrtqyuwGibhwzf9BxiLUq92C6jXahEjVagSf2mVbXrBY5PmtkDsFaBj/dhZCAbo47Nf6O4hXJPOP6z1lQQvW6o7O2bCT5qOUeIXIL/+7SAr8Yjg/aPrnYrg0mUev5WMG6BaMz9T35eG1OhroLU2OZ3UE7FydQ9kne5HsZ6fIbMJiGSPspjf8URl9rWZOvBrapTbucp2HbvnNcagDtZ6qDG96bLoSZ1smKRbcEYbdYtSiAHgwQ42mhvYyWZ55czdVLRMIek+r+uQIDAQAB",

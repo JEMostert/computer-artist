@@ -56,7 +56,8 @@ def add_command(commands):
     parser = commands.add_parser(
         'browser',
         help='Drive tabs in your running Chrome/Chromium through the Computer Artist extension',
-        description='Operate tabs in browsers where the Computer Artist extension is installed. '
+        description='Operate tabs in the browsers you already run with the Computer Artist '
+        'extension; ca never starts a browser. '
         'Actions are DOM operations inside the page; they never move your pointer, switch tabs '
         'or focus windows, except the explicit focus command. Tabs ca acts on are claimed with a lease that your own clicks or '
         'keys in that tab revoke.',
@@ -131,7 +132,12 @@ def add_command(commands):
     label = target('label', 'Name a browser instance for later selection', tab=False)
     label.add_argument('label')
     target('tabs', 'List tabs with handles, activity and claims', tab=False)
-    open_ = target('open', 'Open a URL in a new background tab and claim it', tab=False)
+    open_ = target(
+        'open',
+        "Open a URL in a new background tab of the user's running browser and claim it; this "
+        'starts your session on the tab, which close ends',
+        tab=False,
+    )
     open_.add_argument('url')
     open_.add_argument('--window', type=int, help='Window ID (default: the last focused)')
     open_.add_argument('--owner', help='Name shown on the claim (default: ca)')
@@ -233,8 +239,9 @@ def add_command(commands):
     press.add_argument('key')
     shot = target(
         'screenshot',
-        'Capture a tab to a new PNG: the active tab as shown, any other tab rendered in the '
-        'background without switching to it',
+        'Capture a tab to a new PNG: a shown tab as the user sees it (pen included), a tab you '
+        'claimed rendered in the background without switching to it (pen left out). The first '
+        'background capture attaches the debugger for the rest of the claim',
     )
     shot.add_argument('output', type=Path, help='New PNG file; existing files are not overwritten')
 
@@ -261,7 +268,10 @@ def operate(args):
     if action == 'instances':
         problems = []
         instances = bridge.live_instances(problems=problems)
-        return {'ok': True, 'instances': instances, 'unreachable': problems}
+        reply = {'ok': True, 'instances': instances, 'unreachable': problems}
+        if not instances:
+            reply['hint'] = bridge.NO_INSTANCES
+        return reply
     if action == 'cleanup':
         return cleanup(args)
     if action == 'reload':

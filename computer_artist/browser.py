@@ -294,6 +294,14 @@ def live_instances(root=None, timeout=5.0, problems=None):
     return instances
 
 
+# ca browser works in the browser the user already runs and never starts one.
+NO_INSTANCES = (
+    'No Chrome with the Computer Artist extension is connected, and ca never starts a '
+    'browser. Run `ca browser doctor`, then tell the user: they can open their Chrome '
+    '(with the extension loaded) or agree to a new browser. Do not start one without saying so.'
+)
+
+
 def select_instance(instances, wanted=None, unresolved=()):
     """Pick an instance by id or label; refuse ambiguity instead of guessing.
 
@@ -326,8 +334,7 @@ def select_instance(instances, wanted=None, unresolved=()):
     if not instances:
         raise BrowserError(
             'no_instances',
-            'No browser with the Computer Artist extension is connected. Run '
-            '`ca browser doctor` to check the native host installation.',
+            NO_INSTANCES,
         )
     if len(instances) > 1:
         raise BrowserError(

@@ -20,7 +20,9 @@ exactly one guide and follow its steps; never mix them:
 - Anything else: Computer Artist does not support it yet. Tell the user and stop.
 
 Web pages in the user's own running Chrome/Chromium are the exception: on any
-operating system, follow [browser tabs](references/browser.md) (`ca browser`).
+operating system, follow [browser tabs](references/browser.md) (`ca browser`). Run
+`ca browser instances` first and work in your own tabs in the Chrome it finds; never
+start another browser without telling the user first.
 
 ## 2. Rules on every platform
 
