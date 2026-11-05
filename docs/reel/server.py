@@ -4,7 +4,7 @@ paintings come from assets/gallery), and writes POSTed PNG frames.
 python server.py PORT OUTDIR
 POST /frame?i=N  body=PNG  -> OUTDIR/NNNN.png
 POST /log        body=text -> stdout
-POST /done                 -> exit"""
+POST /done?written=W&requested=R -> OUTDIR/DONE holds "W R", then exit"""
 
 import http.server
 import os
@@ -35,7 +35,9 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         elif url.path == '/log':
             print(body.decode(errors='replace'), flush=True)
         elif url.path == '/done':
-            (OUT / 'DONE').write_text('ok')
+            query = parse_qs(url.query)
+            written, requested = query.get('written', ['0'])[0], query.get('requested', ['?'])[0]
+            (OUT / 'DONE').write_text(f'{written} {requested}')
             threading.Thread(target=self.server.shutdown).start()
         self.send_response(204)
         self.end_headers()

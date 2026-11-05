@@ -13,4 +13,7 @@ sleep 0.5
   "http://127.0.0.1:$PORT/reel/index.html?$QUERY" >/dev/null 2>&1 & BR=$!
 while [ ! -f "$OUT/DONE" ] && kill -0 $SRV 2>/dev/null && kill -0 $BR 2>/dev/null; do sleep 0.5; done
 kill $BR $SRV 2>/dev/null; wait 2>/dev/null
-echo "rendered $(ls "$OUT"/*.png 2>/dev/null | wc -l) frames into $OUT"
+if [ ! -f "$OUT/DONE" ]; then echo "render failed: the browser or the server stopped early" >&2; exit 1; fi
+read -r written requested < "$OUT/DONE"
+if [ "$written" != "$requested" ]; then echo "render failed: wrote $written of $requested frames" >&2; exit 1; fi
+echo "rendered $written frames into $OUT"

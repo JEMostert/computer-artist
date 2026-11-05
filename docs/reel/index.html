@@ -11,20 +11,24 @@
   const list = q.get('frames') ? q.get('frames').split(',').map(Number) : null;
   const sub = +(q.get('sub') ?? 5);
   const log = (m) => fetch('/log', { method: 'POST', body: String(m) });
+  const frames = list || [...Array(Math.ceil((to - from) / step)).keys()].map((k) => from + k * step);
+  let written = 0;
   try {
     await Reel.load();
     const out = document.getElementById('out');
-    const frames = list || [...Array(Math.ceil((to - from) / step)).keys()].map((k) => from + k * step);
     const t0 = performance.now();
     for (const i of frames) {
       Reel.renderFrame(out, i, sub);
       const blob = await new Promise((r) => out.toBlob(r, 'image/png'));
-      await fetch('/frame?i=' + i, { method: 'POST', body: blob });
+      const reply = await fetch('/frame?i=' + i, { method: 'POST', body: blob });
+      if (!reply.ok) throw new Error(`the server refused frame ${i}: HTTP ${reply.status}`);
+      written++;
       if (i % 60 === 0) log(`frame ${i} ${((performance.now() - t0) / 1000).toFixed(1)}s`);
     }
   } catch (e) {
     await log('ERROR ' + (e && e.stack || e));
   }
-  await fetch('/done', { method: 'POST' });
+  // render.sh succeeds only when every requested frame was written.
+  await fetch(`/done?written=${written}&requested=${frames.length}`, { method: 'POST' });
 })();
 </script></body></html>

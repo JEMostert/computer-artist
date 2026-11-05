@@ -113,8 +113,9 @@ does.
   in a fresh private desktop and attaches the frames it captured at each step.
 - **Persona sweeps.** Five agents use the same build as five kinds of user (keyboard
   only, first visit, power user, tiny window, slow typist), all at once.
-- **An accessibility pass.** `ca a11y` lists every control's role and name; an agent
-  flags the unnamed buttons and retries the flow from the keyboard.
+- **An accessibility pass.** `ca a11y --window APP` lists the roles and names an app
+  exposes (verified for Qt; GTK and browser trees are not yet); an agent flags the
+  unnamed buttons and retries the flow from the keyboard.
 - **A screen-size matrix.** The same flow in private desktops at 1280×720,
   1920×1080 and 2560×1440 (`ca env start --width --height`), side by side.
 - **Screenshots for translators.** Start a private desktop with another locale
