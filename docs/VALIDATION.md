@@ -53,8 +53,8 @@ Earlier records (29–30 September 2026: KolourPaint, scrcpy, KWrite and the
 removed HTML export) live in git history for those revisions; they prove those
 revisions, not current source.
 
-Fresh checks: `scripts/check.sh`, Python unittest discovery and
-`scripts/test.sh --integration`. Integration builds and launches separate packaged
+Fresh checks: `scripts/check.sh` and `scripts/test.sh --integration`
+(see [tests per operating system](../CONTRIBUTING.md#tests-per-operating-system)). Integration builds and launches separate packaged
 KWin with the virtual backend. Results cover the exact Qt/KWrite workflows tested,
 including ownership, cleanup, verification and recovery. GTK, browsers, XWayland,
 IME and popup grabs remain unproven/unsupported. The runner prints report locations.
