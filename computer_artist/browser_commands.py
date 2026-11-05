@@ -127,6 +127,15 @@ def add_command(commands):
         sub.add_argument(
             '--modifiers', help='Keys held during the action, e.g. Shift or Control+Shift'
         )
+        viewport(sub)
+
+    def viewport(sub):
+        sub.add_argument(
+            '--viewport',
+            metavar='WxH',
+            help='Refuse (viewport_changed) unless the viewport still has this size, as the '
+            'screenshot you measured on reported it',
+        )
 
     target('instances', 'List connected browser instances', tab=False)
     label = target('label', 'Name a browser instance for later selection', tab=False)
@@ -215,6 +224,7 @@ def add_command(commands):
     drag.add_argument('--to', dest='end', nargs=2, type=float, required=True, metavar=('X', 'Y'))
     drag.add_argument('--button', choices=('left', 'middle', 'right'), default=None)
     drag.add_argument('--modifiers', help='Keys held during the drag, e.g. Shift')
+    viewport(drag)
     drag.add_argument(
         '--interval',
         type=float,
@@ -294,6 +304,8 @@ def operate(args):
     request.update(pointer_fields(args, action))
     if any(name in request for name in POINTER_FIELDS) or action in ('move', 'drag', 'scroll'):
         require_version(instance, POINTER_VERSION, action)
+    if 'viewport' in request:
+        require_capability(instance, 'viewport_guard', action)
     if getattr(args, 'agent_window', False):
         require_capability(instance, 'agent_window', action)
         request['agent_window'] = True
@@ -486,6 +498,13 @@ def pointer_fields(args, action):
                 'invalid_target',
                 'Pass an element (--ref, --selector, --text or --role), --x and --y, or both',
             )
+    if getattr(args, 'viewport', None):
+        size = re.fullmatch(r'\s*(\d+)\s*[xX]\s*(\d+)\s*', args.viewport)
+        if not size:
+            raise bridge.BrowserError(
+                'invalid_viewport', 'Pass --viewport as WIDTHxHEIGHT, e.g. 1280x720'
+            )
+        fields['viewport'] = {'width': int(size[1]), 'height': int(size[2])}
     if action == 'drag':
         fields['path'] = [list(args.start), *(list(p) for p in args.via or ()), list(args.end)]
     points = fields.get('path') or [[getattr(args, 'x', None) or 0, getattr(args, 'y', None) or 0]]

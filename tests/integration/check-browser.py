@@ -442,6 +442,15 @@ def check_background_work(env, url, work, port, ids):
          seconds=seconds, scale=shot.get('scale'), bytes=(work / 'background.png').stat().st_size
          if shot.get('ok') else None)  # fmt: skip
 
+    # Coordinates measured on another viewport size are refused, not drawn.
+    size = shot.get('viewport') or {}
+    stale = ca('drag', '--tab', tab, '--lease', lease, '--frame', '#pad', '--selector', 'canvas',
+               '--from', '10', '10', '--to', '40', '40',
+               '--viewport', f"{size.get('width')}x{size.get('height', 0) + 56}", env=env)  # fmt: skip
+    step('stale_viewport_refused', stale.get('error') == 'viewport_changed'
+         and stale.get('viewport') == {'width': size.get('width'), 'height': size.get('height')},
+         error=stale.get('error'), viewport=stale.get('viewport'))  # fmt: skip
+
     # Two agents capture their own background tabs at the same time.
     other = ca('open', url + 'draw', '--instance', 'alpha', '--owner', 'viewer-2', env=env,
                expect_ok=True)  # fmt: skip
@@ -521,6 +530,22 @@ def check_background_work(env, url, work, port, ids):
          and mine.get('holds_lease') and mine.get('debugger_attached')
          and after_cleanup and after_cleanup[0] == held[0] - 1, cleaned=cleaned.get('tabs'),
          sessions=[held, after_cleanup])  # fmt: skip
+
+    # Releasing a tab ca opened hands it to the user: it stays open, ungrouped and
+    # without a claim or debugger session, and ca can no longer close it.
+    given = ca('open', url + 'other', '--instance', 'alpha', '--owner', 'giver', env=env,
+               expect_ok=True)  # fmt: skip
+    ca('screenshot', '--tab', given['handle'], str(work / 'given.png'), env=env)
+    ca('release', '--tab', given['handle'], '--lease', given['lease'], env=env, expect_ok=True)
+    kept = next((t for t in ca('tabs', '--instance', 'alpha', env=env)['tabs']
+                 if t['handle'] == given['handle']), {})  # fmt: skip
+    status = ca('status', '--tab', given['handle'], env=env)
+    again = ca('claim', '--tab', given['handle'], '--owner', 'giver', env=env)
+    refused = ca('close', '--tab', given['handle'], '--lease', again.get('lease', ''), env=env)
+    ca('release', '--tab', given['handle'], '--lease', again.get('lease', ''), env=env)
+    step('release_hands_tab_over', kept and kept.get('claim') is None and kept.get('group') is None
+         and not status.get('debugger_attached') and refused.get('error') == 'not_agent_tab',
+         group=kept.get('group'), close=refused.get('error'))  # fmt: skip
 
     # Simultaneous first opens in another browser share one new agent window.
     pair = {}

@@ -208,14 +208,15 @@ class Discovery(unittest.TestCase):
 class PointerRequests(unittest.TestCase):
     """CLI-side validation and request shape for coordinates, gestures and frames."""
 
-    def operate(self, *argv, version='0.6.0'):
+    def operate(self, *argv, version='0.6.0', capabilities=()):
         import argparse
 
         parser = argparse.ArgumentParser()
         browser_commands.add_command(parser.add_subparsers(dest='command'))
         args = parser.parse_args(['browser', *argv])
         sent = []
-        instance = {'instance': 'aaaaaaaa', 'extension_version': version, 'address': 'unix:x'}
+        instance = {'instance': 'aaaaaaaa', 'extension_version': version, 'address': 'unix:x',
+                    'capabilities': list(capabilities)}  # fmt: skip
 
         def call(record, request, timeout):
             sent.append(request)
@@ -271,6 +272,18 @@ class PointerRequests(unittest.TestCase):
             reply, request = self.operate(*argv)
             self.assertEqual(reply['error'], code, argv)
             self.assertIsNone(request)
+
+    def test_viewport_guard_is_sent_only_to_extensions_that_check_it(self):
+        drag = ('drag', '--tab', 'aaaaaaaa:5', '--lease', 'L', '--selector', 'canvas',
+                '--from', '10', '10', '--to', '50', '50', '--viewport', '2560x1267')  # fmt: skip
+        _, request = self.operate(*drag, version='0.9.0', capabilities=['viewport_guard'])
+        self.assertEqual(request['viewport'], {'width': 2560, 'height': 1267})
+        # An older extension would ignore the size and act on stale coordinates.
+        reply, request = self.operate(*drag, version='0.8.0', capabilities=['pointer'])
+        self.assertEqual((reply['error'], request), ('extension_outdated', None))
+        reply, _ = self.operate('click', '--tab', 'aaaaaaaa:5', '--lease', 'L', '--x', '1',
+                                '--y', '1', '--viewport', 'wide', capabilities=['viewport_guard'])  # fmt: skip
+        self.assertEqual(reply['error'], 'invalid_viewport')
 
     def test_scroll_needs_no_target(self):
         _, request = self.operate('scroll', '--tab', 'aaaaaaaa:5', '--lease', 'L', '--delta', '300')

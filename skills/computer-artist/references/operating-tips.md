@@ -23,3 +23,10 @@ fragments should state tool/color/origin/layout assumptions and check the new
 window. After interruption, inspect actual state before retrying: actions after
 a checkpoint may have landed. Check the final canvas and details, then verify the
 requested saved file exists and decodes; a screenshot does not prove a save.
+
+## Drawing on a canvas
+
+Small gaps at joins are the usual flaw. Let strokes that should meet overlap by a
+few pixels, and end a closed shape (circle, outline, window frame) past its start
+point instead of exactly on it. Inspect the joins in a fresh screenshot and close
+any gap with one short overlapping stroke.

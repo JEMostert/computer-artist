@@ -18,7 +18,7 @@ const VERSION = chrome.runtime.getManifest().version;
 // build is running (the version alone does not change between installs).
 const BUILD = '__CA_BUILD__';
 const CAPABILITIES = ['pointer', 'frames', 'background_capture', 'agent_window', 'durable_claims', 'reload',
-  'debugger_session', 'session_pen'];
+  'debugger_session', 'session_pen', 'viewport_guard'];
 let inFlight = 0; // requests being handled, so a reload never cuts one off
 let reloading = false;
 const BADGE = '#0a7c60'; // Chrome lane green, shared with pen.js and the popup.
@@ -175,21 +175,16 @@ function post(current, message) {
 // extension reloaded, and only claims whose tab still shows the claimed URL survive.
 function state() {
   statePromise ??= (async () => {
-    const stored = await chrome.storage.local.get(['claims', 'revoked', 'opened']);
-    // opened: tabs ca opened that the user has not used since, which ca may still close
-    // after a release and a new claim.
-    const current = { claims: stored.claims || {}, revoked: stored.revoked || {}, opened: stored.opened || {} };
+    const stored = await chrome.storage.local.get(['claims', 'revoked']);
+    const current = { claims: stored.claims || {}, revoked: stored.revoked || {} };
     const { alive } = await chrome.storage.session.get('alive');
     if (!alive) {
       for (const [id, claim] of Object.entries(current.claims)) {
         const tab = await chrome.tabs.get(Number(id)).catch(() => null);
         if (!tab || (tab.url || tab.pendingUrl) !== claim.url) delete current.claims[id];
       }
-      // Tab IDs are reused after a restart: keep only tabs whose claim survived.
-      current.opened = Object.fromEntries(
-        Object.entries(current.claims).filter(([, claim]) => claim.opened).map(([id]) => [id, true]),
-      );
-      await chrome.storage.local.set({ claims: current.claims, revoked: current.revoked, opened: current.opened });
+      await chrome.storage.local.set({ claims: current.claims, revoked: current.revoked });
+      await chrome.storage.local.remove('opened'); // kept by 0.8.0, no longer used
       // Window IDs are reused after a restart: keep the agents' window only while a tab
       // ca opened there is still claimed.
       const { agentWindow } = await chrome.storage.local.get('agentWindow');
@@ -220,7 +215,7 @@ async function persist() {
     .sort((a, b) => b[1].at - a[1].at)
     .slice(0, 50);
   current.revoked = Object.fromEntries(revoked);
-  await chrome.storage.local.set({ claims: current.claims, revoked: current.revoked, opened: current.opened });
+  await chrome.storage.local.set({ claims: current.claims, revoked: current.revoked });
 }
 
 function token() {
@@ -245,7 +240,7 @@ async function mark(tabId, claim) {
   }
 }
 
-async function endClaim(tabId, reason) {
+async function endClaim(tabId, reason, details = {}) {
   const current = await state();
   const claim = current.claims[tabId];
   if (!claim) return null;
@@ -258,6 +253,7 @@ async function endClaim(tabId, reason) {
       lease: claim.lease,
       at: Date.now(),
       title: title || claim.title || '',
+      ...details,
     };
   }
   await persist();
@@ -357,13 +353,7 @@ chrome.runtime.onMessage.addListener((message, sender) => {
   if (message?.type === 'ca-human-input' && sender.id === chrome.runtime.id && sender.tab) {
     if (opening.has(sender.tab.id)) inputWhileOpening.add(sender.tab.id);
     state().then((current) => {
-      if (current.claims[sender.tab.id]) {
-        delete current.opened[sender.tab.id];
-        endClaim(sender.tab.id, 'human_input');
-      } else if (current.opened[sender.tab.id]) {
-        delete current.opened[sender.tab.id]; // the user uses it now: ca no longer closes it
-        persist();
-      }
+      if (current.claims[sender.tab.id]) endClaim(sender.tab.id, 'human_input');
     });
   }
 });
@@ -389,13 +379,10 @@ chrome.windows.onRemoved.addListener((windowId) => {
   });
 });
 
-chrome.tabs.onRemoved.addListener((tabId) => {
+chrome.tabs.onRemoved.addListener((tabId, { isWindowClosing }) => {
+  // Chrome does not say who closed a tab; whether its whole window closed narrows it down.
   state().then((current) => {
-    if (current.claims[tabId]) endClaim(tabId, 'target_closed');
-    if (current.opened[tabId]) {
-      delete current.opened[tabId];
-      persist();
-    }
+    if (current.claims[tabId]) endClaim(tabId, 'target_closed', { window_closing: isWindowClosing });
   });
 });
 
@@ -817,12 +804,10 @@ async function claimTab(tab, owner, opened) {
       restriction: restricted,
     });
   }
-  opened ||= Boolean(current.opened[tab.id]);
   const claim = {
     lease: token(), owner, since: Date.now(), opened, title: tab.title || '', url: tab.url || tab.pendingUrl,
   }; // prettier-ignore
   current.claims[tab.id] = claim;
-  if (opened) current.opened[tab.id] = true;
   delete current.revoked[tab.id];
   await persist();
   try {
@@ -958,6 +943,13 @@ async function handle(request) {
         holds_lease: Boolean(claim && request.lease && claim.lease === request.lease),
         debugger_attached: sessions.has(tabId),
         stop_reason: !claim && revoked ? revoked.reason : null,
+        ...(!claim && revoked
+          ? {
+              stopped_at: new Date(revoked.at).toISOString(),
+              stop_owner: revoked.owner,
+              ...(revoked.window_closing != null ? { window_closing: revoked.window_closing } : {}),
+            }
+          : {}),
         ...(tab ? { active: tab.active, url: tab.url, title: tab.title } : {}),
       };
     }
@@ -1810,6 +1802,16 @@ async function pageAction(request) {
   };
 
   try {
+    // Coordinates taken from a screenshot hold only for the viewport it showed, for
+    // example until Chrome's debugging bar shrinks the window.
+    const want = request.viewport;
+    if (want && (innerWidth !== want.width || innerHeight !== want.height)) {
+      return fail(
+        'viewport_changed',
+        `The viewport is ${innerWidth}x${innerHeight}, not ${want.width}x${want.height}: take a new screenshot and measure again`,
+        { viewport: { width: innerWidth, height: innerHeight } },
+      );
+    }
     const scope = scopeOf(request.frame);
     if (scope.ok === false) return scope;
     if (request.op === 'read') {

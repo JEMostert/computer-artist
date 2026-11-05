@@ -57,7 +57,8 @@ registration keeps matching across reinstalls.
 instances without changing anything. Install stamps a **build** (a digest of the
 extension files) into the installed copy; `instances` and `doctor` report the
 build each browser runs and warn `extension_reload_needed` when it differs from
-the installed one, even when the version number is the same. A red **!** badge on the toolbar icon means
+the installed one. Every change to the extension raises its version (0.9.0 adds the
+viewport guard); the build identifies the exact files. A red **!** badge on the toolbar icon means
 the extension cannot reach the native host; its tooltip gives Chrome's reason.
 
 ### Uninstall
@@ -141,6 +142,11 @@ point. All coordinates are CSS pixels:
 - `ca browser screenshot` reports `viewport` and `scale`, the screenshot pixels per CSS
   pixel (device pixel ratio times browser zoom). A point at image pixel (px, py) is
   `--x px/scale --y py/scale`. `locate` rects are top-viewport CSS pixels as well.
+- Coordinates hold only for the viewport they were measured on. Chrome's debugging
+  bar, a resized window or a tab shown again can change it, and canvases that fill
+  the window rescale with it. Pass the screenshot's size as `--viewport WxH` to
+  `click`, `move`, `drag` or `scroll`: when the viewport differs, ca refuses with
+  `viewport_changed` and the current `viewport` instead of acting (extension 0.9.0).
 
 ```bash
 ca browser click --tab H --lease L --selector canvas --x 120 --y 80
@@ -270,7 +276,7 @@ badge on the extension icon. Tabs that ca opened also sit in a green **CA** tab 
 | --- | --- |
 | You click, press a key, scroll or touch inside the tab | `human_input` |
 | The tab closes or Chrome replaces it | `target_closed`, `target_replaced` |
-| `ca browser release` | none, the claim is simply gone |
+| `ca browser release` | none: the agent hands the tab to you |
 
 Tab activation and browser window focus are observation: they preserve the watched
 claim and all other tabs. Trusted page input revokes only the tab receiving it.
@@ -282,8 +288,15 @@ is refused with `ownership_revoked` (`human_input`) instead of performed.
 A revoked lease is refused with `ownership_revoked` and its stop reason. A
 different lease is refused with `lease_mismatch`, and a second claim with
 `tab_claimed`. `ca browser status --tab H --lease L` reports which of these
-applies. ca only closes tabs it opened and you have not used since; releasing such
-a tab and claiming it again keeps it closeable. Claims live in the extension's local
+applies, and for an ended claim `stopped_at`, `stop_owner` and, for a closed tab,
+`window_closing`. Chrome does not report who closed a tab: ca never closes a
+claimed tab without ending its claim first, so `target_closed` means the tab was
+closed outside ca, for example by you.
+
+ca only closes tabs it opened, and only while it holds their claim. Releasing a
+tab ca opened hands it over: the session ends, the pen lifts, the tab leaves the
+CA group and stays open as yours, and ca can no longer close it. Agents release
+results you want to keep and close tabs that were only their workspace. Claims live in the extension's local
 storage: they survive the native host restarting and the extension reloading or
 updating (the human-input watcher is renewed in claimed tabs), and end when the
 browser exits. A claim is restored only for a tab that still shows the URL it was

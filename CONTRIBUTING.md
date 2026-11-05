@@ -50,3 +50,6 @@ Keep dependencies acyclic and use the shared action/evaluation paths.
 Describe the problem, behavior and checks. Input reports need KWin/Qt/app versions,
 scaling, a minimal program and expected/observed behavior. Report native Wayland
 and XWayland separately; claim only the workflows demonstrated by actual evidence.
+
+Raise the version in `computer_artist/chrome_extension/manifest.json` with every
+extension change, so `ca browser instances` shows which one a browser runs.
