@@ -49,6 +49,15 @@ The green in-page pen, mid-glide takeover and toolbar status card were verified 
 same day with headless Chrome for Testing on macOS 27; see the
 [pen and status card record](validation/2026-11-03-chrome-pen-status.md).
 
+On 5 November 2026, five models each painted a commission in Kleki through `ca
+browser`, each in its own tab of one Chrome for Testing 153 on a private KWin desktop
+on Fedora, with extension 0.9.0. A coordinator filmed all five tabs at once (7,394
+captures, every one with the pen in frame) and judged and sent back weak results.
+See the [Kleki gallery record](validation/2026-11-05-kleki-gallery.md) for counts,
+send-backs, every CA error and Kleki quirk. It found that background tabs cannot be
+rendered in headed Chrome on Linux/Wayland, that long drags time out while still
+drawing, and that a screenshot to an existing file crashes without a JSON reply.
+
 Earlier records (29–30 September 2026: KolourPaint, scrcpy, KWrite and the
 removed HTML export) live in git history for those revisions; they prove those
 revisions, not current source.
