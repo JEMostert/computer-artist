@@ -4,6 +4,13 @@
 import sys
 from pathlib import Path
 
+if sys.version_info < (3, 12):
+    # Without an activated venv, /usr/bin/env python3 can be an older system Python.
+    sys.exit(
+        f'Computer Artist needs Python 3.12 or later; this is {sys.version.split()[0]} '
+        f'({sys.executable}). Activate the project venv or run .venv/bin/python ca.'
+    )
+
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from computer_artist.cli import main
 

@@ -17,6 +17,11 @@ records describe the implementation built since that reset.
   Workflow memory is the first reuse path; guarded maps and versioned fragments
   remain supported. See skills/computer-artist/references/memory.md for learning,
   eligibility, retention and adaptation limits.
+- Test with `scripts/test.sh --changed` (on Windows, `python scripts/run_tests.py
+  --changed`): it runs only the sets your change touches, on this OS. Run the full
+  `scripts/test.sh` before a merge and when you change shared code or test
+  infrastructure. Real-browser and real-desktop integration checks are slow; they run
+  only when the changed area needs them. See CONTRIBUTING.md.
 - Distinguish proposed, implemented, and verified behavior. Do not inherit old
   test results or describe input isolation as a security sandbox.
 - Never silently fall back to moving the human's pointer or stealing focus.

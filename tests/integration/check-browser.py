@@ -149,6 +149,12 @@ def page_target(port, predicate):
 def default_chrome():
     found = sorted(
         glob.glob(str(Path.home() / '.cache/ms-playwright/chromium-*/chrome-linux64/chrome'))
+        + glob.glob(
+            str(
+                Path.home() / 'Library/Caches/ms-playwright/chromium-*/chrome-mac*/'
+                'Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing'
+            )
+        )
     )
     return found[-1] if found else shutil.which('chromium') or shutil.which('chromium-browser')
 

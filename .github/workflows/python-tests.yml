@@ -26,6 +26,6 @@ jobs:
         if: runner.os == 'Windows'
       - run: python -m ruff format --check .
         if: runner.os == 'Windows'
-      - run: python scripts/test-windows.py
+      - run: python scripts/run_tests.py
         if: runner.os == 'Windows'
       - run: python -m pip wheel --no-deps . --wheel-dir dist

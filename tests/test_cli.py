@@ -2,6 +2,7 @@ import json
 import os
 import socketserver
 import subprocess
+import sys
 import tempfile
 import threading
 import time
@@ -123,7 +124,11 @@ class CLITest(unittest.TestCase):
 
     def ca(self, *args):
         return subprocess.run(
-            [str(ROOT / 'ca'), *args], env=self.env, capture_output=True, text=True, timeout=8
+            [sys.executable, str(ROOT / 'ca'), *args],
+            env=self.env,
+            capture_output=True,
+            text=True,
+            timeout=8,
         )
 
     def test_click_translates_window_coordinates_and_releases(self):
@@ -265,7 +270,7 @@ class CLITest(unittest.TestCase):
         # previously left the reader/heartbeat sharing a desynchronized stream.
         self.acquire_reply_delay = 0.3
         process = subprocess.Popen(
-            [str(ROOT / 'ca'), 'execute', '--window', 'target'],
+            [sys.executable, str(ROOT / 'ca'), 'execute', '--window', 'target'],
             env=self.env,
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,

@@ -87,9 +87,9 @@ preference, Podman `--replace` or the Docker GPU flag.
 
 ## Running
 
-Activate the project venv (Python >=3.12) before `scripts/test.sh` and
-`scripts/check.sh`: CLI subprocesses use the `python` on `PATH`. On Windows use
-`python scripts/test-windows.py`; executing that selection on macOS verifies only
-its portable cases. Portable fakes do not prove live KWin/Wayland/XWayland or
+See [CONTRIBUTING.md](../CONTRIBUTING.md#tests-per-operating-system):
+`scripts/test.sh --changed` for a change, `scripts/test.sh` for every unit test on this
+OS, `python scripts/run_tests.py` on Windows. Tests start CLI subprocesses with their
+own interpreter (`sys.executable`), not the `python` on `PATH`. Portable fakes do not prove live KWin/Wayland/XWayland or
 native desktop compatibility. Live integration harnesses require their platform
 and were not run for this test-only reduction. No desktop/browser/DB was changed.

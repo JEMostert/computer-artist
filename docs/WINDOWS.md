@@ -86,7 +86,7 @@ speed in WSL 2.
 
 ## Validation
 
-Run portable/native unit checks with `python scripts/test-windows.py`. They do not
+Run portable/native unit checks with `python scripts/run_tests.py`. They do not
 inject desktop input. Live checks require an explicitly chosen display:
 
 ```powershell
