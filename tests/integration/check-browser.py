@@ -217,7 +217,7 @@ def windows_snapshot(env, instance):
 
 
 def pen_pixels(path, colour=(10, 124, 96)):
-    """Count pixels near a colour (default: the pen's teal tag) in an 8-bit RGB(A) PNG."""
+    """Count pixels near a colour (default: the pen's green tag) in an 8-bit RGB(A) PNG."""
     data = Path(path).read_bytes()
     width, height, depth, kind = struct.unpack('>IIBB', data[16:26])
     assert depth == 8 and kind in (2, 6), (depth, kind)

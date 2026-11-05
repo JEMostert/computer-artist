@@ -44,7 +44,7 @@ Linux/macOS independent keys use `ctx.press('Ctrl+S')` or paired `key_down`/`key
 when supported by the backend and target. `ctx.write(text)` (CLI `ca write`) uses
 the live physical-key layout; unreachable characters (dead keys, compose, IME)
 are refused before input. Windows uses targeted control text insertion and a
-limited key set instead; see its platform guide. Host paste for otherwise
+limited key set instead; see [Windows](windows.md). Host paste for otherwise
 unreachable text requires current-task authorization. `ctx.type` uses the agent
 text path on the agent lane and pastes on the host lane. Explicit host contexts
 use real focus. `ctx.paste(text, shortcut=None)` and `ctx.clipboard_get/set` are
@@ -91,3 +91,20 @@ For explicitly requested actual-desktop work, parking human pointer/focus with
 `ca --host focus` or `ca --host move` requires authorization in the current task;
 this reference does not grant it. Use an observed safe point only when authorized,
 then return to agent input. Never use host recovery to bypass a refused action.
+
+## Larger work, such as artwork
+
+- Plan the whole composition first, then submit a substantial `ca execute` program
+  grouped by layer, tool and colour, not one command per stroke. Inspect the
+  complete result, list its issues and fix them together in the next program.
+- Keep observe, map, act, verify inside a large program. Select the tool explicitly
+  before each group and confirm it. Add bounded checkpoints (`ctx.observe`,
+  `ctx.verify`) wherever state or geometry can change, and stop on surprises.
+- Observe and map again after zoom, scroll, resize, a popup or dialog, or a plugin
+  reload. After an interruption, check the current tool and any unfinished gesture
+  (an open polygon, a held drag) and reset it before resuming.
+- Keep clicks and vertices a safe margin inside the canvas; clicks near its edge can
+  grab resize handles.
+- Observe at decision points only. Do not loop captures: each one costs the
+  compositor and can stall the desktop. For a timelapse or video, use a real screen
+  recorder, and on the user's desktop only with permission.

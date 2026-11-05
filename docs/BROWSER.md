@@ -263,7 +263,7 @@ takes an existing one. The claim returns a **lease** that `navigate`, `click`,
 `wait`, `screenshot`) need only the tab handle. `tabs` marks pages Chrome does not
 let extensions script with `scriptable: false` and a `restriction`
 (`browser_page`, `web_store`, `file_access_off`, `unsupported_url`); `claim` refuses
-them as `page_unavailable` with the same reason. A claimed tab shows a teal **CA**
+them as `page_unavailable` with the same reason. A claimed tab shows a green **CA**
 badge on the extension icon. Tabs that ca opened also sit in a green **CA** tab group.
 
 | Lease ends | `stop_reason` |
@@ -312,9 +312,9 @@ A tab an agent claims shows its pen from the moment of the claim until the claim
 ends, also in each page it navigates to and after an extension reload. A pen means
 an agent is working in that tab; no pen means the tab is yours. When you watch a
 tab an agent is working in, its pen moves through the page. This
-is the native ink pen from computer use, drawn in teal Chrome ink with the owner's
+is the native ink pen from computer use, drawn in green Chrome ink with the owner's
 name beside it, so you can tell browser control from computer use at a glance. The
-blue pen is computer use. The teal pen and its name tag mean Chrome DOM control.
+blue pen is computer use. The green pen and its name tag mean Chrome DOM control.
 The pen glides to each target before ca clicks, types or presses a key, splashes
 on clicks, writes along fields and drips at rest; before the first action it rests
 near the top right corner. When the claim ends, it shows **Back to you** and lifts
@@ -326,7 +326,7 @@ page text, so `read`, `locate` and the obscured-click check do not see it.
 it out (see [the pen in screenshots](#the-pen-in-screenshots)). With reduced motion
 turned on, it moves without animation.
 
-![The teal Chrome pen splashing on a click, with its owner tag](evidence/chrome-extension/pen-click.png)
+![The green Chrome pen splashing on a click, with its owner tag](evidence/chrome-extension/pen-click.png)
 
 Click the toolbar icon for the status card. It shows whether the extension
 reaches ca, with Chrome's reason and the fix when it does not. It also shows

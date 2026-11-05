@@ -1,5 +1,5 @@
 // The agent's pen inside a claimed tab: the native ink pen (computer_artist/ink_cursor.py)
-// in teal "Chrome lane" ink with the owner's name beside it, so a human can tell DOM
+// in green "Chrome lane" ink with the owner's name beside it, so a human can tell DOM
 // control in Chrome from computer use at a glance. It glides to each target before ca
 // acts, splashes on clicks, writes along fields and drips at rest. It stays on the page
 // for the whole claim, so a pen means an agent works here and no pen means the tab is

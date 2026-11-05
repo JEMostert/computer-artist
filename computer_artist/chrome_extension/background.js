@@ -4,7 +4,7 @@
 // (untrusted events); nothing here moves the pointer, activates a tab or
 // focuses a window. Claimed tabs carry a lease, a "CA" badge and, for tabs ca
 // opened, a "CA" tab group. Human input in a claimed tab revokes the lease.
-// A claimed tab shows the agent's pen (pen.js) in teal "Chrome lane" ink for as long
+// A claimed tab shows the agent's pen (pen.js) in green "Chrome lane" ink for as long
 // as the claim lasts, distinct from the blue native pen: a pen means an agent works
 // there, no pen means the tab is the user's. The claim is the agent's session on the
 // tab; a background screenshot attaches Chrome's debugger once and keeps it for the
@@ -21,7 +21,7 @@ const CAPABILITIES = ['pointer', 'frames', 'background_capture', 'agent_window',
   'debugger_session', 'session_pen'];
 let inFlight = 0; // requests being handled, so a reload never cuts one off
 let reloading = false;
-const BADGE = '#0a7c60'; // Chrome lane teal, shared with pen.js and the popup.
+const BADGE = '#0a7c60'; // Chrome lane green, shared with pen.js and the popup.
 const GROUP_TITLE = 'CA';
 const GROUP_COLOR = 'green';
 const MAX_TEXT = 100000;
