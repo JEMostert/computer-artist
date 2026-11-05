@@ -1,88 +1,59 @@
-# Linux (KDE Wayland)
+# The user's desktop on Linux (KDE Wayland)
 
-Read this only on Linux. Desktop work requires the loaded KWin plugin; skill setup
-does not deploy or update it. The rules in SKILL.md apply as well.
+Use this only when the user explicitly asked you to work on their own desktop;
+otherwise use a [private environment](environments.md). The agent gets its own
+pointer and keyboard lane in the target app while the user keeps theirs. It needs
+the loaded KWin plugin, which skill setup does not deploy or update.
 
-## Select the environment first
+## Steps
 
-For development and testing, default to a private environment: its own KWin
-desktop, seat, clipboard, D-Bus session (with desktop portals) and optionally a
-Podman or Docker container for the app (`--runtime podman|docker`; Podman is
-preferred when both exist). Use distinct names for concurrent agents
-and separate worktrees for concurrent edits. Mounted folders stay shared; a
-private desktop is not a security sandbox. Stop what you started; never stop
-another agent's environment. If an environment fails, report the blocker; never
-fall back to the user's desktop or main browser.
+1. **Start.** Run `ca capabilities`, `ca windows` and `ca doctor --window ID`. Bind
+   the exact window with `ca set ID --name app`.
+2. **Work.** Search `ca memory search "TASK"` first and reuse a fitting memory
+   ([workflow memory](memory.md)). Then observe, act and observe again:
+   - `ca observe --window app`, and read the image.
+   - `ca a11y --window app` lists controls by role and name; prefer them over pixel
+     positions (`ctx.find`, `ctx.click(element=...)`).
+   - Act with `click`, `type` (agent text path; `write` types layout-resolved keys),
+     `press`, `drag`, or a `ca execute` program for anything with several steps
+     ([programs](programs.md)). Coordinates are logical content pixels; scale
+     screenshot pixels as in [coordinates](operating-tips.md).
+3. **Verify.** Read text back, check saved files with `ctx.verify_file`, and look
+   at a fresh `observe`. A dispatched action is not proof.
+4. **Finish.** Learn a reusable workflow with `ca memory learn NAME --run RUN_ID
+   --task "TASK" --app "APP" --notes "PROCEDURE"`. Keep evidence you need with
+   `ca storage keep RUN_ID`. Then `ca session close`.
 
-```bash
-ca env start TASK --image IMAGE --project .          # or --containerfile FILE
-ca env start TASK --recipe ca-env.toml               # image, mounts, limits, startup apps
-ca env exec TASK --name app --wait-window TITLE -- program args
-ca env exec TASK --wait -- npm test                  # one-off command, returns status/output
-ca env browser TASK --family chromium --executable chromium --name web
-ca --environment TASK windows                         # every ca command takes --environment
-ca env doctor TASK; ca env logs TASK a1; ca env status TASK
-ca env stop TASK                                      # evidence and definition are kept
-```
+## If something goes wrong
 
-Without `--image`/`--containerfile`, apps run from the host in the private desktop
-(`ca env exec --on-host` does this inside container environments). Container apps
-see mounts at their host paths; their HOME is `status.home`, readable on the host,
-so write test evidence there or into the project. `start` is idempotent and reports
-the next command; flags update the stored definition (`ca env show TASK`).
-`ca env exec` reports `ok: false`, the exit status and log tail when an app dies.
-Read [environments](environments.md) for recipes, browsers and limits.
+- **A refusal:** report it. Never retry it with `--host` or host focus/pointer
+  recovery unless the user authorized that in this task.
+- **The user takes over** (their pointer or focus enters the target): input stops.
+  Inspect the current state before you retry anything.
+- **`plugin_build` in doctor:** the loaded plugin is stale. `ca update --check`
+  shows the fix; `ca update` reloads KWin's plugin with sudo, so ask the user first.
+- **The window was reopened or `--title` matches several windows:** bind the exact
+  new ID again with `ca set`.
+- **A guarded target is refused:** take a fresh observation and revalidate it
+  (`ca target app NAME --observation OBS --revalidate`); never copy its old
+  coordinates around the guard.
+- **An XWayland window:** observe only; it cannot be driven. Report native Wayland
+  and XWayland results separately.
+- **A dialog took the user's focus:** apps can do that; say so rather than promise
+  it cannot happen.
+- **A run must stop:** `ca runs stop ID`, then inspect `ca runs inspect ID` before
+  retrying. Checkpoints can miss recent actions and never prove completion.
 
-## Observe and interact
+## Details
 
-All commands below and in references take `--environment TASK` when working
-privately. Inside an environment the default lane is that desktop's own seat (no
-human uses it); targets are raised automatically. There `ready`/`host_acquirable`
-(doctor: `host_candidate`) decide readiness; `acquirable`, `agent_restrictions` and
-`human_active` (grouped under `agent_lane`) describe the agent lane and do not
-block. Never drop the selector to
-recover from a refusal. XWayland windows can be observed but not driven.
-
-Inspect `ca capabilities`, `ca windows`, `ca doctor --window APP` and a fresh
-`ca observe --window APP` image. Name an exact live ID with `ca set ID --name APP`.
-After reopening, rebind explicitly; `--title TEXT` must match one window.
-If doctor reports `plugin_build`, the loaded plugin is stale: `ca update --check` shows
-the fix; running `ca update` reloads KWin's plugin with sudo, so ask the user first.
-Check live capabilities and verify menus/dialogs in the actual app. Agent-lane
-menus opened during a lease are observable and selectable in the tested Qt fixture;
-do not infer general compatibility. Report native Wayland and XWayland separately.
-
-Actual-desktop control remains available when the user explicitly requests it.
-Only in that mode omit `--environment`. Human pointer/focus must stay outside the
-agent target connection. Host focus/pointer recovery requires authorization in the
-current task; this skill itself does not grant it. Do not use host input to perform
-a refused agent action. Human takeover stops input; inspect before retrying. App dialogs can change human
-focus; do not promise prevention.
-
-When `ca a11y --window APP` lists the controls you need, locate them by role and
-name with `ctx.find` instead of mapping pixels; it is read-only and still needs
-outcome checks. Otherwise inspect `window/layout/APP/`; map the controls/work area
-needed now. Stable controls
-use `ca target APP NAME --observation OBS --rect X Y W H` and guarded
-`ctx.click(target='@NAME')`. Recheck old maps; do not bypass failed guards.
-Changing canvases use verified geometry, not artwork pixel hashes. Coordinates
-are logical content pixels; account for capture/display scaling.
-
-Search [workflow memory](memory.md) before building a new procedure. Reuse its
-guarded program when it fits, or adapt from its notes and fresh UI evidence.
-Explicitly authored typed fragments remain under `window/api-fragmants/`; layout
-maps are optional and must match the live state. Compose bounded `ca execute`
-programs with conditions and loops, inspect actual transitions and correct
-unexpected results before continuing. See [programs](programs.md).
-
-Independent physical keys require advertised keyboard support and ready target
-resources. Use `ctx.press`, `key_down`, `key_up` and `ctx.write`/`ca write` for
-layout-resolved text; verify effects before release. Unicode paste on the user's
-desktop uses explicit host focus/clipboard within the task's authorization.
-
-Use `ca watch` for bounded JSONL observation, `ca runs inspect ID` for evidence,
-`ca runs stop ID` for targeted stopping and `ctx.handoff(reason)` to release/yield.
-Inspect related-window candidates and choose an exact ID in a fresh run; interrupted
-contexts cannot resume. Checkpoints can miss recent actions and never prove completion.
-Keep required evidence with `ca storage keep ID`; five eligible runs rotate and
-captures are separately bounded. Close the cursor session with `ca session close`.
+- Stable visual controls can be mapped once with `ca target app NAME --observation
+  OBS --rect X Y W H` and clicked with `ctx.click(target='@NAME')`. Changing canvases
+  need fresh geometry instead.
+- Independent keys need advertised keyboard support and a ready target: use
+  `ctx.press`, `key_down`/`key_up` and `ctx.write`. Unicode paste uses host focus
+  and clipboard, so it needs the user's authorization.
+- `ca watch` gives bounded JSONL observation; `ctx.handoff(reason)` releases or
+  yields; `ctx.related_windows()` lists dialogs of the same process.
+- Menus opened by the agent lane were selectable in the tested Qt fixture only; check
+  each app's menus and dialogs live.
+- Five eligible runs rotate; keep what you need with `ca storage keep`.

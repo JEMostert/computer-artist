@@ -5,6 +5,9 @@ size `(W, H)`, use `x = px * W / Pw`, `y = py * H / Ph`. For a displayed crop
 point `(dx, dy)`, displayed size `(Dw, Dh)` and logical region `(rx, ry, rw, rh)`,
 use `x = rx + dx * rw / Dw`, `y = ry + dy * rh / Dh`.
 
+The agent pen's nib tip is the click point. The pen is drawn only on screen; window
+captures leave it out unless the reply says `may_include_overlapping_windows: true`.
+
 Use the actual displayed size. Observation `pixel_size` describes the full capture
 even when `image` is cropped; `full_image` is the full-window reference. Canvas
 zoom/scroll can invalidate coordinates without changing window geometry.

@@ -7,7 +7,8 @@ the browser. Each browser profile with the extension installed becomes a
 
 Actions are DOM events inside the page, including a full mouse model for canvases
 and drawing editors. `ca browser` never moves your pointer, never sends
-operating-system input, and never activates a tab or focuses a window.
+operating-system input, never activates a tab or focuses a window, and never starts
+a browser: agents work in the Chrome you already run.
 Agents normally work in background tabs that they open themselves. This is
 separation by design, not a security sandbox. The extension can read and change any
 page it is allowed to script, and anything running as your user can reach the local
@@ -99,6 +100,12 @@ ca browser navigate --tab 1a2b3c4d:812 --lease LEASE --reload
 ca browser close --tab 1a2b3c4d:812 --lease LEASE
 ```
 
+Agents start with `ca browser instances` and work in a connected browser, in tabs
+they open next to yours. ca has no command that starts a browser. With no instance
+connected, `instances` adds a `hint` and other commands refuse with `no_instances`:
+the agent tells you, and starts a new browser only after saying so and with your
+agreement, never silently.
+
 Targets are always explicit. A tab handle carries its instance. With several
 instances connected, a bare tab ID or `instances`-wide command without
 `--instance` is refused (`ambiguous_instance`) rather than guessed. Elements are
@@ -173,23 +180,63 @@ the old extension click an element's centre.
 
 ### Screenshots without switching tabs
 
-`ca browser screenshot --tab H out.png` captures any scriptable tab. A tab Chrome is
-painting (the active tab of a window that is on screen) is captured as displayed
-(`method: visible_tab`). Any other tab, in the background, in a minimized window, or
+`ca browser screenshot --tab H out.png` captures a tab without switching to it. A
+tab Chrome is painting (the active tab of a window that is on screen) is captured as
+displayed (`method: visible_tab`), spaced to stay within Chrome's rate of about two
+such captures a second. Any other tab, in the background, in a minimized window, or
 in a window that is covered or behind another application (Chrome stops painting
 those and would return a stale frame), is rendered through Chrome's debugger
-protocol without being shown (`method: debugger`): the extension attaches to that
-one tab, asks Chrome for a fresh rendering of its viewport, including canvases and
-iframes, and detaches, in about 0.05 s. It never sends input that way. Chrome allows
-about two captures of shown tabs a second; further ones in a burst are rendered the
-same way instead of failing. The user's
-tab and window stay in front. A tab Chrome will not attach to (another extension's
-debugger is attached, or a browser page) is refused as `capture_unavailable`.
+protocol without being shown (`method: debugger`), including canvases and iframes.
+It never sends input that way. The user's tab and window stay in front.
+
+Background rendering needs a claim on the tab (`open` or `claim`); an unclaimed tab
+that is not on screen is refused as `claim_required`. A tab Chrome will not attach
+to (another extension's debugger is attached, or a browser page) is refused as
+`capture_unavailable`.
+
+#### Debugger sessions
+
+While any extension debugs a tab, Chrome shows **"Computer Artist" started debugging
+this browser** with a Cancel button above the page in every window. The bar pushes
+page content down by about 56 pixels, and Chrome keeps it about 5 seconds after the
+last detach. Attaching for each capture made it appear and disappear repeatedly.
+
+So the claim is the agent's **session** on a tab. Its first background screenshot
+attaches the debugger to that tab, and it stays attached for the rest of the claim.
+It detaches when the session ends:
+
+| Session ends | How |
+| --- | --- |
+| The agent ends it | `close` or `release` |
+| The agent forgot it | `ca browser cleanup --owner NAME` |
+| The user takes the tab | click, key, scroll or touch in the page (`human_input`) |
+| The tab goes away | closed or replaced |
+| The agent stopped or crashed | 5 minutes without any request using the lease; the claim and its pen stay, and the next background capture attaches again |
+| The extension reloads or Chrome exits | Chrome detaches everything; on startup, sessions of surviving claims are kept and any other leftover is detached |
+
+So the bar appears at most once per session and goes away only after the last
+session ends: several agents with sessions share one bar. `ca browser status`
+reports `debugger_attached` for a tab, `ca browser instances` reports
+`debugger_sessions`, and screenshots report `debugger_attached`. If you press
+**Cancel** on the bar, Chrome detaches every session, and ca refuses further
+background captures for those claims (`capture_unavailable`, `stop_reason:
+debugging_cancelled`) instead of bringing the bar back; a new claim may attach again.
+
+A background tab keeps the viewport size it last had on screen until it is shown
+again, so its screenshots keep one size for the session. Each reply reports
+`viewport` and `scale`; take coordinates from the latest screenshot.
+
+#### The pen in screenshots
+
+The pen is never hidden from the user (see [What you see](#what-you-see)). A shown
+tab is captured as the user sees it, pen included (`pen: included`, with `pen_rect`,
+an approximate box in viewport CSS pixels that covers the pen and its name tag).
+A background rendering leaves the pen out (`pen: excluded`): the pen is hidden only
+for that capture, in a tab nobody can see, and returns as soon as the tab is shown.
+`pen: none` means the tab has no pen. Clicks and DOM reads never hit the pen.
 
 This uses the `debugger` permission, listed by Chrome as "Access the page debugger
-backend". While attached, Chrome may show that Computer Artist is debugging the
-browser; in Chrome for Testing 153 the user's tab kept its exact viewport during
-captures. Adding the permission to an unpacked extension needs one reload of the
+backend". Adding the permission to an unpacked extension needs one reload of the
 card and no further prompt.
 
 ### The agents' window
@@ -216,7 +263,7 @@ takes an existing one. The claim returns a **lease** that `navigate`, `click`,
 `wait`, `screenshot`) need only the tab handle. `tabs` marks pages Chrome does not
 let extensions script with `scriptable: false` and a `restriction`
 (`browser_page`, `web_store`, `file_access_off`, `unsupported_url`); `claim` refuses
-them as `page_unavailable` with the same reason. A claimed tab shows a teal **CA**
+them as `page_unavailable` with the same reason. A claimed tab shows a green **CA**
 badge on the extension icon. Tabs that ca opened also sit in a green **CA** tab group.
 
 | Lease ends | `stop_reason` |
@@ -235,7 +282,8 @@ is refused with `ownership_revoked` (`human_input`) instead of performed.
 A revoked lease is refused with `ownership_revoked` and its stop reason. A
 different lease is refused with `lease_mismatch`, and a second claim with
 `tab_claimed`. `ca browser status --tab H --lease L` reports which of these
-applies. ca only closes tabs it opened. Claims live in the extension's local
+applies. ca only closes tabs it opened and you have not used since; releasing such
+a tab and claiming it again keeps it closeable. Claims live in the extension's local
 storage: they survive the native host restarting and the extension reloading or
 updating (the human-input watcher is renewed in claimed tabs), and end when the
 browser exits. A claim is restored only for a tab that still shows the URL it was
@@ -260,19 +308,25 @@ input is outside this page-input guard.
 
 ### What you see
 
-When you watch a tab an agent is working in, its pen moves through the page. This
-is the native ink pen from computer use, drawn in teal Chrome ink with the owner's
+A tab an agent claims shows its pen from the moment of the claim until the claim
+ends, also in each page it navigates to and after an extension reload. A pen means
+an agent is working in that tab; no pen means the tab is yours. When you watch a
+tab an agent is working in, its pen moves through the page. This
+is the native ink pen from computer use, drawn in green Chrome ink with the owner's
 name beside it, so you can tell browser control from computer use at a glance. The
-blue pen is computer use. The teal pen and its name tag mean Chrome DOM control.
+blue pen is computer use. The green pen and its name tag mean Chrome DOM control.
 The pen glides to each target before ca clicks, types or presses a key, splashes
-on clicks, writes along fields and drips at rest. When the claim ends, it shows
-**Back to you** and lifts away. In a background tab ca acts without the glide. If
+on clicks, writes along fields and drips at rest; before the first action it rests
+near the top right corner. When the claim ends, it shows **Back to you** and lifts
+away; in a tab you are not looking at it is removed at once. In a background tab ca
+acts without the glide. If
 you switch to that tab, its agent keeps working and you can watch the pen. The pen is drawn above the page's dialogs, ignores the pointer and holds no
 page text, so `read`, `locate` and the obscured-click check do not see it.
-`ca browser screenshot` hides it during the capture, like native window captures. With
-reduced motion turned on, it moves without animation.
+`ca browser screenshot` of a tab on screen includes it; background renderings leave
+it out (see [the pen in screenshots](#the-pen-in-screenshots)). With reduced motion
+turned on, it moves without animation.
 
-![The teal Chrome pen splashing on a click, with its owner tag](evidence/chrome-extension/pen-click.png)
+![The green Chrome pen splashing on a click, with its owner tag](evidence/chrome-extension/pen-click.png)
 
 Click the toolbar icon for the status card. It shows whether the extension
 reaches ca, with Chrome's reason and the fix when it does not. It also shows
@@ -294,8 +348,10 @@ never acts on tabs. Copy the instance ID from its footer for `--instance`.
   and the LabServant canvas structure editor exactly like trusted input; see the
   [precise input record](validation/2026-11-04-chrome-precise-input.md).
 - **Background screenshots render the viewport only**, at the tab's window size,
-  and need the `debugger` permission (0.7.0). Pages that block extension debugging
-  are refused as `capture_unavailable`.
+  and need the `debugger` permission (0.7.0) and a claim (0.8.0). Chrome shows its
+  debugging bar while a session is attached; branded Chrome cannot hide it for an
+  installed extension. Pages that block extension debugging are refused as
+  `capture_unavailable`.
 - **Scriptable pages only.** `chrome://` pages, the Web Store, other extensions'
   pages and, unless you allow file access on the extension card, `file://` URLs
   cannot be claimed or read. Same-origin iframes are reachable with `--frame` and
@@ -313,10 +369,11 @@ ca browser ──(same-user socket, mutual HMAC)──> native host ──(stdio
 
 - **Extension** (Manifest V3, `computer_artist/chrome_extension`). Each action runs
   as one script in the tab's top frame, so a drag of any length is one round trip. Its permissions
-  are `nativeMessaging`, `debugger` (background screenshots only), `tabs`, `scripting`,
+  are `nativeMessaging`, `debugger` (background screenshots only, one session per claim), `tabs`, `scripting`,
   `storage`, `alarms` and `tabGroups`,
   with host access `<all_urls>` and the `watch.js` content script. `pen.js` is
-  injected only into the top frame of a claimed tab before an action. The popup
+  injected only into the top frame of a claimed tab, when it is claimed and in each
+  new document. The popup
   reads bridge state from session storage and claims from local storage. The service worker connects to the native host at
   startup, and that open port keeps it running. It reconnects with backoff after a
   disconnect and checks every minute from an alarm.
@@ -344,7 +401,7 @@ open to the network.
 | Platform | Status |
 | --- | --- |
 | Linux (Fedora 43, GNOME Wayland) | Verified on 3 November 2026 with Chrome for Testing 153, headless and headed in a private KWin desktop. See the [validation record](validation/2026-11-03-chrome-extension.md). |
-| macOS | Unix socket, `~/Library/Application Support/<browser>/NativeMessagingHosts`. The pen, status card and takeover were verified on 3 November 2026 with headless Chrome for Testing 153 on macOS 27; see the [pen and status card record](validation/2026-11-03-chrome-pen-status.md). |
+| macOS | Unix socket, `~/Library/Application Support/<browser>/NativeMessagingHosts`. Debugger sessions and the session pen were verified on 5 November 2026 in the user's Chrome 156; see the [debugger session record](validation/2026-11-05-chrome-debugger-session.md). The pen, status card and takeover were verified on 3 November 2026 with headless Chrome for Testing 153 on macOS 27; see the [pen and status card record](validation/2026-11-03-chrome-pen-status.md). |
 | Windows | Implemented (loopback TCP plus key, `HKCU\Software\<vendor>\NativeMessagingHosts`) for Chrome, Chromium, Edge and Brave; covered by portable tests, not exercised with a real browser |
 
 The folder names for Chrome Beta, Dev and Canary, Brave, Edge and Vivaldi follow

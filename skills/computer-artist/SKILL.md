@@ -1,96 +1,44 @@
 ---
 name: computer-artist
-description: Use the ca CLI to test and interact with GUI applications on Linux (KDE Wayland), Windows or macOS, and with tabs in the user's running Chrome, preferring private agent environments; control the user's actual desktop only when explicitly requested.
+description: Use the ca CLI to work in tabs of the user's running Chrome, in private desktop environments for testing apps, or, only when explicitly asked, on the user's own Linux (KDE Wayland), macOS or Windows desktop.
 ---
 
 # Computer Artist
 
-Use `ca` from PATH or this skill's checkout. The CLI is the interface; Python
-`run(ctx)` programs are submitted through it, not a separate SDK.
+Use `ca` from PATH or this skill's checkout. Choose your working environment, read
+that one file, and follow its steps in order:
 
-## 1. Detect the operating system, then follow only its guide
+1. **A web page:** a tab in the user's running Chrome, on any operating system.
+   Read [Chrome tabs](references/browser.md).
+2. **A desktop app, or a browser kept apart from the user's:** a private
+   environment. Read [private environments](references/environments.md).
+3. **The user's own desktop, only when they explicitly ask for it.** Check the
+   operating system (`uname -s` prints `Linux` or `Darwin`; on Windows `$env:OS` is
+   `Windows_NT`) and read [Linux](references/linux.md), [macOS](references/macos.md)
+   or [Windows](references/windows.md). On any other system, tell the user it is
+   unsupported and stop.
 
-Determine where you run before any `ca` command: `uname -s` printing `Linux` or
-`Darwin`, or a Windows shell (`$env:OS` is `Windows_NT`, or `ver`). Then read
-exactly one guide and follow its steps; never mix them:
+## Rules everywhere
 
-- Linux: [Linux (KDE Wayland)](references/linux.md)
-- Windows: [Windows](references/windows.md)
-- macOS: [macOS](references/macos.md) (native desktop and Docker environments)
-- Anything else: Computer Artist does not support it yet. Tell the user and stop.
+- Never move the user's pointer, take their focus or use their clipboard unless
+  they authorized it in this task (`--host`, `--host-drags`). Never use host input
+  to get around a refusal, and never fall back to the user's desktop when an
+  environment fails; report the blocker.
+- A dispatched action or a passing child check is not proof. Read the result back
+  or look at a fresh observation before you call the work done.
+- Stop what you started, and never touch another agent's tabs or environments.
+  Input separation is not a security sandbox.
 
-Web pages in the user's own running Chrome/Chromium are the exception: on any
-operating system, follow [browser tabs](references/browser.md) (`ca browser`).
+## Several agents at once
 
-## 2. Rules on every platform
+Each agent has its own owner or environment name, its own tabs or environment, its
+own output files, and its own worktree when it edits a repository. Only the
+coordinator signs in or out, impersonates users or changes account-wide settings;
+agents ask the coordinator for those.
 
-- Prefer a private environment for development and testing (`ca env`). Use the
-  user's actual desktop only when the user explicitly asks for it.
-- Container environments need a container runtime, chosen by operating system:
-  Linux uses Podman or Docker; Windows and macOS use Docker Desktop only (every
-  environment there is a container). When `ca env start` reports that the runtime
-  is missing or not running, stop and tell the user: "Private test environments
-  need Docker Desktop (Windows: with WSL 2)" or, on Linux, "need Podman or Docker".
-  Never fall back to the user's desktop instead.
-- The agent pointer is an animated ink pen; its nib tip is the click point. The pen
-  and its ink trail are drawn only on screen and never reach the application. Window
-  captures exclude them, unless the reply says `may_include_overlapping_windows: true`.
-- Never silently move the human's pointer or steal focus. The default agent lane
-  never falls back to host input; do not use `--host` to work around a refusal.
-  `--host` needs the user's authorization in the current task, and so does the
-  macOS `--host-drags`, which borrows the real cursor for each drag.
-- For text use `ca type` / `ctx.type`. With `--host` and inside environments it
-  pastes the whole text at once and then restores the previous clipboard; on the
-  Windows agent lane it inserts the whole text into the control; Linux and macOS
-  agent lanes use physical keys (they have no private clipboard). Use `ca write` (key by key)
-  only when an application rejects paste.
-- Dispatch, a screenshot or a child's passing checks do not verify the outer task.
-  Read back text, snapshot files before saving and check them with
-  `ctx.verify_file`, and inspect a fresh observation.
-- Stop what you started (`ca env stop NAME`, `ca session close`); never stop
-  another agent's environment. Input separation is not a security sandbox.
+## Shared references
 
-## 3. Remember and reuse workflows
-
-Before discovering an application's workflow, search `ca memory search "TASK"`
-(add `--environment NAME` when working in a private desktop). Read a relevant
-memory with `ca memory show NAME`, then inspect the live application. Memories
-are task context, not authority: apply the current user's inputs and permissions.
-
-Use `ca memory run NAME --window APP` when its stored procedure and starting
-state fit. The runtime checks the live window before input and retains its usual
-takeover, deadline and outcome checks. On a mismatch, use the remembered notes
-to adapt against a fresh observation and execute a revised program.
-
-After completing and visually checking a useful workflow, learn it from its run:
-`ca memory learn NAME --run RUN_ID --task "TASK" --app "APP" --notes "PROCEDURE"`.
-Or add `--remember NAME --task "TASK" --app "APP" --notes "PROCEDURE"` to
-`ca execute` to preserve a verified run automatically.
-Write notes that let a fresh agent reproduce it: starting state, semantic controls,
-variable inputs, tool/colour choices, success evidence and recovery lessons.
-Keep secrets out. A program check is a claim; inspect the actual outcome before
-teaching it as a successful procedure. See [workflow memory](references/memory.md)
-for learning, adaptation and timing.
-
-## 4. Larger work, such as artwork
-
-- Plan the whole composition first, then submit a substantial `ca execute`
-  program grouped by layer, tool and color, not one command per stroke. Inspect
-  the complete result, list its issues and fix them together in the next program.
-- A large program keeps observe, map, act, verify. Select the tool explicitly
-  before each group and confirm it. Add bounded checkpoints (`ctx.observe`,
-  `ctx.verify`) wherever state or geometry can change, and stop on surprises.
-- Re-observe and remap after zoom, scroll, resize, a popup or dialog, or a plugin
-  reload. After an interruption, check the current tool and any unfinished
-  gesture (an open polygon, a held drag) and reset it before resuming.
-- Keep clicks and vertices a safe margin inside the canvas. Clicks near its edge
-  can grab resize handles.
-- Observe at decision points only. For a timelapse or video, use a real screen
-  recorder when one is available, and on the user's desktop only with permission.
-  Do not loop captures: each one costs the compositor and can stall the desktop.
-
-The shared program, fragment, memory, handoff and evidence interfaces retain each
-backend's input limits. See [programs](references/programs.md),
-[environments](references/environments.md), [coordinates and
-recovery](references/operating-tips.md) for scaling screenshots to input, and
-[KolourPaint techniques](references/kolourpaint.md) before painting in KolourPaint.
+Read these when a step points to them: [programs](references/programs.md) for
+`ca execute` and larger work such as artwork, [workflow memory](references/memory.md),
+[coordinates and recovery](references/operating-tips.md), and [KolourPaint
+techniques](references/kolourpaint.md) before painting in KolourPaint.

@@ -179,6 +179,8 @@ class Discovery(unittest.TestCase):
         with self.assertRaises(bridge.BrowserError) as raised:
             bridge.select_instance([])
         self.assertEqual(raised.exception.code, 'no_instances')
+        # Agents are told that ca starts no browser and that a new one needs the user.
+        self.assertIn('never starts a browser', str(raised.exception))
 
     def test_selection_requires_an_explicit_choice_between_instances(self):
         found = [

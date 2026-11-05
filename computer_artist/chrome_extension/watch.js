@@ -30,6 +30,17 @@
     }
   };
   for (const type of types) addEventListener(type, report, { capture: true, passive: true });
+  // The worker puts the agent's pen on a claimed tab's new document as soon as it exists.
+  if (window === top && !previous) {
+    const ready = () => {
+      try {
+        chrome.runtime.sendMessage({ type: 'ca-document-ready' }).catch(() => {});
+      } catch (error) {
+        // The extension was reloaded; its worker restores pens itself.
+      }
+    };
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', ready, { once: true });
+  }
   globalThis.__caHumanWatch = {
     live,
     stop: () => types.forEach((type) => removeEventListener(type, report, { capture: true })),

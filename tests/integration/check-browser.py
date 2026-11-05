@@ -217,7 +217,7 @@ def windows_snapshot(env, instance):
 
 
 def pen_pixels(path, colour=(10, 124, 96)):
-    """Count pixels near a colour (default: the pen's teal tag) in an 8-bit RGB(A) PNG."""
+    """Count pixels near a colour (default: the pen's green tag) in an 8-bit RGB(A) PNG."""
     data = Path(path).read_bytes()
     width, height, depth, kind = struct.unpack('>IIBB', data[16:26])
     assert depth == 8 and kind in (2, 6), (depth, kind)
@@ -348,12 +348,14 @@ def check_pointer(env, url, work, port):
     target = page_target(port, lambda t: t['url'].startswith(url + 'draw'))
     with urlopen(f'http://127.0.0.1:{port}/json/activate/{target["id"]}') as response:
         response.read()
-    # A visible click leaves the pen resting on the canvas; captures leave it out.
+    # A visible click leaves the pen resting on the canvas. The pen is never hidden from
+    # the user, so a capture of the shown tab includes it and says where it is.
     act('click', '--frame', '#pad', '--selector', 'canvas', '--x', '150', '--y', '100')
     shot = ca('screenshot', '--tab', tab, str(work / 'draw.png'), env=env)
     teal = pen_pixels(work / 'draw.png') if shot.get('ok') else None
-    step('screenshot_reports_scale_without_pen', shot.get('ok') and shot.get('scale', 0) > 0
-         and shot.get('viewport', {}).get('width') and teal == 0, scale=shot.get('scale'),
+    step('shown_screenshot_includes_pen', shot.get('ok') and shot.get('scale', 0) > 0
+         and shot.get('viewport', {}).get('width') and teal and shot.get('pen') == 'included'
+         and shot.get('pen_rect'), scale=shot.get('scale'),
          viewport=shot.get('viewport'), pen_pixels=teal, bytes=(work / 'draw.png').stat().st_size
          if shot.get('ok') else None)  # fmt: skip
     before = pad('#strokes').get('text', '')
@@ -427,7 +429,9 @@ def check_background_work(env, url, work, port, ids):
     shot = ca('screenshot', '--tab', tab, str(work / 'background.png'), env=env)
     seconds = round(time.perf_counter() - began, 3)
     magenta = pen_pixels(work / 'background.png', (255, 0, 170)) if shot.get('ok') else 0
+    teal = pen_pixels(work / 'background.png') if shot.get('ok') else None
     step('background_capture_shows_iframe_canvas', shot.get('ok') and shot.get('method') == 'debugger'
+         and shot.get('pen') == 'excluded' and teal == 0 and shot.get('debugger_attached')
          and magenta > 500 and windows_snapshot(env, 'alpha') == before, magenta_pixels=magenta,
          seconds=seconds, scale=shot.get('scale'), bytes=(work / 'background.png').stat().st_size
          if shot.get('ok') else None)  # fmt: skip
@@ -444,8 +448,10 @@ def check_background_work(env, url, work, port, ids):
         thread.start()
     for thread in threads:
         thread.join()
-    step('concurrent_background_captures', all(r.get('ok') for r in shots.values()),
-         errors=[r.get('error') for r in shots.values()])  # fmt: skip
+    sessions = ca('instances', env=env)['instances']
+    held = [i.get('debugger_sessions') for i in sessions if i.get('label') == 'alpha']
+    step('concurrent_background_captures', all(r.get('ok') for r in shots.values())
+         and held and held[0] >= 2, errors=[r.get('error') for r in shots.values()], sessions=held)  # fmt: skip
 
     # The human works in their own tab while the agent drags: only input in a tab ends its claim.
     user_tab = next(t for t in ca('tabs', '--instance', 'alpha', env=env)['tabs'] if t['active'])
@@ -479,9 +485,9 @@ def check_background_work(env, url, work, port, ids):
          and user_tab['tab'] in after['active_tabs'] and shown.get('method') == 'visible_tab',
          window=windowed.get('window'), focus=after, method=shown.get('method'))  # fmt: skip
 
-    # Rapid captures of a shown tab exceed Chrome's captureVisibleTab quota (about two
-    # a second); those are rendered through the debugger instead of failing.
-    # The tab shows the pen (a click at rest leaves it), which no capture may include.
+    # Rapid captures of a shown tab are spaced to stay within Chrome's captureVisibleTab
+    # quota (about two a second) instead of attaching the debugger. The tab shows the
+    # pen (a click at rest leaves it), and every capture of it says so.
     ca('click', '--tab', second.get('handle', ''), '--lease', second.get('lease', ''), '--text',
        'Press me', env=env)  # fmt: skip
     burst = {}
@@ -493,17 +499,22 @@ def check_background_work(env, url, work, port, ids):
     for thread in takers:
         thread.join()
     methods = sorted(r.get('method') or r.get('detail', r.get('error')) for r in burst.values())
-    pens = [pen_pixels(work / f'burst-{n}.png') if burst[n].get('ok') else None for n in range(4)]
-    step('rapid_visible_captures_fall_back', all(r.get('ok') for r in burst.values())
-         and 'debugger' in methods and 'visible_tab' in methods and pens == [0, 0, 0, 0],
-         methods=methods, pen_pixels=pens)  # fmt: skip
+    pens = [burst[n].get('pen') for n in range(4)]
+    step('rapid_visible_captures_are_spaced', all(r.get('ok') for r in burst.values())
+         and methods == ['visible_tab'] * 4 and pens == ['included'] * 4
+         and not any(r.get('debugger_attached') for r in burst.values()),
+         methods=methods, pens=pens)  # fmt: skip
 
     # An agent that lost its leases cleans up only its own tabs.
     cleaned = ca('cleanup', '--owner', 'viewer-2', env=env)
     gone = ca('status', '--tab', other['handle'], env=env)
     mine = ca('status', '--tab', tab, '--lease', lease, env=env)
+    after_cleanup = [i.get('debugger_sessions') for i in ca('instances', env=env)['instances']
+                     if i.get('label') == 'alpha']  # fmt: skip
     step('cleanup_closes_only_own_tabs', cleaned.get('ok') and not gone.get('exists')
-         and mine.get('holds_lease'), cleaned=cleaned.get('tabs'))  # fmt: skip
+         and mine.get('holds_lease') and mine.get('debugger_attached')
+         and after_cleanup and after_cleanup[0] == held[0] - 1, cleaned=cleaned.get('tabs'),
+         sessions=[held, after_cleanup])  # fmt: skip
 
     # Simultaneous first opens in another browser share one new agent window.
     pair = {}

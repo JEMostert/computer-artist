@@ -4,9 +4,12 @@
 // (untrusted events); nothing here moves the pointer, activates a tab or
 // focuses a window. Claimed tabs carry a lease, a "CA" badge and, for tabs ca
 // opened, a "CA" tab group. Human input in a claimed tab revokes the lease.
-// Actions in a visible tab show the agent's pen (pen.js) in teal "Chrome lane"
-// ink, distinct from the blue native pen. The toolbar popup (popup.js) shows the
-// bridge and claim state that this worker keeps in session storage.
+// A claimed tab shows the agent's pen (pen.js) in green "Chrome lane" ink for as long
+// as the claim lasts, distinct from the blue native pen: a pen means an agent works
+// there, no pen means the tab is the user's. The claim is the agent's session on the
+// tab; a background screenshot attaches Chrome's debugger once and keeps it for the
+// session. The toolbar popup (popup.js) shows the bridge and claim state that this
+// worker keeps in session storage.
 
 const HOST = 'com.computer_artist.browser';
 const PROTOCOL = 1;
@@ -14,10 +17,11 @@ const VERSION = chrome.runtime.getManifest().version;
 // ca browser install stamps the installed files' digest here, so ca can tell which
 // build is running (the version alone does not change between installs).
 const BUILD = '__CA_BUILD__';
-const CAPABILITIES = ['pointer', 'frames', 'background_capture', 'agent_window', 'durable_claims', 'reload'];
+const CAPABILITIES = ['pointer', 'frames', 'background_capture', 'agent_window', 'durable_claims', 'reload',
+  'debugger_session', 'session_pen'];
 let inFlight = 0; // requests being handled, so a reload never cuts one off
 let reloading = false;
-const BADGE = '#0a7c60'; // Chrome lane teal, shared with pen.js and the popup.
+const BADGE = '#0a7c60'; // Chrome lane green, shared with pen.js and the popup.
 const GROUP_TITLE = 'CA';
 const GROUP_COLOR = 'green';
 const MAX_TEXT = 100000;
@@ -171,15 +175,21 @@ function post(current, message) {
 // extension reloaded, and only claims whose tab still shows the claimed URL survive.
 function state() {
   statePromise ??= (async () => {
-    const stored = await chrome.storage.local.get(['claims', 'revoked']);
-    const current = { claims: stored.claims || {}, revoked: stored.revoked || {} };
+    const stored = await chrome.storage.local.get(['claims', 'revoked', 'opened']);
+    // opened: tabs ca opened that the user has not used since, which ca may still close
+    // after a release and a new claim.
+    const current = { claims: stored.claims || {}, revoked: stored.revoked || {}, opened: stored.opened || {} };
     const { alive } = await chrome.storage.session.get('alive');
     if (!alive) {
       for (const [id, claim] of Object.entries(current.claims)) {
         const tab = await chrome.tabs.get(Number(id)).catch(() => null);
         if (!tab || (tab.url || tab.pendingUrl) !== claim.url) delete current.claims[id];
       }
-      await chrome.storage.local.set({ claims: current.claims, revoked: current.revoked });
+      // Tab IDs are reused after a restart: keep only tabs whose claim survived.
+      current.opened = Object.fromEntries(
+        Object.entries(current.claims).filter(([, claim]) => claim.opened).map(([id]) => [id, true]),
+      );
+      await chrome.storage.local.set({ claims: current.claims, revoked: current.revoked, opened: current.opened });
       // Window IDs are reused after a restart: keep the agents' window only while a tab
       // ca opened there is still claimed.
       const { agentWindow } = await chrome.storage.local.get('agentWindow');
@@ -196,6 +206,7 @@ function state() {
       for (const [id, claim] of Object.entries(current.claims)) {
         watchTab(Number(id)).catch(() => {});
         mark(Number(id), claim);
+        showPen(Number(id), claim);
       }
     }
     return current;
@@ -209,7 +220,7 @@ async function persist() {
     .sort((a, b) => b[1].at - a[1].at)
     .slice(0, 50);
   current.revoked = Object.fromEntries(revoked);
-  await chrome.storage.local.set({ claims: current.claims, revoked: current.revoked });
+  await chrome.storage.local.set({ claims: current.claims, revoked: current.revoked, opened: current.opened });
 }
 
 function token() {
@@ -250,6 +261,7 @@ async function endClaim(tabId, reason) {
     };
   }
   await persist();
+  await endSession(tabId);
   if (reason !== 'target_closed') {
     liftPen(tabId, reason);
     await mark(tabId, null);
@@ -283,7 +295,24 @@ async function requireLease(tabId, lease) {
       owner: claim.owner,
     });
   }
+  touchSession(tabId, lease);
   return claim;
+}
+
+// The pen stays on a claimed page for the whole claim, from the claim itself and again
+// in every new document, so the user can tell an agent's tab from a free one.
+async function showPen(tabId, claim) {
+  try {
+    await chrome.scripting.executeScript({ target: { tabId }, world: 'ISOLATED', files: ['pen.js'] });
+    await chrome.scripting.executeScript({
+      target: { tabId },
+      world: 'ISOLATED',
+      func: (owner) => globalThis.__caPen?.hold({ owner }),
+      args: [claim.owner],
+    });
+  } catch (error) {
+    // Closing, loading a page Chrome forbids, or replaced: no page to mark.
+  }
 }
 
 function liftPen(tabId, reason) {
@@ -303,6 +332,7 @@ async function noteAction(tabId, lease, op) {
   const claim = current.claims[tabId];
   if (!claim || claim.lease !== lease) return;
   claim.last = { op, at: Date.now() };
+  touchSession(tabId, lease);
   await persist();
 }
 
@@ -317,23 +347,39 @@ async function watchTab(tabId) {
 }
 
 chrome.runtime.onMessage.addListener((message, sender) => {
+  if (message?.type === 'ca-document-ready' && sender.id === chrome.runtime.id && sender.tab && sender.frameId === 0) {
+    // A new document of a claimed tab gets its pen as soon as it is parsed.
+    state().then((current) => {
+      const claim = current.claims[sender.tab.id];
+      if (claim) showPen(sender.tab.id, claim);
+    });
+  }
   if (message?.type === 'ca-human-input' && sender.id === chrome.runtime.id && sender.tab) {
     if (opening.has(sender.tab.id)) inputWhileOpening.add(sender.tab.id);
     state().then((current) => {
-      if (current.claims[sender.tab.id]) endClaim(sender.tab.id, 'human_input');
+      if (current.claims[sender.tab.id]) {
+        delete current.opened[sender.tab.id];
+        endClaim(sender.tab.id, 'human_input');
+      } else if (current.opened[sender.tab.id]) {
+        delete current.opened[sender.tab.id]; // the user uses it now: ca no longer closes it
+        persist();
+      }
     });
   }
 });
 
 chrome.tabs.onUpdated.addListener((tabId, change) => {
   // Track each claimed tab's URL so a reload can tell the same tab from a reused ID.
-  if (!change.url) return;
+  // watch.js reports each new document once parsed; 'complete' covers any it missed.
+  if (!change.url && change.status !== 'complete') return;
   state().then((current) => {
     const claim = current.claims[tabId];
-    if (claim && claim.url !== change.url) {
+    if (!claim) return;
+    if (change.url && claim.url !== change.url) {
       claim.url = change.url;
       persist();
     }
+    if (change.status === 'complete') showPen(tabId, claim);
   });
 });
 
@@ -346,6 +392,10 @@ chrome.windows.onRemoved.addListener((windowId) => {
 chrome.tabs.onRemoved.addListener((tabId) => {
   state().then((current) => {
     if (current.claims[tabId]) endClaim(tabId, 'target_closed');
+    if (current.opened[tabId]) {
+      delete current.opened[tabId];
+      persist();
+    }
   });
 });
 
@@ -539,18 +589,18 @@ function openInAgentWindow(url) {
   return next;
 }
 
-// Screenshots leave the pen out. Overlapping captures of one tab share the hiding,
-// and the pen returns only when the last of them is done.
+// The pen stays visible to the user. A screenshot leaves it out only while the tab is
+// not on screen (pen.js refuses to hide it in a painted tab), so hiding it there never
+// shows. Overlapping captures of one tab share the hiding; the last one restores it.
 const concealed = new Map();
 function setPen(tabId, hidden) {
   return chrome.scripting
-    .executeScript({ target: { tabId }, world: 'ISOLATED', func: (h) => globalThis.__caPen?.conceal(h), args: [hidden] })
-    .catch(() => null);
+    .executeScript({ target: { tabId }, world: 'ISOLATED', func: (h) => globalThis.__caPen?.conceal(h) ?? null, args: [hidden] })
+    .then((results) => results?.[0]?.result ?? null, () => null);
 }
 async function concealPen(tabId) {
-  const count = (concealed.get(tabId) || 0) + 1;
-  concealed.set(tabId, count);
-  await setPen(tabId, true); // also waits until a shown tab has painted without it
+  concealed.set(tabId, (concealed.get(tabId) || 0) + 1);
+  return setPen(tabId, true); // { present, hidden, rect } of the pen, or null without one
 }
 async function revealPen(tabId) {
   const count = (concealed.get(tabId) || 1) - 1;
@@ -559,20 +609,146 @@ async function revealPen(tabId) {
   await setPen(tabId, false);
 }
 
-// Background tabs are captured through the debugger protocol, one capture at a time
-// per tab, attached only for the capture. Visible tabs never need it.
-const capturing = new Map();
-function debuggerCapture(tabId) {
-  const run = async () => {
-    const target = { tabId };
-    try {
-      await chrome.debugger.attach(target, '1.3');
-    } catch (error) {
+// Debugger sessions. Chrome shows "Computer Artist started debugging this browser" above
+// every window while any of this extension's debugger sessions is attached, which moves
+// page content. So a claimed tab attaches once, at its first background capture, and
+// stays attached until its claim ends (release, close, cleanup, human input, tab closed
+// or replaced) or until DEBUGGER_IDLE_MS pass without any request in that claim, which
+// covers agents that crash or forget to close. Chrome detaches by itself when the
+// extension reloads or the browser exits. Session storage remembers attached tabs, so a
+// restarted worker adopts those of live claims and detaches the rest. Unclaimed tabs
+// are never attached.
+const DEBUGGER_IDLE_MS = 5 * 60 * 1000;
+const DEBUGGER_SETTLE_MS = 400; // the bar resizes windows after the first attach
+const sessions = new Map(); // tabId -> { lease, used, ready }
+const cancelledLeases = new Set(); // the user pressed Cancel on the bar during these claims
+let idleTimer = null;
+
+function touchSession(tabId, lease) {
+  const session = sessions.get(tabId);
+  if (session && session.lease === lease) session.used = Date.now();
+}
+
+function scheduleIdleCheck() {
+  clearTimeout(idleTimer);
+  idleTimer = null;
+  if (!sessions.size) return;
+  const next = Math.min(...[...sessions.values()].map((s) => s.used)) + DEBUGGER_IDLE_MS - Date.now();
+  idleTimer = setTimeout(endIdleSessions, Math.max(1000, next + 50));
+}
+
+async function endIdleSessions() {
+  const now = Date.now();
+  for (const [tabId, session] of [...sessions]) {
+    if (now - session.used >= DEBUGGER_IDLE_MS) await endSession(tabId);
+  }
+  scheduleIdleCheck();
+}
+
+// Chrome's target list does not say which extension attached a debugger, so this worker
+// keeps its own record across worker restarts.
+function rememberSessions() {
+  chrome.storage.session.set({ debuggerTabs: [...sessions.keys()] }).catch(() => {});
+}
+
+async function endSession(tabId) {
+  const session = sessions.get(tabId);
+  if (!session) return false;
+  sessions.delete(tabId);
+  rememberSessions();
+  scheduleIdleCheck();
+  await session.ready.catch(() => {});
+  await chrome.debugger.detach({ tabId }).catch(() => {}); // closed tabs are already detached
+  return true;
+}
+
+const holds = async (tabId, claim) => (await state()).claims[tabId]?.lease === claim.lease;
+
+async function openSession(tabId, claim) {
+  // A claim that ended while this capture waited must not attach again.
+  if (!(await holds(tabId, claim))) throw new Refusal('not_claimed', `The claim on tab ${tabId} ended`);
+  let session = sessions.get(tabId);
+  if (session && session.lease !== claim.lease) {
+    await endSession(tabId);
+    session = null;
+  }
+  if (!session) {
+    if (cancelledLeases.has(claim.lease)) {
       throw new Refusal(
         'capture_unavailable',
-        `Chrome refused to capture background tab ${tabId}: ${error.message}. Use focus to show it, or read and locate.`,
+        `You cancelled Computer Artist's debugging, so ca no longer renders background tab ${tabId} ` +
+          'for this claim. Use read and locate, or focus the tab if the user agrees.',
+        { stop_reason: 'debugging_cancelled' },
       );
     }
+    const target = { tabId };
+    const ready = (async () => {
+      try {
+        await chrome.debugger.attach(target, '1.3');
+      } catch (error) {
+        throw new Refusal(
+          'capture_unavailable',
+          `Chrome refused to capture background tab ${tabId}: ${error.message}. Use focus to show it, or read and locate.`,
+        );
+      }
+      await new Promise((resolve) => setTimeout(resolve, DEBUGGER_SETTLE_MS));
+    })();
+    session = { lease: claim.lease, used: Date.now(), ready };
+    sessions.set(tabId, session);
+    rememberSessions();
+    ready.catch(() => {
+      if (sessions.get(tabId) !== session) return;
+      sessions.delete(tabId);
+      rememberSessions();
+    });
+  }
+  await session.ready;
+  if (!(await holds(tabId, claim))) {
+    if (sessions.get(tabId) === session) await endSession(tabId);
+    throw new Refusal('not_claimed', `The claim on tab ${tabId} ended`);
+  }
+  session.used = Date.now();
+  scheduleIdleCheck();
+}
+
+chrome.debugger.onDetach.addListener((source, reason) => {
+  const session = sessions.get(source.tabId);
+  if (!session) return;
+  sessions.delete(source.tabId);
+  rememberSessions();
+  if (reason === 'canceled_by_user') cancelledLeases.add(session.lease);
+  scheduleIdleCheck();
+});
+
+// After a worker restart (not an extension reload, which detaches everything and clears
+// session storage): keep the sessions of live claims, with a fresh idle clock, and
+// detach the rest.
+async function adoptSessions() {
+  const current = await state();
+  const { debuggerTabs = [] } = await chrome.storage.session.get('debuggerTabs');
+  const attached = new Set(
+    (await chrome.debugger.getTargets().catch(() => [])).filter((t) => t.attached).map((t) => t.tabId),
+  );
+  for (const tabId of debuggerTabs) {
+    if (sessions.has(tabId) || !attached.has(tabId)) continue;
+    const claim = current.claims[tabId];
+    if (claim) {
+      sessions.set(tabId, { lease: claim.lease, used: Date.now(), ready: Promise.resolve() });
+    } else {
+      await chrome.debugger.detach({ tabId }).catch(() => {});
+    }
+  }
+  rememberSessions();
+  scheduleIdleCheck();
+}
+
+// Background tabs are captured through the claim's debugger session, one capture at a
+// time per tab. Visible tabs never need it.
+const capturing = new Map();
+function debuggerCapture(tabId, claim) {
+  const run = async () => {
+    await openSession(tabId, claim);
+    const target = { tabId };
     try {
       const shot = await Promise.race([
         chrome.debugger.sendCommand(target, 'Page.captureScreenshot', { format: 'png' }),
@@ -582,11 +758,36 @@ function debuggerCapture(tabId) {
     } catch (error) {
       throw new Refusal('capture_unavailable', `Capturing background tab ${tabId} failed: ${error.message}`);
     } finally {
-      await chrome.debugger.detach(target).catch(() => {});
+      touchSession(tabId, claim.lease);
     }
   };
   const next = (capturing.get(tabId) || Promise.resolve()).then(run, run);
   capturing.set(tabId, next.catch(() => {}));
+  return next;
+}
+
+// Chrome allows about two captureVisibleTab calls a second per extension: space them
+// out rather than falling back to the debugger, which would show its bar.
+const VISIBLE_SPACING_MS = 520;
+let visibleTurn = Promise.resolve();
+let visibleLast = 0;
+function captureVisible(windowId) {
+  const run = async () => {
+    const wait = visibleLast + VISIBLE_SPACING_MS - Date.now();
+    if (wait > 0) await new Promise((resolve) => setTimeout(resolve, wait));
+    try {
+      // A window Chrome stops painting can leave this waiting for a frame that never
+      // comes (seen once for 30 s); after 5 s the caller renders it another way.
+      return await Promise.race([
+        chrome.tabs.captureVisibleTab(windowId, { format: 'png' }),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('capture_stalled')), 5000)),
+      ]);
+    } finally {
+      visibleLast = Date.now();
+    }
+  };
+  const next = visibleTurn.then(run, run);
+  visibleTurn = next.catch(() => {});
   return next;
 }
 
@@ -616,10 +817,12 @@ async function claimTab(tab, owner, opened) {
       restriction: restricted,
     });
   }
+  opened ||= Boolean(current.opened[tab.id]);
   const claim = {
     lease: token(), owner, since: Date.now(), opened, title: tab.title || '', url: tab.url || tab.pendingUrl,
   }; // prettier-ignore
   current.claims[tab.id] = claim;
+  if (opened) current.opened[tab.id] = true;
   delete current.revoked[tab.id];
   await persist();
   try {
@@ -633,6 +836,7 @@ async function claimTab(tab, owner, opened) {
     );
   }
   await mark(tab.id, claim);
+  await showPen(tab.id, claim);
   return claim;
 }
 
@@ -664,6 +868,7 @@ async function handle(request) {
           windows: windows.map((w) => ({ window: w.id, focused: w.focused, state: w.state, type: w.type, incognito: w.incognito })),
           tabs: tabs.length,
           claims: Object.keys(current.claims).length,
+          debugger_sessions: sessions.size,
         },
       };
     }
@@ -751,6 +956,7 @@ async function handle(request) {
         claimed: Boolean(claim),
         owner: claim?.owner ?? null,
         holds_lease: Boolean(claim && request.lease && claim.lease === request.lease),
+        debugger_attached: sessions.has(tabId),
         stop_reason: !claim && revoked ? revoked.reason : null,
         ...(tab ? { active: tab.active, url: tab.url, title: tab.title } : {}),
       };
@@ -841,30 +1047,41 @@ async function handle(request) {
         (await chrome.scripting
           .executeScript({ target: { tabId }, world: 'ISOLATED', func: () => document.visibilityState })
           .then((results) => results?.[0]?.result === 'visible', () => false));
-      await concealPen(tabId);
-      let data;
-      let method = 'debugger';
-      try {
-        if (await painted()) {
-          try {
-            // A window Chrome stops painting can leave this waiting for a frame that never
-            // comes (seen once for 30 s); after 5 s the debugger renders instead.
-            data = await Promise.race([
-              chrome.tabs.captureVisibleTab(tab.windowId, { format: 'png' }),
-              new Promise((_, reject) => setTimeout(() => reject(new Error('capture_stalled')), 5000)),
-            ]);
-            method = 'visible_tab';
-          } catch (error) {
-            // Chrome allows about two visible captures a second; render the rest instead.
-            const message = String(error?.message);
-            if (!/MAX_CAPTURE_VISIBLE_TAB_CALLS_PER_SECOND|^capture_stalled$/.test(message)) throw error;
-          }
-          // Hidden or switched away while capturing: that frame may be stale.
-          if (method === 'visible_tab' && !((await getTab(tabId)).active && (await painted()))) method = 'debugger';
+      // A shown tab is captured as the user sees it, pen included; the pen is never hidden
+      // from the user. A tab that is not shown renders through its claim's debugger
+      // session with the pen left out, which the user cannot see either way.
+      const claim = (await state()).claims[tabId] || null;
+      let data = null;
+      let method = null;
+      let pen = null;
+      if (await painted()) {
+        try {
+          data = await captureVisible(tab.windowId);
+          method = 'visible_tab';
+        } catch (error) {
+          // Over Chrome's rate after all, or stalled: render it through the debugger.
+          const message = String(error?.message);
+          if (!/MAX_CAPTURE_VISIBLE_TAB_CALLS_PER_SECOND|^capture_stalled$/.test(message)) throw error;
         }
-        if (method === 'debugger') data = await debuggerCapture(tabId);
-      } finally {
-        await revealPen(tabId);
+        // Hidden or switched away while capturing: that frame may be stale.
+        if (method && !((await getTab(tabId)).active && (await painted()))) method = null;
+        if (method) pen = await setPen(tabId, false);
+      }
+      if (!method) {
+        if (!claim) {
+          throw new Refusal(
+            'claim_required',
+            `Tab ${tabId} is not on screen. ca renders a tab in the background only during a claim on it ` +
+              '(open or claim), so the debugger attaches once per session. Open your own tab, or read and locate.',
+          );
+        }
+        pen = await concealPen(tabId);
+        try {
+          data = await debuggerCapture(tabId, claim);
+          method = 'debugger';
+        } finally {
+          await revealPen(tabId);
+        }
       }
       // The viewport in CSS pixels maps screenshot pixels to pointer coordinates.
       const viewport = await chrome.scripting
@@ -874,7 +1091,12 @@ async function handle(request) {
           func: () => ({ width: innerWidth, height: innerHeight, scroll_x: scrollX, scroll_y: scrollY }),
         })
         .then((results) => results?.[0]?.result ?? null, () => null);
-      return { tab: tabId, format: 'png', data_url: data, viewport, method };
+      return {
+        tab: tabId, format: 'png', data_url: data, viewport, method,
+        pen: !pen?.present ? 'none' : pen.hidden ? 'excluded' : 'included',
+        ...(pen?.present && !pen.hidden ? { pen_rect: pen.rect } : {}),
+        debugger_attached: sessions.has(tabId),
+      }; // prettier-ignore
     }
     default:
       throw new Refusal('unknown_operation', `Unknown operation ${request.op}`);
@@ -1746,8 +1968,11 @@ async function pageAction(request) {
 
 chrome.alarms.create('ca-reconnect', { periodInMinutes: 1 });
 chrome.alarms.onAlarm.addListener((alarm) => {
-  if (alarm.name === 'ca-reconnect' && !port) connect();
+  if (alarm.name !== 'ca-reconnect') return;
+  if (!port) connect();
+  endIdleSessions(); // a backstop in case the worker slept through its timer
 });
 chrome.runtime.onStartup.addListener(() => connect());
 chrome.runtime.onInstalled.addListener(() => connect());
 connect();
+adoptSessions().catch(() => {});

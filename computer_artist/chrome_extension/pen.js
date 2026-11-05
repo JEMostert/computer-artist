@@ -1,9 +1,11 @@
 // The agent's pen inside a claimed tab: the native ink pen (computer_artist/ink_cursor.py)
-// in teal "Chrome lane" ink with the owner's name beside it, so a human can tell DOM
+// in green "Chrome lane" ink with the owner's name beside it, so a human can tell DOM
 // control in Chrome from computer use at a glance. It glides to each target before ca
-// acts, splashes on clicks, writes along fields and drips at rest. When the claim ends
-// it lifts away. Injected on demand into the top frame of claimed tabs only. Purely
-// visual: a closed shadow root that ignores pointer events and holds no page text.
+// acts, splashes on clicks, writes along fields and drips at rest. It stays on the page
+// for the whole claim, so a pen means an agent works here and no pen means the tab is
+// the user's again. When the claim ends it lifts away. Injected into the top frame of
+// claimed tabs only. Purely visual: a closed shadow root that ignores pointer events
+// and holds no page text.
 if (!globalThis.__caPen) {
   const SVG = 'http://www.w3.org/2000/svg';
   // Pen parts as (along, across) the pen from the nib tip; see ink_cursor.py.
@@ -70,7 +72,12 @@ if (!globalThis.__caPen) {
   let leaving = null;
   let lift = null;
 
+  let concealed = false;
+
   const build = () => {
+    // A pen left by an extension instance that has since reloaded cannot be reached any
+    // more; this one replaces it.
+    for (const old of document.querySelectorAll('ca-agent-pen')) old.remove();
     host = document.createElement('ca-agent-pen');
     // Inline !important beats page styles on the host; the shadow root holds the rest.
     host.style.cssText =
@@ -160,7 +167,44 @@ if (!globalThis.__caPen) {
   const animate = (el, keyframes, options) =>
     el.animate(keyframes, options).finished.then(() => el.remove(), () => el.remove());
 
+  // Whatever a capture did, the user never sees the page without the pen.
+  document.addEventListener('visibilitychange', () => {
+    if (visible() && concealed) globalThis.__caPen.conceal(false);
+  });
+
+  const status = () => {
+    if (!host?.isConnected || leaving) return { present: false, hidden: false, rect: null };
+    const box = pen.getBoundingClientRect();
+    const tag = chip.getBoundingClientRect();
+    // The body leans up and to the right of the nib; the name tag sits below it.
+    const left = Math.min(box.left - 12, tag.left);
+    const top = Math.min(box.top - 42, tag.top);
+    const rect = {
+      x: Math.round(left), y: Math.round(top),
+      width: Math.round(Math.max(box.left + 40, tag.right) - left),
+      height: Math.round(Math.max(box.top + 12, tag.bottom) - top),
+    }; // prettier-ignore
+    return { present: true, hidden: concealed, rect };
+  };
+
   globalThis.__caPen = {
+    // Show the pen at rest from the moment a tab is claimed, and again in each new
+    // document, at its last point or near the top right corner.
+    hold({ owner } = {}) {
+      leaving = null;
+      lift?.cancel();
+      lift = null;
+      attach();
+      chip.textContent = owner || 'ca';
+      pen.style.opacity = '1';
+      if (!at) {
+        const { x, y } = clamp(Math.max(24, innerWidth - 200), 30);
+        samples = [];
+        place(x, y);
+      }
+      rest(true);
+    },
+
     // Glide to (x, y) and resolve on arrival, so ca acts where the pen lands.
     to(x, y, { owner } = {}) {
       leaving = null;
@@ -238,14 +282,14 @@ if (!globalThis.__caPen) {
       animate(splash, [{ opacity: 1 }, { opacity: 1 }], { duration: 650 });
     },
 
-    // Screenshots leave the pen out, like native window captures. Hiding waits two
-    // frames so the capture shows the page without it.
+    // Background screenshots leave the pen out. It is hidden only while the page is not
+    // on screen, where the user cannot see it go; a shown page keeps it, and the capture
+    // includes it. Returns the pen's state and its rect in viewport pixels.
     conceal(hidden) {
-      if (!host?.isConnected) return Promise.resolve(false);
-      host.style.setProperty('visibility', hidden ? 'hidden' : 'visible', 'important');
-      // A hidden tab paints nothing until captured, and its frames never fire.
-      if (!hidden || !visible()) return Promise.resolve(true);
-      return new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(() => done(true))));
+      if (!host?.isConnected) return status();
+      concealed = Boolean(hidden) && !visible();
+      host.style.setProperty('visibility', concealed ? 'hidden' : 'visible', 'important');
+      return status();
     },
 
     // Follow a drag: the nib moves with each pointer move and leaves its ink trail.
@@ -294,8 +338,9 @@ if (!globalThis.__caPen) {
         samples = [];
         leaving = null;
       };
-      // In a background tab this finishes once the human looks, which shows the handback.
-      if (!motion()) return done();
+      // Nobody sees a hidden tab: remove the pen at once, so the user who switches to it
+      // finds a free tab, not a pen still lifting.
+      if (!motion() || !visible()) return done();
       lift = pen.animate(
         [
           { transform: pen.style.transform, opacity: 1 },
