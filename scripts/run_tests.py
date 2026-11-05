@@ -221,6 +221,8 @@ def main():
                     integrations.add(name)
                 else:
                     units.add(name)
+    unregistered = sorted({f.stem for f in TESTS.glob('test_*.py')}
+                          - {m for modules in SETS.values() for m in modules})  # fmt: skip
     if full:
         units = set(SETS)
     if args.integration and not args.changed:
@@ -230,12 +232,17 @@ def main():
     other = sorted(n for n in integrations if OS not in INTEGRATION[n]['os'])
     integrations = sorted(integrations - set(other))
     modules = [m for name in SETS if name in units for m in SETS[name] if runnable(m)]
+    if full:
+        # A new test module runs in the full run even before it is added to SETS.
+        modules += [m for m in unregistered if runnable(m)]
 
     print(f'\nOn {NAMES.get(OS, OS)}:')
     print(f'  unit sets: {", ".join(n for n in SETS if n in units) or "none"}'
           f'{" (full run)" if full else ""}, {len(modules)} modules')  # fmt: skip
     if docs:
         print(f'  link check: {len(docs)} changed docs')
+    if unregistered:
+        print(f'  not in SETS yet: {", ".join(unregistered)}; add them to scripts/run_tests.py')
     print(f'  integration: {", ".join(integrations) or "none"}')
     for name in other:
         print(
