@@ -1,8 +1,8 @@
 # Kleki gallery: five models paint through `ca browser` (5 November 2026)
 
 Five models each painted one commission in [Kleki](https://kleki.com), each in its
-own tab of one Chrome, only through `ca browser`. The works, time-lapses, chart,
-diagram and film in the README come from this run. This record covers the setup,
+own tab of one Chrome, only through `ca browser`. The works, time-lapses, chart
+and diagram in the [gallery](../GALLERY.md) come from this run. This record covers the setup,
 how each artist's run went, the pen footage, and every CA error and Kleki quirk
 seen. It verifies these workflows on this setup, not general compatibility.
 
@@ -189,14 +189,13 @@ Observations:
 - Progress GIFs from the camera frames plus the artists' own numbered screenshots:
   cropped to the canvas, frames kept only when more than 0.4% of the canvas changed
   (ignoring the pen box), frames with Kleki dialogs or the layer-preview popup
-  dropped, one palette per GIF (ffmpeg `palettegen`/`paletteuse`), the clean final
-  held for 2.8 s.
-- The film: Remotion **4.0.537** (19 October 2026), 1920×1080 at 30 fps, rendered
-  with `npx remotion render`; motion only from `useCurrentFrame`, `interpolate` and
-  `spring`. All footage is real captured frames. The pen-cam segments follow the
-  `pen_rect` each capture reported and crossfade between captured frames. The pen
-  drawn on the title and end cards is a motion graphic from the pen's own geometry,
-  not footage. The project source was kept out of the repository.
+  dropped, one palette per GIF (ffmpeg `palettegen`/`paletteuse`), and the clean
+  final shown for 1 s first and held for 2 s at the end.
+- A first film, made with Remotion 4.0.537 from this run's footage, was replaced on
+  6 November 2026 by the README's 15-second reel: motion graphics with a
+  synthesized soundtrack, rendered by the project's own code in
+  [`docs/reel`](../reel/README.md). The reel shows the five finished paintings and
+  no footage from this run.
 
 ## Not verified
 

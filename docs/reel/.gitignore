@@ -1,0 +1,6 @@
+fonts/
+frames/
+*.wav
+*.mp4
+cues.json
+spectrogram.png
