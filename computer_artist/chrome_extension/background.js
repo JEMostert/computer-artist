@@ -3,7 +3,10 @@
 // `com.computer_artist.browser`. Actions run as DOM operations inside the page
 // (untrusted events); nothing here moves the pointer, activates a tab or
 // focuses a window. Claimed tabs carry a lease, a "CA" badge and, for tabs ca
-// opened, a "CA" tab group. Human input in a claimed tab revokes the lease.
+// opened, a "CA" tab group. Human input in a claimed tab pauses the agent there:
+// the lease holds, and ca acts again once the human has stopped for a moment.
+// The worker remembers which tabs ca opened, across claims, so ca can close those
+// and never a tab the user opened.
 // A claimed tab shows the agent's pen (pen.js) in green "Chrome lane" ink for as long
 // as the claim lasts, distinct from the blue native pen: a pen means an agent works
 // there, no pen means the tab is the user's. The claim is the agent's session on the
@@ -18,7 +21,7 @@ const VERSION = chrome.runtime.getManifest().version;
 // build is running (the version alone does not change between installs).
 const BUILD = '__CA_BUILD__';
 const CAPABILITIES = ['pointer', 'frames', 'background_capture', 'agent_window', 'durable_claims', 'reload',
-  'debugger_session', 'session_pen', 'viewport_guard'];
+  'debugger_session', 'session_pen', 'viewport_guard', 'human_pause', 'agent_tabs'];
 let inFlight = 0; // requests being handled, so a reload never cuts one off
 let reloading = false;
 const BADGE = '#0a7c60'; // Chrome lane green, shared with pen.js and the popup.
@@ -26,6 +29,11 @@ const GROUP_TITLE = 'CA';
 const GROUP_COLOR = 'green';
 const MAX_TEXT = 100000;
 const MAX_READ = 200000;
+// Human input pauses the agent in that tab: ca acts only after HUMAN_IDLE_MS without
+// any, and one request waits at most HUMAN_WAIT_MS (or half its timeout) for that pause.
+// pen.js shows the pause for the same time.
+const HUMAN_IDLE_MS = 3000;
+const HUMAN_WAIT_MS = 15000;
 const ALLOWED_SCHEMES = ['http:', 'https:', 'file:'];
 
 let port = null;
@@ -39,6 +47,9 @@ let statePromise = null;
 const opening = new Set();
 const activatedWhileOpening = new Set();
 const inputWhileOpening = new Set();
+// tabId -> { at, kind }: the latest trusted input in a claimed (or opening) tab. Kept in
+// memory only: a worker that restarted has been idle far longer than HUMAN_IDLE_MS.
+const human = new Map();
 
 class Refusal extends Error {
   constructor(code, detail, extra = {}) {
@@ -175,15 +186,19 @@ function post(current, message) {
 // extension reloaded, and only claims whose tab still shows the claimed URL survive.
 function state() {
   statePromise ??= (async () => {
-    const stored = await chrome.storage.local.get(['claims', 'revoked']);
-    const current = { claims: stored.claims || {}, revoked: stored.revoked || {} };
+    const stored = await chrome.storage.local.get(['claims', 'revoked', 'agentTabs']);
+    const current = { claims: stored.claims || {}, revoked: stored.revoked || {}, agentTabs: stored.agentTabs || {} };
     const { alive } = await chrome.storage.session.get('alive');
     if (!alive) {
-      for (const [id, claim] of Object.entries(current.claims)) {
-        const tab = await chrome.tabs.get(Number(id)).catch(() => null);
-        if (!tab || (tab.url || tab.pendingUrl) !== claim.url) delete current.claims[id];
+      // Tab IDs are reused after a restart: a claim, or the record that ca opened a tab,
+      // holds only for a tab that still shows the URL recorded for it.
+      for (const records of [current.claims, current.agentTabs]) {
+        for (const [id, record] of Object.entries(records)) {
+          const tab = await chrome.tabs.get(Number(id)).catch(() => null);
+          if (!tab || (tab.url || tab.pendingUrl) !== record.url) delete records[id];
+        }
       }
-      await chrome.storage.local.set({ claims: current.claims, revoked: current.revoked });
+      await chrome.storage.local.set({ claims: current.claims, revoked: current.revoked, agentTabs: current.agentTabs });
       await chrome.storage.local.remove('opened'); // kept by 0.8.0, no longer used
       // Window IDs are reused after a restart: keep the agents' window only while a tab
       // ca opened there is still claimed.
@@ -215,7 +230,7 @@ async function persist() {
     .sort((a, b) => b[1].at - a[1].at)
     .slice(0, 50);
   current.revoked = Object.fromEntries(revoked);
-  await chrome.storage.local.set({ claims: current.claims, revoked: current.revoked });
+  await chrome.storage.local.set({ claims: current.claims, revoked: current.revoked, agentTabs: current.agentTabs });
 }
 
 function token() {
@@ -230,7 +245,7 @@ async function mark(tabId, claim) {
       await chrome.action.setBadgeBackgroundColor({ tabId, color: BADGE });
       await chrome.action.setTitle({
         tabId,
-        title: `Computer Artist: ${claim.owner} controls this tab. Clicking or typing in it takes it back.`,
+        title: `Computer Artist: ${claim.owner} works in this tab and pauses while you use it.`,
       });
     } else {
       await chrome.action.setTitle({ tabId, title: 'Computer Artist' });
@@ -245,6 +260,7 @@ async function endClaim(tabId, reason, details = {}) {
   const claim = current.claims[tabId];
   if (!claim) return null;
   delete current.claims[tabId];
+  human.delete(tabId);
   if (reason !== 'released') {
     const title = reason === 'target_closed' ? null : (await chrome.tabs.get(tabId).catch(() => null))?.title;
     current.revoked[tabId] = {
@@ -293,6 +309,83 @@ async function requireLease(tabId, lease) {
   }
   touchSession(tabId, lease);
   return claim;
+}
+
+// ------------------------------------------------------------ human input
+
+function noteHuman(tabId, kind, at = Date.now()) {
+  const seen = human.get(tabId);
+  if (!seen || seen.at < at) human.set(tabId, { at, kind: kind || seen?.kind || 'input' });
+}
+
+// Milliseconds until the human counts as idle in the tab; 0 once they are.
+function quietIn(tabId) {
+  const seen = human.get(tabId);
+  return seen ? Math.max(0, HUMAN_IDLE_MS - (Date.now() - seen.at)) : 0;
+}
+
+function humanStatus(tabId) {
+  const seen = human.get(tabId);
+  if (!seen) return { human_active: false };
+  return { human_active: quietIn(tabId) > 0, human_input_at: new Date(seen.at).toISOString(), human_input: seen.kind };
+}
+
+const humanBudget = (request) => Math.min(HUMAN_WAIT_MS, timeoutMs(request, 30) / 2);
+
+// Wait until the human has paused in the tab. Refuses with human_active, keeping the
+// lease, when that would take longer than the budget. Returns the total ms waited.
+async function humanTurn(tabId, lease, budget, waited = 0) {
+  for (;;) {
+    const remaining = quietIn(tabId);
+    if (!remaining) return waited;
+    if (waited + remaining > budget) {
+      throw new Refusal(
+        'human_active',
+        `The user is using tab ${tabId}; ca waited ${(waited / 1000).toFixed(1)} s for a pause and did nothing. ` +
+          'The lease holds: try again later.',
+        { retry_after_ms: remaining, human_waited_ms: waited, human_input: human.get(tabId)?.kind, performed: false },
+      );
+    }
+    await new Promise((resolve) => setTimeout(resolve, remaining));
+    waited += remaining;
+    await requireLease(tabId, lease); // released, closed or replaced meanwhile
+  }
+}
+
+// Run a page action in the human's pauses. A page that saw the human before ca did
+// anything refuses with performed: false, and the action waits for the next pause and
+// runs again. A gesture the human cut short (gesture: cancelled) is reported instead.
+async function inHumanPause(tabId, request, run) {
+  const budget = humanBudget(request);
+  let waited = 0;
+  for (;;) {
+    waited = await humanTurn(tabId, request.lease, budget, waited);
+    try {
+      const result = await run();
+      return waited ? { ...result, human_waited_ms: waited } : result;
+    } catch (error) {
+      if (!(error instanceof Refusal) || error.code !== 'human_active') throw error;
+      const retry = Math.max(250, Number(error.extra.retry_after_ms) || HUMAN_IDLE_MS);
+      noteHuman(tabId, null, Date.now() - HUMAN_IDLE_MS + retry);
+      error.extra = { ...error.extra, human_waited_ms: waited };
+      if (error.extra.gesture) throw error;
+    }
+  }
+}
+
+// Input in a frame below the top one: the top frame, where actions and the pen run,
+// learns of it here.
+function humanInFrame(tabId) {
+  chrome.scripting
+    .executeScript({
+      target: { tabId, frameIds: [0] },
+      world: 'ISOLATED',
+      func: () => {
+        globalThis.__caHumanAt = performance.now();
+        globalThis.__caPen?.pause?.();
+      },
+    })
+    .catch(() => {});
 }
 
 // The pen stays on a claimed page for the whole claim, from the claim itself and again
@@ -351,9 +444,16 @@ chrome.runtime.onMessage.addListener((message, sender) => {
     });
   }
   if (message?.type === 'ca-human-input' && sender.id === chrome.runtime.id && sender.tab) {
-    if (opening.has(sender.tab.id)) inputWhileOpening.add(sender.tab.id);
+    // The human's input pauses the agent in this tab; it never ends the claim.
+    const tabId = sender.tab.id;
+    if (opening.has(tabId)) {
+      inputWhileOpening.add(tabId);
+      noteHuman(tabId, message.kind);
+    }
     state().then((current) => {
-      if (current.claims[sender.tab.id]) endClaim(sender.tab.id, 'human_input');
+      if (!current.claims[tabId]) return;
+      noteHuman(tabId, message.kind);
+      if (sender.frameId !== 0) humanInFrame(tabId);
     });
   }
 });
@@ -363,6 +463,11 @@ chrome.tabs.onUpdated.addListener((tabId, change) => {
   // watch.js reports each new document once parsed; 'complete' covers any it missed.
   if (!change.url && change.status !== 'complete') return;
   state().then((current) => {
+    const opened = current.agentTabs[tabId];
+    if (opened && change.url && opened.url !== change.url) {
+      opened.url = change.url;
+      persist();
+    }
     const claim = current.claims[tabId];
     if (!claim) return;
     if (change.url && claim.url !== change.url) {
@@ -381,13 +486,26 @@ chrome.windows.onRemoved.addListener((windowId) => {
 
 chrome.tabs.onRemoved.addListener((tabId, { isWindowClosing }) => {
   // Chrome does not say who closed a tab; whether its whole window closed narrows it down.
+  human.delete(tabId);
   state().then((current) => {
+    if (current.agentTabs[tabId]) {
+      delete current.agentTabs[tabId];
+      persist();
+    }
     if (current.claims[tabId]) endClaim(tabId, 'target_closed', { window_closing: isWindowClosing });
   });
 });
 
 chrome.tabs.onReplaced.addListener((added, removed) => {
-  state().then((current) => {
+  state().then(async (current) => {
+    // The user sees the same tab, so a tab ca opened stays one it opened.
+    const opened = current.agentTabs[removed];
+    if (opened) {
+      delete current.agentTabs[removed];
+      const tab = await chrome.tabs.get(added).catch(() => null);
+      if (tab) current.agentTabs[added] = { ...opened, url: tab.url || tab.pendingUrl || opened.url };
+      await persist();
+    }
     if (current.claims[removed]) endClaim(removed, 'target_replaced');
   });
 });
@@ -470,6 +588,7 @@ async function describeTab(tab) {
     status: tab.status,
     group: tab.groupId >= 0 ? tab.groupId : null,
     claim: claim ? { owner: claim.owner, since: claim.since, opened: claim.opened } : null,
+    opened_by: current.agentTabs[tab.id]?.owner ?? null,
     scriptable: !restricted,
     ...(restricted ? { restriction: restricted } : {}),
     ...(revoked && !claim ? { last_stop_reason: revoked.reason } : {}),
@@ -809,11 +928,13 @@ async function claimTab(tab, owner, opened) {
   }; // prettier-ignore
   current.claims[tab.id] = claim;
   delete current.revoked[tab.id];
+  if (opened) current.agentTabs[tab.id] = { owner, at: claim.since, url: claim.url };
   await persist();
   try {
     await watchTab(tab.id);
   } catch (error) {
     delete current.claims[tab.id];
+    if (opened) delete current.agentTabs[tab.id];
     await persist();
     throw new Refusal(
       'page_unavailable',
@@ -911,14 +1032,11 @@ async function handle(request) {
         opening.delete(tab.id);
       }
       activatedWhileOpening.delete(tab.id);
-      if (inputWhileOpening.delete(tab.id)) {
-        await endClaim(tab.id, 'human_input');
-        throw new Refusal('ownership_revoked', 'Your input took the tab while it opened', {
-          stop_reason: 'human_input', tab: tab.id,
-        });
-      }
+      // Input while it opened pauses the agent like any other: the claim holds, and the
+      // first action waits for the human to stop.
+      inputWhileOpening.delete(tab.id);
       await groupOpenedTab(tab);
-      return { lease: claim.lease, loaded, ...(await describeTab(now)) };
+      return { lease: claim.lease, loaded, ...(await describeTab(now)), ...(quietIn(tab.id) ? { human_active: true } : {}) };
     }
     case 'claim': {
       const tab = await getTab(tabId);
@@ -941,6 +1059,8 @@ async function handle(request) {
         claimed: Boolean(claim),
         owner: claim?.owner ?? null,
         holds_lease: Boolean(claim && request.lease && claim.lease === request.lease),
+        ...(claim ? humanStatus(tabId) : {}),
+        opened_by: current.agentTabs[tabId]?.owner ?? null,
         debugger_attached: sessions.has(tabId),
         stop_reason: !claim && revoked ? revoked.reason : null,
         ...(!claim && revoked
@@ -954,13 +1074,15 @@ async function handle(request) {
       };
     }
     case 'close': {
-      const claim = await requireLease(tabId, request.lease);
-      if (!claim.opened) {
+      await requireLease(tabId, request.lease);
+      if (!(await state()).agentTabs[tabId]) {
         throw new Refusal('not_agent_tab', 'ca closes only tabs it opened; release this one instead');
       }
+      // Never close a tab under the user's hands.
+      const waited = await humanTurn(tabId, request.lease, humanBudget(request));
       await endClaim(tabId, 'released');
       await chrome.tabs.remove(tabId);
-      return { closed: true, tab: tabId };
+      return { closed: true, tab: tabId, ...(waited ? { human_waited_ms: waited } : {}) };
     }
     case 'navigate': {
       await requireLease(tabId, request.lease);
@@ -969,10 +1091,11 @@ async function handle(request) {
         ? () => chrome.tabs.reload(tabId)
         : () => chrome.tabs.update(tabId, { url: checkUrl(request.url) });
       if (!request.reload) checkUrl(request.url);
+      const waited = await humanTurn(tabId, request.lease, humanBudget(request));
       const loaded = await waitForLoad(tab.id, timeoutMs(request, 30), start);
       await requireLease(tabId, request.lease);
       await noteAction(tabId, request.lease, request.reload ? 'reload' : 'navigate');
-      return { loaded, ...(await describeTab(await getTab(tabId))) };
+      return { loaded, ...(await describeTab(await getTab(tabId))), ...(waited ? { human_waited_ms: waited } : {}) };
     }
     case 'read':
     case 'locate': {
@@ -1005,7 +1128,9 @@ async function handle(request) {
       if (request.op === 'type' && String(request.input ?? '').length > MAX_TEXT) {
         throw new Refusal('payload_too_large', `Type at most ${MAX_TEXT} characters at once`);
       }
-      const result = await inPage(tabId, request, claim);
+      const result = await inHumanPause(tabId, request, () =>
+        inPage(tabId, { ...request, human_idle_ms: HUMAN_IDLE_MS }, claim),
+      );
       await noteAction(tabId, request.lease, request.op);
       return result;
     }
@@ -1398,14 +1523,19 @@ async function pageAction(request) {
   };
   // Glide the pen to the target before acting, like the native pen. Human input
   // or a claim that ends while it moves refuses the action instead of performing it.
+  // Human input pauses the agent and keeps the lease: the worker waits for a pause
+  // and runs the action again (performed: false).
   const started = performance.now();
   const pen = request.pen ? globalThis.__caPen : null;
+  const idle = Number(request.human_idle_ms) || 0;
+  const humanAt = () => globalThis.__caHumanAt ?? -Infinity;
+  const humanActive = () =>
+    fail('human_active', 'The user is using this tab; ca waits for a pause', {
+      retry_after_ms: Math.max(0, Math.round(idle - (performance.now() - humanAt()))),
+      performed: false,
+    });
   const interrupted = () => {
-    if ((globalThis.__caHumanAt ?? -Infinity) > started) {
-      return fail('ownership_revoked', 'Your input took the tab back before ca acted', {
-        stop_reason: 'human_input',
-      });
-    }
+    if (humanAt() > started) return humanActive();
     const ended = globalThis.__caClaimEnded;
     if (ended && ended.at > started) {
       if (ended.reason === 'released') return fail('not_claimed', 'The claim was released before ca acted');
@@ -1785,7 +1915,9 @@ async function pageAction(request) {
       const stop = interrupted();
       if (stop) {
         cancel(last);
+        // The press already happened, so this is reported, not run again.
         stop.extra = { ...stop.extra, gesture: 'cancelled', moved: i - 1 };
+        delete stop.extra.performed;
         return stop;
       }
       last = hitTest(path[i].x, path[i].y) || { ...last, x: path[i].x, y: path[i].y };
@@ -1802,6 +1934,8 @@ async function pageAction(request) {
   };
 
   try {
+    // The worker waited for the human to pause; input since then waits again.
+    if (idle && performance.now() - humanAt() < idle) return humanActive();
     // Coordinates taken from a screenshot hold only for the viewport it showed, for
     // example until Chrome's debugging bar shrinks the window.
     const want = request.viewport;

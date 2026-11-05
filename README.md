@@ -18,8 +18,9 @@ act, check what happened, remember what worked, and hand the app back.
 
 - **Real apps, no API needed.** Desktop apps, games, canvas editors and web apps
   are used the way people use them: windows, menus, fields, drags.
-- **Never in your way.** On your desktop the agent drives its own pointer and keys;
-  in Chrome it works in its own tab. Your click or key takes the app back.
+- **Never in your way.** On your desktop the agent drives its own pointer and keys,
+  and your click or key takes the app back. In Chrome it works in its own tab and
+  pauses while you use that tab.
 - **Many at once.** One private desktop or one tab per agent, each tagged with its
   name, so several agents test different features of the same app in parallel.
 - **Checked, not assumed.** Programs verify their own outcome, and agents read the
@@ -198,8 +199,8 @@ eligible runs rotate by default, so save final documents elsewhere.
 ## Input boundaries
 
 On KDE, keep your pointer and keyboard focus outside the agent's target connection;
-returning revokes its control. In Chrome, your input in a claimed tab ends the
-agent's lease. The agent lane never falls back to moving your pointer or stealing
+returning revokes its control. In Chrome, your input in a claimed tab pauses the
+agent there until you stop for a moment; its lease holds. The agent lane never falls back to moving your pointer or stealing
 focus. `--host` explicitly selects real desktop input, and macOS `--host-drags`
 borrows your mouse for each drag; both need specific authorization and neither is
 an automatic recovery path.

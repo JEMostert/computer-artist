@@ -57,8 +57,9 @@ registration keeps matching across reinstalls.
 instances without changing anything. Install stamps a **build** (a digest of the
 extension files) into the installed copy; `instances` and `doctor` report the
 build each browser runs and warn `extension_reload_needed` when it differs from
-the installed one. Every change to the extension raises its version (0.9.0 adds the
-viewport guard); the build identifies the exact files. A red **!** badge on the toolbar icon means
+the installed one. Every change to the extension raises its version (0.10.0 pauses for your
+input instead of ending the claim, and remembers the tabs ca opened); the build
+identifies the exact files. A red **!** badge on the toolbar icon means
 the extension cannot reach the native host; its tooltip gives Chrome's reason.
 
 ### Uninstall
@@ -125,7 +126,7 @@ selected state and disabled state. Use `ca browser select --tab H --lease L
 --selector '#colour' blue` to choose one exact value in a native single select.
 This explicit DOM control sets the selection without opening a native popup and
 emits bubbling `input` then `change`, only if the selection changes. It uses the
-same lease, pen and human-interruption guard as other actions. Missing/ambiguous
+same lease, pen and pause for your input as other actions. Missing/ambiguous
 values, disabled options/optgroups/controls and multiple selects are refused.
 Events remain untrusted; trusted-gesture requirements are unchanged.
 
@@ -177,8 +178,9 @@ flags to pass. Frames from another origin are refused as `cross_origin_frame`.
 Elements named only by a tooltip (`title`) or `aria-label`, like icon toolbar
 buttons, match `--text`.
 
-When the user takes over in the middle of a drag, ca sends `pointercancel`, releases
-nothing else and refuses with `ownership_revoked` and `gesture: cancelled`.
+When you use the tab in the middle of a drag, ca sends `pointercancel`, releases
+nothing else and refuses with `human_active`, `gesture: cancelled` and the number of
+steps `moved` (see [when you use a claimed tab](#when-you-use-a-claimed-tab)).
 
 Pointer coordinates, gestures and frames need extension 0.6.0. With an older
 extension running, the CLI refuses them as `extension_outdated` instead of letting
@@ -215,7 +217,6 @@ It detaches when the session ends:
 | --- | --- |
 | The agent ends it | `close` or `release` |
 | The agent forgot it | `ca browser cleanup --owner NAME` |
-| The user takes the tab | click, key, scroll or touch in the page (`human_input`) |
 | The tab goes away | closed or replaced |
 | The agent stopped or crashed | 5 minutes without any request using the lease; the claim and its pen stay, and the next background capture attaches again |
 | The extension reloads or Chrome exits | Chrome detaches everything; on startup, sessions of surviving claims are kept and any other leftover is detached |
@@ -259,7 +260,9 @@ as displayed. Closing the window's last tab closes it.
 window, restoring it if minimized. It is the only command that switches tabs or
 focuses a window, and it takes keyboard focus from whatever the user was doing.
 Use it only for visible testing or when the user's attention is wanted, never for
-background work. Activation keeps every lease, like the user switching tabs.
+background or parallel work: agents focus once, at handoff, only the one tab you
+need to look at, or during the work when you asked to watch. Activation keeps every
+lease, like the user switching tabs.
 
 ### Tab claims
 
@@ -274,16 +277,12 @@ badge on the extension icon. Tabs that ca opened also sit in a green **CA** tab 
 
 | Lease ends | `stop_reason` |
 | --- | --- |
-| You click, press a key, scroll or touch inside the tab | `human_input` |
 | The tab closes or Chrome replaces it | `target_closed`, `target_replaced` |
 | `ca browser release` | none: the agent hands the tab to you |
+| `ca browser close` | none: ca closes a tab it opened |
 
-Tab activation and browser window focus are observation: they preserve the watched
-claim and all other tabs. Trusted page input revokes only the tab receiving it.
-Hover and page focus events do not count as takeover.
-
-Input while the agent's pen is still moving to its target also counts: the action
-is refused with `ownership_revoked` (`human_input`) instead of performed.
+Your input in the tab does not end the lease; it pauses the agent (see below).
+Extension 0.9.0 and earlier ended the lease instead, with `stop_reason: human_input`.
 
 A revoked lease is refused with `ownership_revoked` and its stop reason. A
 different lease is refused with `lease_mismatch`, and a second claim with
@@ -293,10 +292,16 @@ applies, and for an ended claim `stopped_at`, `stop_owner` and, for a closed tab
 claimed tab without ending its claim first, so `target_closed` means the tab was
 closed outside ca, for example by you.
 
-ca only closes tabs it opened, and only while it holds their claim. Releasing a
-tab ca opened hands it over: the session ends, the pen lifts, the tab leaves the
-CA group and stays open as yours, and ca can no longer close it. Agents release
-results you want to keep and close tabs that were only their workspace. Claims live in the extension's local
+ca only closes tabs it opened, and only while it holds a claim on them. The
+extension remembers which tabs ca opened, and for which owner, for as long as each
+tab exists: across release and later claims, extension reloads and Chrome replacing
+the tab (`opened_by` in `tabs` and `status`). A tab you opened is only ever
+released; `close` refuses it as `not_agent_tab`. Releasing a tab ca opened hands it
+over: the session ends, the pen lifts, the tab leaves the CA group and stays open as
+yours. An agent that claims it again later, with your agreement, may close it.
+Agents release only what they hand over for good, keep the lease on a result you
+want to look at until you are done with it, and close tabs that were only their
+workspace. Claims live in the extension's local
 storage: they survive the native host restarting and the extension reloading or
 updating (the human-input watcher is renewed in claimed tabs), and end when the
 browser exits. A claim is restored only for a tab that still shows the URL it was
@@ -305,7 +310,9 @@ claimed at.
 The CLI records each lease it receives in an owner-only folder
 (`~/.local/share/computer-artist/leases`). An agent that lost track of its tabs runs
 `ca browser cleanup --owner NAME`: tabs that owner opened are closed and tabs it
-claimed are released, through their own leases. Claims that already ended are
+claimed are released, through their own leases. With extension 0.10.0 a tab the owner
+opened, released and claimed again counts as opened. There is no command that
+closes tabs without a lease: a released tab is yours. Claims that already ended are
 reported as `ended` with whether the tab is still open. Other owners' tabs are never
 touched. If the native host restarts during a command, the CLI waits for it to
 reconnect and resends the request when that is safe: always when it was never
@@ -319,6 +326,36 @@ address bar, so typing a URL into a claimed tab's
 address bar is not detected. Tab activation alone is allowed; browser-toolbar
 input is outside this page-input guard.
 
+#### When you use a claimed tab
+
+A trusted click, key, wheel or touch in a claimed tab, in any of its frames, pauses
+the agent in that tab. The lease holds, and the agent goes on once you stop:
+
+- The pen fades and its tag reads **OWNER · paused** until you stop.
+- Every action that changes the page (`click`, `move`, `drag`, `scroll`, `type`,
+  `press`, `select`, `navigate` and `close`) first waits until the tab has had 3
+  seconds without your input. A reply that waited reports `human_waited_ms`.
+- One request waits at most 15 seconds, or half its `--timeout`. If you are still
+  busy then, it is refused with `human_active`, `performed: false` and
+  `retry_after_ms`, having done nothing, and the agent tries again later.
+- Input while the pen glides to its target holds the action back before any event
+  reaches the page; ca waits for your next pause and performs it then.
+- A drag you interrupt is cancelled with `pointercancel` and refused with
+  `human_active`, `gesture: cancelled` and `moved`, because its press already
+  happened. The agent decides whether to draw the stroke again.
+- Reads (`read`, `locate`, `wait`, `screenshot`, `status`), `release` and `focus`
+  never wait.
+- `ca browser status` reports `human_active`, `human_input_at` and `human_input`
+  (the event type) for a claimed tab, and `open` adds `human_active: true` when you
+  used the tab while it opened.
+
+![The paused pen: faded, with a grey "painter · paused" tag](evidence/chrome-extension/pen-paused.png)
+
+Switching to a claimed tab or focusing its window is not input: you can watch an
+agent work without pausing it. Hover and page focus events do not count either,
+and input in one tab never pauses another. To end an agent's claim yourself, close
+the tab or ask the agent to release it.
+
 ### What you see
 
 A tab an agent claims shows its pen from the moment of the claim until the claim
@@ -330,7 +367,8 @@ name beside it, so you can tell browser control from computer use at a glance. T
 blue pen is computer use. The green pen and its name tag mean Chrome DOM control.
 The pen glides to each target before ca clicks, types or presses a key, splashes
 on clicks, writes along fields and drips at rest; before the first action it rests
-near the top right corner. When the claim ends, it shows **Back to you** and lifts
+near the top right corner. While you use the tab it fades and its tag reads
+**OWNER · paused**; it comes back when you stop. When the claim ends, it shows **Back to you** and lifts
 away; in a tab you are not looking at it is removed at once. In a background tab ca
 acts without the glide. If
 you switch to that tab, its agent keeps working and you can watch the pen. The pen is drawn above the page's dialogs, ignores the pointer and holds no
@@ -344,7 +382,7 @@ turned on, it moves without animation.
 Click the toolbar icon for the status card. It shows whether the extension
 reaches ca, with Chrome's reason and the fix when it does not. It also shows
 who controls the tab you are looking at, every tab an agent holds now with its
-latest action, and why recent claims ended, for example **Your input in "Example Domain"**. The card only reads state the extension already keeps; it
+latest action, and why recent claims ended, for example **"Example Domain" closed**. The card only reads state the extension already keeps; it
 never acts on tabs. Copy the instance ID from its footer for `--instance`.
 
 ![The status card in light and dark mode](evidence/chrome-extension/status-card.png)
@@ -413,7 +451,7 @@ open to the network.
 
 | Platform | Status |
 | --- | --- |
-| Linux (Fedora 43, GNOME Wayland) | Verified on 3 November 2026 with Chrome for Testing 153, headless and headed in a private KWin desktop. See the [validation record](validation/2026-11-03-chrome-extension.md). |
+| Linux (Fedora 43, GNOME Wayland) | Verified on 3 November 2026 with Chrome for Testing 153, headless and headed in a private KWin desktop. See the [validation record](validation/2026-11-03-chrome-extension.md). The pause for your input and closing reclaimed agent tabs (0.10.0) were verified the same way on 6 November 2026; see the [human pause record](validation/2026-11-06-chrome-human-pause.md). |
 | macOS | Unix socket, `~/Library/Application Support/<browser>/NativeMessagingHosts`. Debugger sessions and the session pen were verified on 5 November 2026 in the user's Chrome 156; see the [debugger session record](validation/2026-11-05-chrome-debugger-session.md). The pen, status card and takeover were verified on 3 November 2026 with headless Chrome for Testing 153 on macOS 27; see the [pen and status card record](validation/2026-11-03-chrome-pen-status.md). |
 | Windows | Implemented (loopback TCP plus key, `HKCU\Software\<vendor>\NativeMessagingHosts`) for Chrome, Chromium, Edge and Brave; covered by portable tests, not exercised with a real browser |
 

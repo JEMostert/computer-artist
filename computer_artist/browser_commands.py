@@ -173,7 +173,7 @@ def add_command(commands):
     target('release', 'Release a claimed tab', lease=True)
     status = target('status', 'Report a tab claim and why a lease ended')
     status.add_argument('--lease')
-    target('close', 'Close a tab that ca opened', lease=True)
+    target('close', 'Close a tab that ca opened, under any claim of it', lease=True)
     target(
         'focus',
         'Bring a claimed tab and its window to the front. Only for visible testing or when '
@@ -444,12 +444,17 @@ def cleanup(args):
                             'result': status.get('error', 'failed')})  # fmt: skip
             continue
         if not status.get('holds_lease'):
-            # The claim ended elsewhere (human input, closed tab, an older extension's reload).
+            # The claim ended elsewhere (closed tab, an older extension's takeover or reload).
             path.unlink(missing_ok=True)
             results.append({'handle': f'{record["instance"]}:{record["tab"]}', 'result': 'ended',
                             'tab_open': status.get('exists'), 'stop_reason': status.get('stop_reason')})  # fmt: skip
             continue
-        op = 'close' if record.get('opened') else 'release'
+        # Extension 0.10.0 remembers which owner opened a tab, across release and claim.
+        if 'opened_by' in status:
+            opened = status['opened_by'] == record.get('owner')
+        else:
+            opened = record.get('opened')
+        op = 'close' if opened else 'release'
         reply = bridge.call(instance, {'op': op, **base}, args.timeout)
         if reply.get('ok'):
             path.unlink(missing_ok=True)

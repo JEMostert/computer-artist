@@ -159,10 +159,13 @@ def default_chrome():
     return found[-1] if found else shutil.which('chromium') or shutil.which('chromium-browser')
 
 
-def launch(chrome, profile, extension, env):
+def launch(chrome, profile, extension, env, headed=False):
+    # Headed runs show windows on the display in env: point WAYLAND_DISPLAY at a private
+    # desktop (ca env start) and unset DISPLAY, never at the user's own session.
+    shown = ['--ozone-platform=wayland'] if env.get('WAYLAND_DISPLAY') else []
     command = [
         chrome,
-        '--headless=new',
+        *(shown if headed else ['--headless=new']),
         f'--user-data-dir={profile}',
         # Never ask the desktop keyring (a GNOME unlock prompt would take focus).
         '--password-store=basic',
@@ -378,10 +381,52 @@ def check_pointer(env, url, work, port):
     slow.join(30)
     taken = pending.get('reply', {})
     after = pad('#strokes').get('text', '')
-    step('human_takeover_cancels_drag', taken.get('error') == 'ownership_revoked'
+    held = ca('status', '--tab', tab, '--lease', lease, env=env)
+    step('human_input_cancels_drag_and_keeps_lease', taken.get('error') == 'human_active'
          and taken.get('gesture') == 'cancelled' and after == before
-         and 'cancel' in pad('#log').get('text', ''), reply={k: taken.get(k) for k in
-         ('error', 'gesture', 'moved', 'stop_reason')})  # fmt: skip
+         and 'cancel' in pad('#log').get('text', '') and held.get('holds_lease')
+         and held.get('human_active') and held.get('human_input') == 'pointerdown',
+         reply={k: taken.get(k) for k in ('error', 'gesture', 'moved', 'retry_after_ms')},
+         status={k: held.get(k) for k in ('holds_lease', 'human_active', 'human_input')})  # fmt: skip
+    # Meanwhile the pen shows the pause: its tag turns grey instead of green.
+    shot = ca('screenshot', '--tab', tab, str(work / 'paused.png'), env=env)
+    grey = pen_pixels(work / 'paused.png', (91, 107, 103)) if shot.get('ok') else 0
+    green = pen_pixels(work / 'paused.png') if shot.get('ok') else None
+    step('pen_shows_pause', shot.get('pen') == 'included' and grey > 100 and green < grey,
+         grey_pixels=grey, green_pixels=green)  # fmt: skip
+    # The next action waits for the human's pause, then runs on the same lease.
+    resumed = act('click', '--frame', '#pad', '--text', 'Dot tool')
+    step('action_waits_for_human_pause', resumed.get('ok')
+         and resumed.get('human_waited_ms', 0) > 0 and resumed['_seconds'] < 10,
+         waited_ms=resumed.get('human_waited_ms'), seconds=resumed['_seconds'],
+         error=resumed.get('error'))  # fmt: skip
+    shot = ca('screenshot', '--tab', tab, str(work / 'resumed.png'), env=env)
+    back = pen_pixels(work / 'resumed.png') if shot.get('ok') else 0
+    step('pen_resumes_after_pause', back > 300, green_pixels=back)
+    # A human who keeps working outlasts a short request: refused, nothing done, lease kept.
+    busy = {'on': True}
+
+    def keep_typing():
+        typist = DevTools(target['webSocketDebuggerUrl'])
+        while busy['on']:
+            typist.call('Input.dispatchMouseEvent', type='mouseWheel', x=5, y=5, deltaX=0, deltaY=1)
+            time.sleep(0.3)
+        typist.close()
+
+    typing = threading.Thread(target=keep_typing)
+    typing.start()
+    time.sleep(0.5)
+    waited = ca('click', '--tab', tab, '--lease', lease, '--frame', '#pad', '--text', 'Line tool',
+                '--timeout', '6', env=env)  # fmt: skip
+    busy['on'] = False
+    typing.join(10)
+    tool = pad('#tool').get('text')
+    step('busy_human_refuses_with_lease_kept', waited.get('error') == 'human_active'
+         and waited.get('performed') is False and waited.get('retry_after_ms', 0) > 0
+         and waited.get('human_waited_ms', 0) >= 2000 and tool == 'dot'
+         and ca('status', '--tab', tab, '--lease', lease, env=env).get('holds_lease'),
+         reply={k: waited.get(k) for k in ('error', 'performed', 'retry_after_ms',
+                                           'human_waited_ms', 'human_input')}, tool=tool)  # fmt: skip
 
     # Browser pages are listed as unscriptable and refused with the reason.
     request = Request(f'http://127.0.0.1:{port}/json/new?chrome://version', method='PUT')
@@ -540,12 +585,25 @@ def check_background_work(env, url, work, port, ids):
     kept = next((t for t in ca('tabs', '--instance', 'alpha', env=env)['tabs']
                  if t['handle'] == given['handle']), {})  # fmt: skip
     status = ca('status', '--tab', given['handle'], env=env)
-    again = ca('claim', '--tab', given['handle'], '--owner', 'giver', env=env)
-    refused = ca('close', '--tab', given['handle'], '--lease', again.get('lease', ''), env=env)
-    ca('release', '--tab', given['handle'], '--lease', again.get('lease', ''), env=env)
     step('release_hands_tab_over', kept and kept.get('claim') is None and kept.get('group') is None
-         and not status.get('debugger_attached') and refused.get('error') == 'not_agent_tab',
-         group=kept.get('group'), close=refused.get('error'))  # fmt: skip
+         and kept.get('opened_by') == 'giver' and not status.get('debugger_attached'),
+         group=kept.get('group'), opened_by=kept.get('opened_by'))  # fmt: skip
+    # ca remembers that it opened the tab: a later claim of it may close it.
+    again = ca('claim', '--tab', given['handle'], '--owner', 'giver', env=env)
+    closed = ca('close', '--tab', given['handle'], '--lease', again.get('lease', ''), env=env)
+    gone = ca('status', '--tab', given['handle'], env=env)
+    step('reclaimed_agent_tab_closes', again.get('ok') and closed.get('closed') is True
+         and not gone.get('exists'), close=closed.get('error'))  # fmt: skip
+    # So does cleanup, for a tab its owner opened, released and claimed again.
+    lent = ca('open', url + 'other', '--instance', 'alpha', '--owner', 'lender', env=env,
+              expect_ok=True)  # fmt: skip
+    ca('release', '--tab', lent['handle'], '--lease', lent['lease'], env=env, expect_ok=True)
+    ca('claim', '--tab', lent['handle'], '--owner', 'lender', env=env, expect_ok=True)
+    swept = ca('cleanup', '--owner', 'lender', env=env)
+    step('cleanup_closes_reclaimed_agent_tab', swept.get('ok')
+         and [t.get('result') for t in swept.get('tabs', [])] == ['close']
+         and not ca('status', '--tab', lent['handle'], env=env).get('exists'),
+         tabs=swept.get('tabs'))  # fmt: skip
 
     # Simultaneous first opens in another browser share one new agent window.
     pair = {}
@@ -594,16 +652,16 @@ def check_background_work(env, url, work, port, ids):
          and acted.get('ok') and same.get('reloaded') is False
          and after_redirect.get('holds_lease'), build=build, redirect=after_redirect.get('url'),
          kept=kept.get('holds_lease'), acted=acted.get('error'), noop=same)  # fmt: skip
-    # A trusted click in the agent's tab after the reload still ends that claim.
+    # A trusted click in the agent's tab after the reload still pauses that claim.
     target = page_target(port, lambda t: t['url'].startswith(url + 'draw'))
     human = DevTools(target['webSocketDebuggerUrl'])
     for kind in ('mousePressed', 'mouseReleased'):
         human.call('Input.dispatchMouseEvent', type=kind, x=5, y=5, button='left', clickCount=1)
     human.close()
     time.sleep(0.6)
-    revoked = ca('status', '--tab', tab, '--lease', lease, env=env)
-    step('human_watch_live_after_reload', revoked.get('stop_reason') == 'human_input',
-         status=revoked.get('stop_reason'))  # fmt: skip
+    paused = ca('status', '--tab', tab, '--lease', lease, env=env)
+    step('human_watch_live_after_reload', paused.get('holds_lease') and paused.get('human_active'),
+         status={k: paused.get(k) for k in ('holds_lease', 'human_active', 'stop_reason')})  # fmt: skip
     for handle, held in ((windowed.get('handle'), windowed.get('lease')),
                          (second.get('handle'), second.get('lease'))):  # fmt: skip
         if handle:
@@ -627,6 +685,8 @@ def main():
         '--idle', type=float, default=40, help='Idle seconds for the keepalive check'
     )
     parser.add_argument('--evidence', type=Path, help='Write the JSON results here')
+    parser.add_argument('--headed', action='store_true',
+                        help="Show windows on env's display, such as a private KWin desktop")  # fmt: skip
     parser.add_argument('--keep', action='store_true', help='Keep temporary folders')
     args = parser.parse_args()
     if not args.chrome or not Path(args.chrome).is_file():
@@ -658,7 +718,7 @@ def main():
         ids = {}
         for count, (name, profile) in enumerate(profiles.items(), 1):
             # Start them one at a time so each new instance gets its profile's label.
-            browsers[name] = launch(args.chrome, profile, extension, env)
+            browsers[name] = launch(args.chrome, profile, extension, env, args.headed)
             load_unpacked(profile, extension)
             found = wait_instances(env, count)
             ids[name] = next(i['instance'] for i in found if i['instance'] not in ids.values())
@@ -817,7 +877,7 @@ def main():
         shot = ca('screenshot', '--tab', existing['handle'], str(work / 'visible.png'), env=env)
         step('existing_tab_claim_and_screenshot', shot.get('ok') and shot['width'] > 0,
              size=[shot.get('width'), shot.get('height')], url=claimed['url'])  # fmt: skip
-        # The human clicks inside the page's iframe: the lease ends at once.
+        # The human clicks inside the page's iframe: the agent pauses, the lease holds.
         frame = tools.call('Runtime.evaluate', returnByValue=True, expression=(
             'JSON.stringify(document.getElementById("frame").getBoundingClientRect())'
         ))['result']['value']  # fmt: skip
@@ -827,20 +887,27 @@ def main():
             tools.call('Input.dispatchMouseEvent', type=kind, x=x, y=y, button='left', clickCount=1)
         time.sleep(0.5)
         status = ca('status', '--tab', existing['handle'], '--lease', claimed['lease'], env=env)
-        refused = ca('click', '--tab', existing['handle'], '--lease', claimed['lease'], '--text',
+        hovered = ca('move', '--tab', existing['handle'], '--lease', claimed['lease'], '--text',
                      'Add note', env=env)  # fmt: skip
-        step('human_input_in_iframe_revokes', status.get('stop_reason') == 'human_input'
-             and refused.get('error') == 'ownership_revoked', status=status.get('stop_reason'))  # fmt: skip
-        # Claimed again, then the human types in the top document.
-        claimed = ca('claim', '--tab', existing['handle'], env=env, expect_ok=True)
+        step('human_input_in_iframe_pauses', status.get('holds_lease') and status.get('human_active')
+             and hovered.get('ok') and hovered.get('human_waited_ms', 0) > 0,
+             status={k: status.get(k) for k in ('holds_lease', 'human_active', 'human_input')},
+             waited_ms=hovered.get('human_waited_ms'), error=hovered.get('error'))  # fmt: skip
+        # The human types in the top document.
         tools.call('Input.dispatchKeyEvent', type='keyDown', key='a', text='a')
         tools.call('Input.dispatchKeyEvent', type='keyUp', key='a')
         tools.close()
         time.sleep(0.5)
         status = ca('status', '--tab', existing['handle'], '--lease', claimed['lease'], env=env)
-        step('human_key_revokes', status.get('stop_reason') == 'human_input')
+        step('human_key_pauses', status.get('holds_lease') and status.get('human_active')
+             and status.get('human_input') == 'keydown', status=status.get('human_input'))  # fmt: skip
+        # ca never closes a tab the user opened, even while it holds the claim.
+        refused = ca('close', '--tab', existing['handle'], '--lease', claimed['lease'], env=env)
+        released = ca('release', '--tab', existing['handle'], '--lease', claimed['lease'], env=env)
+        step('close_refuses_user_tab', refused.get('error') == 'not_agent_tab' and released.get('ok'),
+             error=refused.get('error'))  # fmt: skip
 
-        # Close a tab ca opened; refuse to close one it merely claimed.
+        # Close a tab ca opened.
         spare = ca('open', url + 'other', '--instance', 'alpha', env=env, expect_ok=True)
         closed = ca('close', '--tab', spare['handle'], '--lease', spare['lease'], env=env)
         step('close_agent_tab', closed.get('closed') is True)
@@ -938,22 +1005,25 @@ def main():
         human.close()
         loading_opener.join(30)
         taken = loading_reply.get('reply', {})
+        kept = ca('status', '--tab', taken.get('handle', ''), '--lease', taken.get('lease', ''),
+                  env=env)  # fmt: skip
         step(
-            'human_input_while_opening_refuses_ownership',
-            taken.get('error') == 'ownership_revoked' and taken.get('stop_reason') == 'human_input',
-            result=taken,
+            'human_input_while_opening_keeps_claim',
+            taken.get('ok') and kept.get('holds_lease'),
+            error=taken.get('error'),
+            human_active=taken.get('human_active'),
         )
         with urlopen(f'http://127.0.0.1:{port}/json/activate/{agent_page["id"]}') as response:
             response.read()
 
-        # Trusted input revokes only the active tab, leaving two sibling leases intact.
+        # Trusted input pauses only the tab it lands in; sibling tabs act without waiting.
         third = ca('open', url + 'other', '--instance', 'alpha', env=env, expect_ok=True)
         human = DevTools(agent_page['webSocketDebuggerUrl'])
         human.call('Input.dispatchKeyEvent', type='keyDown', key='a', text='a')
         human.call('Input.dispatchKeyEvent', type='keyUp', key='a')
         human.close()
         time.sleep(0.5)
-        revoked = ca('status', '--tab', tab, '--lease', lease, env=env)
+        paused = ca('status', '--tab', tab, '--lease', lease, env=env)
         sibling = ca(
             'click',
             '--tab',
@@ -968,11 +1038,14 @@ def main():
             'status', '--tab', reply.get('handle', ''), '--lease', reply.get('lease', ''), env=env
         )
         step(
-            'human_input_only_revokes_relevant_tab',
-            revoked.get('stop_reason') == 'human_input'
+            'human_input_pauses_only_its_tab',
+            paused.get('holds_lease')
+            and paused.get('human_active')
             and sibling.get('ok')
-            and slow_status.get('holds_lease'),
-            revoked=revoked.get('stop_reason'),
+            and 'human_waited_ms' not in sibling
+            and slow_status.get('holds_lease')
+            and not slow_status.get('human_active'),
+            paused={k: paused.get(k) for k in ('holds_lease', 'human_active')},
             sibling=sibling.get('error'),
             slow=slow_status.get('holds_lease'),
         )

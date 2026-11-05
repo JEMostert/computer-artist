@@ -35,7 +35,7 @@ that goal. Separate KWin instances are development test harnesses.
 | Verified outcomes | Invocation-owned checks and stable, optionally fresh file/text/JSON/image/hash checks |
 | Reusable work | Typed fragments, contracts, immutable versions, nested calls and explicit restore |
 | Workflow memory | Local task/app search, semantic notes, durable learned program/evidence summaries, guarded reuse and recent attempt timings; the calling agent teaches and verifies flows |
-| Browser tabs | `ca browser` drives tabs in your running Chrome/Chromium through the Computer Artist extension: DOM read/locate/click/type/select, a full mouse model with element-relative or viewport points guarded against viewport changes, hover, drags, wheel and modifiers through same-origin frames, background-tab screenshots through one debugger session per claim (released on close, cleanup, takeover or 5 idle minutes), an unfocused agent window, watchable leased tab claims that survive extension reloads, owner cleanup, release as a handover that leaves the tab with the user, build-aware reload revoked by page input, a green agent pen shown for the whole claim, work only in an already running browser, a toolbar status card, no OS input, no tab switching except an explicit `focus` command for testing or user attention; see [browser](BROWSER.md) |
+| Browser tabs | `ca browser` drives tabs in your running Chrome/Chromium through the Computer Artist extension: DOM read/locate/click/type/select, a full mouse model with element-relative or viewport points guarded against viewport changes, hover, drags, wheel and modifiers through same-origin frames, background-tab screenshots through one debugger session per claim (released on close, release, cleanup or 5 idle minutes), an unfocused agent window, watchable leased tab claims that survive extension reloads, owner cleanup, release as a handover that leaves the tab with the user, build-aware reload, a pause while the user uses the tab (the lease holds), closing any tab ca opened across claims, a green agent pen shown for the whole claim, work only in an already running browser, a toolbar status card, no OS input, no tab switching except an explicit `focus` command for testing or user attention; see [browser](BROWSER.md) |
 | Diagnosis | Read-only doctor (including stale/mismatched plugin builds), refusal details, JSON inspection, checkpoints and targeted stop |
 
 Workflow memory is agent-assisted: the agent searches local task/app/notes,
@@ -82,7 +82,8 @@ and report native Wayland/XWayland separately.
 
 Browser watch/select regressions on macOS Chrome for Testing 153 passed on
 3 November 2026: activation preserves claims, trusted page input ends only its
-tab, and native single selects emit input/change. This uses disposable headless
+tab (extension 0.9.0; 0.10.0 pauses instead, below), and native single selects emit
+input/change. This uses disposable headless
 profiles and emulated human input; actual-user Chrome concurrency is pending.
 See [watchable tabs and selects](validation/2026-11-03-watchable-tabs-select.md).
 Precise pointer input was verified on 4 November 2026 in the user's Chrome on macOS
@@ -93,3 +94,8 @@ On 5 November 2026, background screenshots in the user's Chrome 156 kept one deb
 session per claim. Chrome's debugging bar appeared once per session and left after
 close, release or cleanup. The pen stayed visible for the whole claim; see [debugger
 sessions](validation/2026-11-05-chrome-debugger-session.md).
+On 6 November 2026, extension 0.10.0 in Chrome for Testing 153, headless and headed in
+a private KWin desktop, paused for emulated human input instead of ending the lease,
+resumed on the same lease, and closed a tab it had opened after release and a new
+claim. `--agent-window` took focus from the user's window in KWin, before and after
+that change; see [human pause](validation/2026-11-06-chrome-human-pause.md).

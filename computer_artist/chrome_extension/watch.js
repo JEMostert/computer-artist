@@ -1,4 +1,4 @@
-// Reports the human's own input so the worker can end a claim on this tab.
+// Reports the human's own input so the worker can pause the agent in this tab.
 // Declared for every frame at document_start, and injected into documents that
 // were already open when a tab is claimed or the extension restarts. Only trusted
 // events count: ca's own DOM events are untrusted. Sends the event type only, at
@@ -19,8 +19,10 @@
   let last = -Infinity;
   const report = (event) => {
     if (!event.isTrusted) return;
-    // pageAction reads this to refuse an action the human interrupted mid-glide.
+    // pageAction reads this to hold back an action the human interrupted mid-glide.
     globalThis.__caHumanAt = performance.now();
+    // In a claimed tab's top frame the pen shows the pause at once.
+    globalThis.__caPen?.pause?.();
     if (event.timeStamp - last < 250) return;
     last = event.timeStamp;
     try {
