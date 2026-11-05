@@ -7,8 +7,8 @@ the result, and remember the workflow. An agent works in its own tab of your
 Chrome, in a private desktop, or in apps on your own desktop next to your pointer.
 
 <p align="center">
-  <a href="docs/assets/kleki-promo.mp4"><img src="docs/assets/gallery/promo-teaser.gif" width="100%" alt="Excerpt of the film: the five time-lapses with live counters of input actions and minutes, then the gallery wall."></a>
-  <br><sub><a href="docs/assets/kleki-promo.mp4">Watch the 56-second film</a> (MP4, 1080p)</sub>
+  <a href="docs/assets/kleki-promo.mp4?raw=true"><img src="docs/assets/gallery/promo-teaser.gif" width="100%" alt="Excerpt of the film: the five time-lapses with live counters of input actions and minutes, then the gallery wall."></a>
+  <br><sub><a href="docs/assets/kleki-promo.mp4?raw=true">Watch the 56-second film</a> (MP4 download, 1080p, 5.7 MB)</sub>
 </p>
 
 ## Five models, one browser
