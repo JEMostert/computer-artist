@@ -54,10 +54,9 @@ user's. Every reply is JSON; refusals are `{"ok": false, "error": CODE, "detail"
 
 ## If something goes wrong
 
-- `target_closed` (in `ownership_revoked`, or in `status` as `stop_reason`): your
-  tab was closed outside ca, for example by the user. Stop. Do not open it again
-  without asking. Report it, with `stopped_at` from `ca browser status --tab H`,
-  and run `ca browser cleanup --owner OWNER`.
+- `stop_reason: target_closed`: your tab was closed outside ca, for example by the
+  user. Stop, and do not open it again without asking. Report it with `stopped_at`
+  from `ca browser status --tab H`, then run `ca browser cleanup --owner OWNER`.
 - `viewport_changed`: see step 4. The reply's `viewport` is the current size.
 - `ownership_revoked` with `stop_reason: human_input`: the user clicked or typed in
   your tab and took it back. Stop working there; claim it again only if they ask.
