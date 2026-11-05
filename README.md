@@ -70,11 +70,6 @@ in supported native Wayland apps, so it can draw in one app while you type in
 another. macOS delivers the agent's pointer through SkyLight and Windows uses UI
 Automation, each with a drawn pen. On KDE you take an app back by moving into it.
 
-<p align="center">
-  <img src="docs/assets/kolourpaint-showcase.svg" width="100%" alt="Two KolourPaint drawings of the same character made by an agent on a KDE desktop: a reconstruction from a reference image and an interpretation with authored contours, layered fills and dragged brushwork.">
-  <br><sub>Drawn in KolourPaint on a KDE desktop through the KWin lane, with an earlier revision.</sub>
-</p>
-
 ### Automate apps that have no API
 
 `ca execute` runs a Python program against a window with a hard deadline, a request
