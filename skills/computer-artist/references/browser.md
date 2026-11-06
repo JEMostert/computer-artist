@@ -41,16 +41,18 @@ user's. Every reply is JSON; refusals are `{"ok": false, "error": CODE, "detail"
      `--viewport WIDTHxHEIGHT` to every `click`, `move`, `drag` or `scroll` with
      coordinates. When a reply's `viewport` or `scale` differs from it, or ca
      refuses with `viewport_changed`, take a new screenshot and measure again.
-5. **Hand over or close.** This ends your session, and the pen disappears.
-   - When the user or coordinator wants to keep the result, or you are not sure,
-     hand it over with `ca browser release --tab H --lease L`. The tab stays open as
-     the user's tab, leaves the CA group, and ca can no longer close it.
-   - Close a tab that was only your workspace with `ca browser close --tab H
-     --lease L`.
-   - Release a tab you claimed from the user.
-
-   Do it as soon as you are done. You are done when the result reads back as
-   expected and every tab you opened or claimed is handed over or closed.
+5. **Finish every tab.** You are done when the result reads back as expected and
+   every tab you opened or claimed is finished one of these ways, as soon as you
+   are done:
+   - **Nobody needs to see it:** close tabs you opened (`ca browser close --tab H
+     --lease L`) and release tabs you claimed (`ca browser release --tab H --lease
+     L`). This ends your session, and the pen disappears.
+   - **The user should see the result:** keep the tab open and keep its lease. Tell
+     the user which tab holds it, focus it if they need to look now (see
+     Details), and close it, or release a tab you claimed, when they say they are
+     done.
+   - **Handing a tab over for good:** release it. It stays open as the user's tab
+     and leaves the CA group.
 
 ## If something goes wrong
 
@@ -58,9 +60,12 @@ user's. Every reply is JSON; refusals are `{"ok": false, "error": CODE, "detail"
   user. Stop, and do not open it again without asking. Report it with `stopped_at`
   from `ca browser status --tab H`, then run `ca browser cleanup --owner OWNER`.
 - `viewport_changed`: see step 4. The reply's `viewport` is the current size.
-- `ownership_revoked` with `stop_reason: human_input`: the user clicked or typed in
-  your tab and took it back. Stop working there; claim it again only if they ask.
-  If the pen was still moving, the action did not happen.
+- `human_active`: the user is using your tab. Your lease holds and nothing
+  happened (`performed: false`) after ca waited `human_waited_ms` for them to pause.
+  Wait at least `retry_after_ms`, then repeat the action. With `gesture:
+  cancelled`, your drag stopped after `moved` steps: check the page before drawing
+  it again.
+- `not_agent_tab`: the user opened that tab, so release it instead of closing it.
 - `ambiguous_target`: choose one of the listed candidates by `ref`; pass `--first`
   only when any match will do.
 - `stale_element`: the page changed or navigated. Run `locate` again.
@@ -88,9 +93,10 @@ user's. Every reply is JSON; refusals are `{"ok": false, "error": CODE, "detail"
 - **Claim a tab the user has open** (`ca browser claim --tab H --owner OWNER`) only
   when they asked you to work in that tab. Release it when done.
 - **Show the user something:** `ca browser focus --tab H --lease L` brings your tab
-  to the front and takes their keyboard focus. Use it only when they asked to watch
-  or you need their attention, never for background work. The user may switch to
-  your tab at any time; that keeps your lease.
+  to the front and takes their keyboard focus. Focus once, at handoff, only the one
+  tab the user needs to look at, or during the work when they asked to watch.
+  Background and parallel work stays unfocused. The user may switch to your tab or
+  use it at any time; that keeps your lease.
 - **The agents' window:** add `--agent-window` to `open` only when the user or
   coordinator asks for agent tabs in a window of their own.
 - **A screenshot of a tab on screen** (the user switched to it) includes your pen

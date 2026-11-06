@@ -3,7 +3,8 @@
 // control in Chrome from computer use at a glance. It glides to each target before ca
 // acts, splashes on clicks, writes along fields and drips at rest. It stays on the page
 // for the whole claim, so a pen means an agent works here and no pen means the tab is
-// the user's again. When the claim ends it lifts away. Injected into the top frame of
+// the user's again. While the user uses the tab it fades and its tag says "paused",
+// until they stop for a moment. When the claim ends it lifts away. Injected into the top frame of
 // claimed tabs only. Purely visual: a closed shadow root that ignores pointer events
 // and holds no page text.
 if (!globalThis.__caPen) {
@@ -26,6 +27,8 @@ if (!globalThis.__caPen) {
     * { pointer-events: none; }
     .layer { position: fixed; inset: 0; overflow: visible; }
     .pen { position: fixed; left: 0; top: 0; will-change: transform; transition: opacity .2s; }
+    .paused .body, .paused .drop { opacity: .4; }
+    .paused .chip { background: #5b6b67; }
     .pen svg { position: absolute; left: 0; top: 0; overflow: visible; }
     .body { transform: rotate(-50deg) scale(1.15); transition: transform .12s ease-out; }
     .pressed .body { transform: rotate(-50deg) scale(1.02); }
@@ -73,6 +76,10 @@ if (!globalThis.__caPen) {
   let lift = null;
 
   let concealed = false;
+  let owner = 'ca';
+  let paused = null; // timer that ends the pause
+  // HUMAN_IDLE_MS in background.js: the agent waits this long after the user's last input.
+  const PAUSE_MS = 3000;
 
   const build = () => {
     // A pen left by an extension instance that has since reloaded cannot be reached any
@@ -190,12 +197,13 @@ if (!globalThis.__caPen) {
   globalThis.__caPen = {
     // Show the pen at rest from the moment a tab is claimed, and again in each new
     // document, at its last point or near the top right corner.
-    hold({ owner } = {}) {
+    hold({ owner: name } = {}) {
       leaving = null;
       lift?.cancel();
       lift = null;
       attach();
-      chip.textContent = owner || 'ca';
+      owner = name || 'ca';
+      chip.textContent = paused ? `${owner} · paused` : owner;
       pen.style.opacity = '1';
       if (!at) {
         const { x, y } = clamp(Math.max(24, innerWidth - 200), 30);
@@ -206,12 +214,13 @@ if (!globalThis.__caPen) {
     },
 
     // Glide to (x, y) and resolve on arrival, so ca acts where the pen lands.
-    to(x, y, { owner } = {}) {
+    to(x, y, { owner: name } = {}) {
       leaving = null;
       lift?.cancel();
       lift = null;
       attach();
-      chip.textContent = owner || 'ca';
+      owner = name || 'ca';
+      chip.textContent = paused ? `${owner} · paused` : owner;
       pen.style.opacity = '1';
       ({ x, y } = clamp(x, y));
       if (!visible() || !motion()) {
@@ -321,6 +330,23 @@ if (!globalThis.__caPen) {
       requestAnimationFrame(step);
     },
 
+    // The user is using the tab: stop gliding, fade and say so, until they pause.
+    pause() {
+      if (!host?.isConnected || leaving) return;
+      if (glide) glide.cancel();
+      clearTimeout(paused);
+      paused = setTimeout(() => {
+        paused = null;
+        pen.classList.remove('paused');
+        if (leaving) return;
+        chip.textContent = owner;
+        if (!glide) rest(true);
+      }, PAUSE_MS);
+      pen.classList.add('paused');
+      chip.textContent = `${owner} · paused`;
+      rest(false);
+    },
+
     // The claim ended: lift the pen off the page and remove it.
     leave(reason) {
       // A pending action reads this so a claim that ended mid-glide does not act,
@@ -328,8 +354,11 @@ if (!globalThis.__caPen) {
       globalThis.__caClaimEnded = { at: performance.now(), reason: reason || 'released' };
       if (!host?.isConnected || leaving) return;
       if (glide) glide.cancel();
+      clearTimeout(paused);
+      paused = null;
+      pen.classList.remove('paused');
       leaving = reason || 'released';
-      if (reason === 'human_input' || reason === 'human_activated_tab') chip.textContent = 'Back to you';
+      chip.textContent = 'Back to you';
       rest(false);
       const done = () => {
         if (leaving !== (reason || 'released')) return;

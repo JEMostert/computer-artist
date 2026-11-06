@@ -105,7 +105,7 @@ async function render() {
     here.append(
       lead,
       el('p', 'meta', `For ${since(mine.since)}, ${activity(mine)}`),
-      el('p', 'hint', 'Click, type or scroll in the page to take it back.'),
+      el('p', 'hint', 'It pauses while you click, type or scroll here, and goes on when you stop.'),
     );
   } else if (stopped && Date.now() - stopped.at < HISTORY_MS) {
     here.append(

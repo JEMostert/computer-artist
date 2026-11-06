@@ -28,8 +28,8 @@
 <text x="70" y="292.0" class="s" font-weight="600" font-size="23" fill="#eef3f2" text-anchor="start">A tab in your Chrome</text>
 <text x="70" y="320.0" class="s" font-weight="400" font-size="18" fill="#10b48a" text-anchor="start">ca browser</text>
 <text x="70" y="358.0" class="s" font-weight="400" font-size="17" fill="#b9c8c6" text-anchor="start">Any OS. DOM events in a tab of its own,</text>
-<text x="70" y="382.0" class="s" font-weight="400" font-size="17" fill="#b9c8c6" text-anchor="start">never your pointer or your tabs. Your</text>
-<text x="70" y="406.0" class="s" font-weight="400" font-size="17" fill="#b9c8c6" text-anchor="start">click in that tab takes it back.</text>
+<text x="70" y="382.0" class="s" font-weight="400" font-size="17" fill="#b9c8c6" text-anchor="start">never your pointer or your tabs. It</text>
+<text x="70" y="406.0" class="s" font-weight="400" font-size="17" fill="#b9c8c6" text-anchor="start">pauses while you use that tab.</text>
 <rect x="424" y="104" width="352" height="330" rx="14" fill="#0f1d22" stroke="#33505a" stroke-width="1.2"/>
 <rect x="442" y="122" width="316" height="128" rx="8" fill="#16282e"/>
 <rect x="464" y="138" width="272" height="96" rx="6" fill="#26414a" stroke="#4b6873" stroke-dasharray="5 5"/>

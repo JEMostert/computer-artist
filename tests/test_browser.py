@@ -367,6 +367,31 @@ class Maintenance(unittest.TestCase):
         if os.name != 'nt':  # Windows has no POSIX modes
             self.assertEqual(oct(browser_commands.lease_dir().stat().st_mode & 0o777), '0o700')
 
+    def test_cleanup_closes_tabs_the_extension_says_the_owner_opened(self):
+        # Extension 0.10.0 remembers who opened a tab, so a tab opened, released and
+        # claimed again is closed, and a user's tab claimed by this owner only released.
+        current = {'instance': 'aaaaaaaa', 'extension_version': '0.10.0', 'address': 'unix:x'}
+        for tab in (5, 6, 7):
+            browser_commands.journal(
+                'aaaaaaaa', tab, f'{tab:024x}', {'claim': {'owner': 'mine'}}, 'claim'
+            )
+        opened_by = {5: 'mine', 6: None, 7: 'someone-else'}
+
+        def replies(request):
+            if request['op'] == 'status':
+                return {
+                    'ok': True,
+                    'exists': True,
+                    'holds_lease': True,
+                    'opened_by': opened_by[request['tab']],
+                }
+            return {'ok': True}
+
+        reply, sent = self.run_cli(['cleanup', '--owner', 'mine'], [current], replies)
+        self.assertTrue(reply['ok'])
+        acted = [(r['op'], r['tab']) for r in sent if r['op'] != 'status']
+        self.assertEqual(acted, [('close', 5), ('release', 6), ('release', 7)])
+
     def test_cleanup_keeps_records_it_could_not_check(self):
         current = {'instance': 'aaaaaaaa', 'extension_version': '0.7.0', 'address': 'unix:x'}
         browser_commands.journal('aaaaaaaa', 4, 'a' * 24, {'claim': {'owner': 'mine'}}, 'open')
