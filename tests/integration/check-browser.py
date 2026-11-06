@@ -543,7 +543,8 @@ def check_background_work(env, url, work, port, ids):
          and windowed.get('window') == second.get('window') != user_tab['window']
          and after['focused_windows'] == before['focused_windows'] and second.get('active')
          and user_tab['tab'] in after['active_tabs'] and shown.get('method') == 'visible_tab',
-         window=windowed.get('window'), focus=after, method=shown.get('method'))  # fmt: skip
+         window=windowed.get('window'), focus=after, method=shown.get('method'),
+         focus_returned=windowed.get('focus_returned'))  # fmt: skip
 
     # Rapid captures of a shown tab are spaced to stay within Chrome's captureVisibleTab
     # quota (about two a second) instead of attaching the debugger. The tab shows the
@@ -666,6 +667,29 @@ def check_background_work(env, url, work, port, ids):
                          (second.get('handle'), second.get('lease'))):  # fmt: skip
         if handle:
             ca('close', '--tab', handle, '--lease', held, env=env)
+
+
+def check_agent_window_beside_other_app(env, url, port):
+    """Headed: with focus in another application (beta), a new agent window leaves it there."""
+    user_page = page_target(port, lambda t: t['type'] == 'page')
+    tools = DevTools(user_page['webSocketDebuggerUrl'])
+    tools.call('Page.bringToFront')
+    tools.close()
+    time.sleep(1)
+    before = {name: windows_snapshot(env, name)['focused_windows'] for name in ('alpha', 'beta')}
+    opened = ca('open', url + 'pad', '--instance', 'alpha', '--owner', 'beside', '--agent-window',
+                env=env)  # fmt: skip
+    after = {name: windows_snapshot(env, name)['focused_windows'] for name in ('alpha', 'beta')}
+    state = next((w['state'] for i in ca('instances', env=env)['instances'] if i['label'] == 'alpha'
+                  for w in i['windows'] if w['window'] == opened.get('window')), None)  # fmt: skip
+    # A compositor that honours Chrome's request never focuses it; KWin does, and the
+    # window is minimized so that focus returns to the other application.
+    step('agent_window_leaves_other_app_focused', opened.get('ok') and not before['alpha']
+         and before['beta'] and after == before
+         and (opened.get('focus_returned'), state) in ((None, 'normal'), ('minimized', 'minimized')),
+         before=before, after=after, focus_returned=opened.get('focus_returned'), state=state)  # fmt: skip
+    if opened.get('ok'):
+        ca('close', '--tab', opened['handle'], '--lease', opened['lease'], env=env)
 
 
 def browser_commands_id():
@@ -1052,6 +1076,8 @@ def main():
 
         check_pointer(env, url, work, port)
         check_background_work(env, url, work, port, ids)
+        if args.headed:
+            check_agent_window_beside_other_app(env, url, devtools_port(profiles['beta']))
 
         if args.idle:
             pid = next(
