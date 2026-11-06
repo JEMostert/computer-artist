@@ -188,6 +188,12 @@ function state() {
   statePromise ??= (async () => {
     const stored = await chrome.storage.local.get(['claims', 'revoked', 'agentTabs']);
     const current = { claims: stored.claims || {}, revoked: stored.revoked || {}, agentTabs: stored.agentTabs || {} };
+    if (!stored.agentTabs) {
+      // 0.9.0 recorded only on the claim which tabs ca opened.
+      for (const [id, claim] of Object.entries(current.claims)) {
+        if (claim.opened) current.agentTabs[id] = { owner: claim.owner, at: claim.since, url: claim.url };
+      }
+    }
     const { alive } = await chrome.storage.session.get('alive');
     if (!alive) {
       // Tab IDs are reused after a restart: a claim, or the record that ca opened a tab,
@@ -1092,7 +1098,8 @@ async function handle(request) {
         : () => chrome.tabs.update(tabId, { url: checkUrl(request.url) });
       if (!request.reload) checkUrl(request.url);
       const waited = await humanTurn(tabId, request.lease, humanBudget(request));
-      const loaded = await waitForLoad(tab.id, timeoutMs(request, 30), start);
+      // One deadline for the request: the CLI stops waiting after its timeout.
+      const loaded = await waitForLoad(tab.id, Math.max(100, timeoutMs(request, 30) - waited), start);
       await requireLease(tabId, request.lease);
       await noteAction(tabId, request.lease, request.reload ? 'reload' : 'navigate');
       return { loaded, ...(await describeTab(await getTab(tabId))), ...(waited ? { human_waited_ms: waited } : {}) };
