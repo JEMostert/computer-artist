@@ -97,5 +97,8 @@ sessions](validation/2026-11-05-chrome-debugger-session.md).
 On 6 November 2026, extension 0.10.0 in Chrome for Testing 153, headless and headed in
 a private KWin desktop, paused for emulated human input instead of ending the lease,
 resumed on the same lease, and closed a tab it had opened after release and a new
-claim. `--agent-window` took focus from the user's window in KWin, before and after
-that change; see [human pause](validation/2026-11-06-chrome-human-pause.md).
+claim; see [human pause](validation/2026-11-06-chrome-human-pause.md). In KWin,
+`--agent-window` took focus from the user's window. Extension 0.11.0 gives it back:
+to the user's browser window, or, when another application had focus, by minimizing
+the agent window. Verified headless and headed in Chrome for Testing 153, and
+headed in Vivaldi 8.2; see [agent window focus](validation/2026-11-06-agent-window-focus.md).

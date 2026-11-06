@@ -162,7 +162,7 @@ events in the agent's own tab. It never moves your pointer or starts a browser, 
 it switches tabs only for an explicit `ca browser focus`, which also takes window
 focus. On Linux with Wayland (tested with Chrome for Testing 153), background tabs
 could not be rendered, so a screenshot needs the tab on screen: open it with
-`--agent-window` or `focus` it.
+`--agent-window` while a browser window has focus, or `focus` it.
 
 <p align="center">
   <img src="docs/assets/browser-pipeline.svg" width="100%" alt="The agent runs the ca browser CLI, which reaches the native host over a same-user socket with mutual HMAC. The host relays to the extension's service worker by native messaging, and the extension sends DOM events into the agent's own tab, where a green pen with the owner's name shows the work. The user's own tab and pointer are untouched.">

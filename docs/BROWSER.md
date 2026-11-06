@@ -58,7 +58,8 @@ instances without changing anything. Install stamps a **build** (a digest of the
 extension files) into the installed copy; `instances` and `doctor` report the
 build each browser runs and warn `extension_reload_needed` when it differs from
 the installed one. Every change to the extension raises its version (0.10.0 pauses for your
-input instead of ending the claim, and remembers the tabs ca opened); the build
+input instead of ending the claim, and remembers the tabs ca opened; 0.11.0 gives focus
+back when the agents' window takes it); the build
 identifies the exact files. A red **!** badge on the toolbar icon means
 the extension cannot reach the native host; its tooltip gives Chrome's reason.
 
@@ -249,10 +250,31 @@ card and no further prompt.
 ### The agents' window
 
 `ca browser open URL --agent-window` opens the tab in a window of its own, created
-unfocused on first use and reused for later tabs. Chrome keeps the user's window
-focused and active tab unchanged. Agent tabs there are the active tab of a shown
-window, so they render at full speed (timers and animation frames run) and capture
-as displayed. Closing the window's last tab closes it.
+unfocused on first use and reused for later tabs. The user's focused window and
+active tab stay unchanged. Agent tabs there are the active tab of a shown window,
+so they render at full speed (timers and animation frames run) and capture as
+displayed. Closing the window's last tab closes it.
+
+Some platforms focus the window anyway: KWin on Wayland activates and raises every
+new window, whatever Chrome asks, and Vivaldi focuses a window when a tab is created
+in it. The extension watches for that (1.5 seconds after creating the window, 300 ms
+after adding a tab) and gives focus straight back. The reply's `focus_returned` says
+how:
+
+- `user_window`: one of the browser's windows had focus. It gets focus back and is
+  raised over the agent window, which stays shown and renders at full speed.
+- `minimized`: another application had focus. The browser cannot focus another
+  application, so the agent window is minimized and the compositor returns focus to
+  that application. Its tabs then render like background tabs; on Linux with Wayland
+  they cannot be captured (`capture_unavailable`) until the user shows the window or
+  you `focus` a tab, which takes focus.
+
+Focus still moves for a moment, from the compositor's activation (about 70 ms after
+the window appeared in KWin) until it is handed back, so a key typed in that instant
+can reach the agent window. Headless Chrome and platforms that honour an unfocused
+window never trigger either path: the reply has no `focus_returned`, and it comes
+up to 1.5 seconds later for a new window (300 ms for a later tab) because the
+extension waited.
 
 ### Focusing a tab
 
@@ -451,7 +473,7 @@ open to the network.
 
 | Platform | Status |
 | --- | --- |
-| Linux (Fedora 43, GNOME Wayland) | Verified on 3 November 2026 with Chrome for Testing 153, headless and headed in a private KWin desktop. See the [validation record](validation/2026-11-03-chrome-extension.md). The pause for your input and closing reclaimed agent tabs (0.10.0) were verified the same way on 6 November 2026; see the [human pause record](validation/2026-11-06-chrome-human-pause.md). |
+| Linux (Fedora 43, GNOME Wayland) | Verified on 3 November 2026 with Chrome for Testing 153, headless and headed in a private KWin desktop. See the [validation record](validation/2026-11-03-chrome-extension.md). The pause for your input and closing reclaimed agent tabs (0.10.0) were verified the same way on 6 November 2026; see the [human pause record](validation/2026-11-06-chrome-human-pause.md). The agents' window giving focus back (0.11.0) was verified the same way, and headed with Vivaldi 8.2; see the [agent window focus record](validation/2026-11-06-agent-window-focus.md). |
 | macOS | Unix socket, `~/Library/Application Support/<browser>/NativeMessagingHosts`. Debugger sessions and the session pen were verified on 5 November 2026 in the user's Chrome 156; see the [debugger session record](validation/2026-11-05-chrome-debugger-session.md). The pen, status card and takeover were verified on 3 November 2026 with headless Chrome for Testing 153 on macOS 27; see the [pen and status card record](validation/2026-11-03-chrome-pen-status.md). |
 | Windows | Implemented (loopback TCP plus key, `HKCU\Software\<vendor>\NativeMessagingHosts`) for Chrome, Chromium, Edge and Brave; covered by portable tests, not exercised with a real browser |
 

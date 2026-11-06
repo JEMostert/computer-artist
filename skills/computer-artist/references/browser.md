@@ -98,7 +98,11 @@ user's. Every reply is JSON; refusals are `{"ok": false, "error": CODE, "detail"
   Background and parallel work stays unfocused. The user may switch to your tab or
   use it at any time; that keeps your lease.
 - **The agents' window:** add `--agent-window` to `open` only when the user or
-  coordinator asks for agent tabs in a window of their own.
+  coordinator asks for agent tabs in a window of their own. If the platform focused
+  it anyway, the reply has `focus_returned`. `user_window`: focus went back to the
+  user's browser window, and your tab renders as shown. `minimized`: the user was in
+  another application, so the agent window was minimized to give it back; on Linux
+  its tabs cannot be captured until shown. Tell the user instead of focusing it.
 - **A screenshot of a tab on screen** (the user switched to it) includes your pen
   (`pen: included`, with `pen_rect`); ignore those pixels. Background screenshots
   leave it out (`pen: excluded`).

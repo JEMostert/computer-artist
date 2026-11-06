@@ -685,20 +685,74 @@ function timeoutMs(request, fallback) {
 
 // The agents' own window: created unfocused on first use and reused, so agent tabs
 // are visible (rendered at full speed, capturable) without touching the user's windows.
+// Some platforms focus it anyway: KWin on Wayland activates and raises every new
+// window, and Vivaldi focuses a window when a tab is created in it. Focus then goes
+// straight back (see giveFocusBack). It arrived within 150 ms of the call in tests.
+const NEW_WINDOW_GRAB_MS = 1500;
+const NEW_TAB_GRAB_MS = 300;
 let agentWindowTurn = Promise.resolve();
 function openInAgentWindow(url) {
   // One at a time, so simultaneous first opens share one new window.
   const run = async () => {
     const { agentWindow } = await chrome.storage.local.get('agentWindow');
     const existing = agentWindow != null ? await chrome.windows.get(agentWindow).catch(() => null) : null;
-    if (existing) return chrome.tabs.create({ windowId: existing.id, url, active: true });
-    const window = await chrome.windows.create({ url, focused: false, type: 'normal' });
-    await chrome.storage.local.set({ agentWindow: window.id });
-    return window.tabs[0];
+    const before = await chrome.windows.getLastFocused().catch(() => null);
+    const userWindow = before?.focused ? before.id : null;
+    // Listen first: the window may be focused before the call that caused it returns.
+    const focusedTo = new Set();
+    let seen = () => {};
+    const onFocus = (id) => {
+      focusedTo.add(id);
+      seen();
+    };
+    chrome.windows.onFocusChanged.addListener(onFocus);
+    try {
+      let windowId;
+      let tab;
+      if (existing) {
+        // A tab created active in a given window also focuses that window in Chrome;
+        // activating it afterwards does not.
+        windowId = existing.id;
+        const created = await chrome.tabs.create({ windowId, url, active: false });
+        tab = await chrome.tabs.update(created.id, { active: true });
+      } else {
+        const window = await chrome.windows.create({ url, focused: false, type: 'normal' });
+        await chrome.storage.local.set({ agentWindow: window.id });
+        windowId = window.id;
+        tab = window.tabs[0];
+      }
+      if (userWindow === windowId) return { tab }; // the user was looking at it already
+      if (!focusedTo.has(windowId)) {
+        await new Promise((resolve) => {
+          const timer = setTimeout(resolve, existing ? NEW_TAB_GRAB_MS : NEW_WINDOW_GRAB_MS);
+          seen = () => focusedTo.has(windowId) && (clearTimeout(timer), resolve());
+        });
+      }
+      const grabbed = focusedTo.has(windowId) || (await chrome.windows.get(windowId)).focused;
+      const returned = grabbed ? await giveFocusBack(windowId, userWindow) : null;
+      return { tab, ...(returned ? { focus_returned: returned } : {}) };
+    } finally {
+      chrome.windows.onFocusChanged.removeListener(onFocus);
+    }
   };
   const next = agentWindowTurn.then(run, run);
   agentWindowTurn = next.catch(() => {});
   return next;
+}
+
+// The agent window took focus anyway. Chrome can focus its own windows, so the
+// user's window gets focus back and is raised over it. Focus in another application
+// cannot be handed back from here; minimizing the agent window makes the compositor
+// return it, and that window's tabs then render like background tabs until shown.
+async function giveFocusBack(agentWindow, userWindow) {
+  if (userWindow != null) {
+    try {
+      await chrome.windows.update(userWindow, { focused: true });
+      return 'user_window';
+    } catch {} // closed meanwhile: minimize instead
+  }
+  await chrome.windows.update(agentWindow, { state: 'minimized' });
+  return 'minimized';
 }
 
 // The pen stays visible to the user. A screenshot leaves it out only while the tab is
@@ -1012,15 +1066,22 @@ async function handle(request) {
       const properties = { url, active: false };
       if (request.window != null) properties.windowId = Number(request.window);
       let tab;
-      const loaded = await waitForLoad(null, timeoutMs(request, 30), async () => {
+      let focusReturned = null;
+      let started;
+      const start = async () => {
         try {
-          tab = request.agent_window ? await openInAgentWindow(url) : await chrome.tabs.create(properties);
+          if (request.agent_window) ({ tab, focus_returned: focusReturned = null } = await openInAgentWindow(url));
+          else tab = await chrome.tabs.create(properties);
           opening.add(tab.id);
         } catch (error) {
           throw new Refusal('window_unavailable', `Cannot open a background tab: ${error.message}`);
         }
         return tab;
-      });
+      };
+      const loaded = await waitForLoad(null, timeoutMs(request, 30), () => (started = start()));
+      // The load may time out before the tab exists (the agent window waits for focus,
+      // and opens queue for it): claim it anyway rather than leave it unclaimed.
+      await started;
       if (!tab) throw new Refusal('window_unavailable', 'Chrome did not open the tab');
       let claim;
       let now;
@@ -1042,7 +1103,13 @@ async function handle(request) {
       // first action waits for the human to stop.
       inputWhileOpening.delete(tab.id);
       await groupOpenedTab(tab);
-      return { lease: claim.lease, loaded, ...(await describeTab(now)), ...(quietIn(tab.id) ? { human_active: true } : {}) };
+      return {
+        lease: claim.lease,
+        loaded,
+        ...(await describeTab(now)),
+        ...(focusReturned ? { focus_returned: focusReturned } : {}),
+        ...(quietIn(tab.id) ? { human_active: true } : {}),
+      };
     }
     case 'claim': {
       const tab = await getTab(tabId);
