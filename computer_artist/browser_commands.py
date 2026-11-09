@@ -108,7 +108,7 @@ def add_command(commands):
             '--frame',
             action='append',
             metavar='SELECTOR',
-            help='Find the element inside this same-origin iframe (repeat for nested frames)',
+            help='Find the element inside this iframe, from any origin (repeat for nested frames)',
         )
 
     def pointer(sub, button=True):
@@ -317,6 +317,14 @@ def operate(args):
         request['owner'] = os.environ.get('CA_BROWSER_OWNER', 'ca')
     reply = call_with_recovery(instance, request, args.timeout, action in READS)
     reply = with_handles(instance['instance'], reply)
+    if reply.get('error') == 'cross_origin_frame' and 'frame_ids' not in (
+        instance.get('capabilities') or []
+    ):
+        # Extensions before 0.12.0 stop at frames from another origin.
+        reply['hint'] = (
+            f'Extension {instance.get("extension_version")} cannot enter frames from another '
+            'origin; 0.12.0 can. Run ca browser install, then ca browser reload.'
+        )
     if action == 'screenshot' and reply.get('ok'):
         reply = save_png(reply, args.output)
     if reply.get('ok') and action in ('open', 'claim'):

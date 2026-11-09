@@ -1,7 +1,8 @@
 // Computer Artist browser bridge: a service worker that lets the local `ca`
 // CLI list, claim and operate tabs through the native host
 // `com.computer_artist.browser`. Actions run as DOM operations inside the page
-// (untrusted events); nothing here moves the pointer, activates a tab or
+// (untrusted events), in the top frame and, through Chrome's frame IDs, in frames from
+// other origins; nothing here moves the pointer, activates a tab or
 // focuses a window. Claimed tabs carry a lease, a "CA" badge and, for tabs ca
 // opened, a "CA" tab group. Human input in a claimed tab pauses the agent there:
 // the lease holds, and ca acts again once the human has stopped for a moment.
@@ -21,7 +22,7 @@ const VERSION = chrome.runtime.getManifest().version;
 // build is running (the version alone does not change between installs).
 const BUILD = '__CA_BUILD__';
 const CAPABILITIES = ['pointer', 'frames', 'background_capture', 'agent_window', 'durable_claims', 'reload',
-  'debugger_session', 'session_pen', 'viewport_guard', 'human_pause', 'agent_tabs'];
+  'debugger_session', 'session_pen', 'viewport_guard', 'human_pause', 'agent_tabs', 'frame_ids'];
 let inFlight = 0; // requests being handled, so a reload never cuts one off
 let reloading = false;
 const BADGE = '#0a7c60'; // Chrome lane green, shared with pen.js and the popup.
@@ -410,6 +411,36 @@ async function showPen(tabId, claim) {
   }
 }
 
+// Move the top frame's pen for an action running in another frame. Answers whether the
+// human used the top frame, or the action's claim (`lease`) ended, since the action
+// started (`since`, in wall-clock milliseconds, as frames do not share a performance clock).
+async function relayPen(tabId, { method, args, since, lease }) {
+  if (!['to', 'tap', 'trace', 'write'].includes(method) || !Array.isArray(args)) return null;
+  const current = await state();
+  if (current.claims[tabId]?.lease !== lease) {
+    // Released, revoked or claimed again: the action in the frame stops as in the top frame.
+    const revoked = current.revoked[tabId];
+    return { human: false, ended: revoked?.lease === lease ? revoked.reason : 'released' };
+  }
+  const results = await chrome.scripting.executeScript({
+    target: { tabId, frameIds: [0] },
+    world: 'ISOLATED',
+    func: async (name, values, sinceMs) => {
+      const pen = globalThis.__caPen;
+      if (!pen) return null;
+      await pen[name](...values);
+      const wall = (at) => Date.now() - (performance.now() - at);
+      const ended = globalThis.__caClaimEnded;
+      return {
+        human: wall(globalThis.__caHumanAt ?? -Infinity) > sinceMs,
+        ended: ended && wall(ended.at) > sinceMs ? ended.reason || 'released' : null,
+      };
+    },
+    args: [method, args, Number(since) || 0],
+  });
+  return results?.[0]?.result ?? null;
+}
+
 function liftPen(tabId, reason) {
   chrome.scripting
     .executeScript({
@@ -441,7 +472,12 @@ async function watchTab(tabId) {
   });
 }
 
-chrome.runtime.onMessage.addListener((message, sender) => {
+chrome.runtime.onMessage.addListener((message, sender, respond) => {
+  if (message?.type === 'ca-pen' && sender.id === chrome.runtime.id && sender.tab && sender.frameId !== 0) {
+    // An action in a frame entered by ID moves the pen in the top frame through here.
+    relayPen(sender.tab.id, message).then(respond, () => respond(null));
+    return true;
+  }
   if (message?.type === 'ca-document-ready' && sender.id === chrome.runtime.id && sender.tab && sender.frameId === 0) {
     // A new document of a claimed tab gets its pen as soon as it is parsed.
     state().then((current) => {
@@ -644,23 +680,20 @@ function waitForLoad(tabId, timeoutMs, start) {
   });
 }
 
-async function inPage(tabId, request, claim = null) {
+// Run pageAction in one frame of the tab and return its raw result.
+async function inFrame(tabId, frameId, request, via) {
   let results;
-  if (claim) {
-    // The pen is cosmetic: a page that refuses it still gets the action.
-    await chrome.scripting
-      .executeScript({ target: { tabId }, world: 'ISOLATED', files: ['pen.js'] })
-      .catch(() => {});
-    request = { ...request, pen: { owner: claim.owner } };
-  }
   try {
     results = await chrome.scripting.executeScript({
-      target: { tabId },
+      target: { tabId, frameIds: [frameId] },
       world: 'ISOLATED',
       func: pageAction,
       args: [request],
     });
   } catch (error) {
+    if (frameId) {
+      throw new Refusal('frame_unavailable', `Cannot script the frame ${via || frameId} in tab ${tabId}: ${error.message}`);
+    }
     const tab = await chrome.tabs.get(tabId).catch(() => null);
     const restricted = await restriction(tab?.url);
     throw new Refusal(
@@ -672,10 +705,183 @@ async function inPage(tabId, request, claim = null) {
     );
   }
   const result = results?.[0]?.result;
-  if (!result) throw new Refusal('page_unavailable', 'The page returned no result');
+  if (!result) throw new Refusal(frameId ? 'frame_unavailable' : 'page_unavailable', 'The page returned no result');
+  return result;
+}
+
+// Every frame's window index path from the top window, with Chrome's frame ID: pages
+// name a frame they cannot enter by its path (see windowPath in pageAction).
+async function framePaths(tabId) {
+  const results = await chrome.scripting
+    .executeScript({
+      target: { tabId, allFrames: true },
+      world: 'ISOLATED',
+      func: () => {
+        const path = [];
+        try {
+          for (let w = window; w !== w.parent; w = w.parent) {
+            let index = -1;
+            for (let i = 0; i < w.parent.frames.length && index < 0; i++) if (w.parent.frames[i] === w) index = i;
+            if (index < 0) return null;
+            path.unshift(index);
+          }
+        } catch (error) {
+          return null;
+        }
+        return path;
+      },
+    })
+    .catch(() => []);
+  return results.filter((r) => Array.isArray(r.result)).map((r) => ({ frameId: r.frameId, key: r.result.join('.') }));
+}
+
+async function frameIdOf(tabId, path) {
+  const key = path.join('.');
+  return (await framePaths(tabId)).find((frame) => frame.key === key)?.frameId ?? null;
+}
+
+// Where frame `frameId` sits in the top viewport: each frame on its path measures its
+// child's box, from the top frame down. Used for refs (ref@frame) into a frame entered
+// by ID; null when the frame is gone.
+async function framePlace(tabId, frameId, reveal = false) {
+  if (frameId === 0) return { origin: null };
+  const frames = await framePaths(tabId);
+  const target = frames.find((frame) => frame.frameId === frameId);
+  if (!target) return null;
+  const path = target.key.split('.').map(Number);
+  let origin = { x: 0, y: 0, sx: 1, sy: 1 };
+  for (let depth = 0; depth < path.length; depth++) {
+    const parentKey = path.slice(0, depth).join('.');
+    const parent = frames.find((frame) => frame.key === parentKey);
+    if (!parent) return null;
+    const box = await chrome.scripting
+      .executeScript({
+        target: { tabId, frameIds: [parent.frameId] },
+        world: 'ISOLATED',
+        func: (index, show) => {
+          const child = window.frames[index];
+          const frame = Array.from(document.querySelectorAll('iframe,frame')).find((el) => el.contentWindow === child);
+          if (!frame) return null;
+          if (show) frame.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'instant' });
+          const rect = frame.getBoundingClientRect();
+          const style = getComputedStyle(frame);
+          const sx = frame.offsetWidth ? rect.width / frame.offsetWidth : 1;
+          const sy = frame.offsetHeight ? rect.height / frame.offsetHeight : 1;
+          return {
+            x: rect.left + (frame.clientLeft + parseFloat(style.paddingLeft)) * sx,
+            y: rect.top + (frame.clientTop + parseFloat(style.paddingTop)) * sy,
+            sx,
+            sy,
+          };
+        },
+        args: [path[depth], reveal],
+      })
+      .then((results) => results?.[0]?.result ?? null, () => null);
+    if (!box) return null;
+    origin = { x: origin.x + box.x * origin.sx, y: origin.y + box.y * origin.sy, sx: origin.sx * box.sx, sy: origin.sy * box.sy };
+  }
+  return { origin };
+}
+
+const MAX_FRAME_HOPS = 8;
+// Each action runs in the top frame first. Frames of the page's own origin are reached
+// from there; a frame the top frame cannot reach (another origin) is entered by its
+// Chrome frame ID, and the action runs again in that frame (enter_frame).
+async function inPage(tabId, request, claim = null) {
+  if (claim) {
+    // The pen is cosmetic: a page that refuses it still gets the action.
+    await chrome.scripting
+      .executeScript({ target: { tabId }, world: 'ISOLATED', files: ['pen.js'] })
+      .catch(() => {});
+    request = { ...request, pen: { owner: claim.owner } };
+  }
+  let frameId = 0;
+  let via = null;
+  const route = [];
+  const ref = typeof request.ref === 'string' ? request.ref.match(/^(.+)@(\d+)$/) : null;
+  if (ref) {
+    // A ref from a frame entered by ID names its frame; go straight there.
+    frameId = Number(ref[2]);
+    // Actions scroll each frame on the way into view, top down, before measuring it.
+    const acting = !['read', 'locate', 'wait'].includes(request.op);
+    const [place, top] = await Promise.all([framePlace(tabId, frameId, acting), topViewport(tabId)]);
+    if (!place || !top) {
+      throw new Refusal('stale_element', `Element ${request.ref} is in a frame that is gone; locate it again`);
+    }
+    const want = request.viewport;
+    if (want && (top.width !== want.width || top.height !== want.height)) {
+      throw new Refusal(
+        'viewport_changed',
+        `The viewport is ${top.width}x${top.height}, not ${want.width}x${want.height}: take a new screenshot and measure again`,
+        { viewport: top },
+      );
+    }
+    request = { ...request, ref: ref[1], frame: [], origin: place.origin, top_viewport: top, viewport: null, frame_id: frameId };
+    via = request.ref;
+  }
+  let result;
+  for (let hops = 0; ; hops++) {
+    if (frameId && request.human_idle_ms && quietIn(tabId)) {
+      // The human used the tab while ca went from one frame to the next: nothing happened yet.
+      result = { ok: false, code: 'human_active', detail: 'The user is using this tab; ca waits for a pause',
+        extra: { retry_after_ms: quietIn(tabId), performed: false } }; // prettier-ignore
+      break;
+    }
+    result = await inFrame(tabId, frameId, request, via);
+    if (result.ok || result.code !== 'enter_frame') break;
+    if (hops >= MAX_FRAME_HOPS) throw new Refusal('frame_unavailable', `Frames are nested more than ${MAX_FRAME_HOPS} deep`);
+    const consumed = (request.frame?.length || 0) - (result.extra.request.frame?.length || 0);
+    route.push(...(request.frame || []).slice(0, consumed));
+    via = result.extra.via;
+    frameId = await frameIdOf(tabId, result.extra.frame_path);
+    if (frameId == null) throw new Refusal('frame_unavailable', `The iframe ${via} has no document ca can script yet; wait for it to load`);
+    request = { ...request, ...result.extra.request, frame_id: frameId };
+  }
+  // Nothing matched here: search the frames this frame could not reach, so the reply
+  // names the --frame flags that find the target.
+  const foreign = result.foreign || result.extra?.foreign;
+  if (foreign) {
+    delete result.foreign;
+    if (result.extra) delete result.extra.foreign;
+    const frames = await foreignHint(tabId, request, foreign, route);
+    if (frames.length && result.ok) {
+      result.frames = [...(result.frames || []), ...frames];
+    } else if (frames.length && result.code === 'element_not_found') {
+      const flags = frames[0].frame.map((selector) => `--frame '${selector}'`).join(' ');
+      result.detail = `No element in the page matches, but ${frames.length} frame(s) do; pass ${flags}`;
+      result.extra = { ...result.extra, frames };
+    }
+  }
   if (!result.ok) throw new Refusal(result.code, result.detail, result.extra || {});
   delete result.ok;
   return result;
+}
+
+async function topViewport(tabId) {
+  return chrome.scripting
+    .executeScript({ target: { tabId }, world: 'ISOLATED', func: () => ({ width: innerWidth, height: innerHeight }) })
+    .then((results) => results?.[0]?.result ?? null, () => null);
+}
+
+// Locate the target in each frame the page could not search itself, a few levels deep.
+async function foreignHint(tabId, request, foreign, route, depth = 0) {
+  const found = [];
+  for (const entry of foreign.slice(0, 5)) {
+    const path = [...route, ...entry.route];
+    const frameId = await frameIdOf(tabId, entry.frame_path);
+    if (frameId == null) continue;
+    const probe = {
+      op: 'locate', limit: 1, frame: [], selector: request.selector, text: request.text, role: request.role,
+      name: request.name, ...entry.request, frame_id: frameId,
+    }; // prettier-ignore
+    const result = await inFrame(tabId, frameId, probe, entry.route.at(-1)).catch(() => null);
+    if (!result?.ok) continue;
+    if (result.count) found.push({ frame: path, matches: result.count });
+    for (const inner of result.frames || []) found.push({ frame: [...path, ...inner.frame], matches: inner.matches });
+    if (result.foreign && depth < 2) found.push(...(await foreignHint(tabId, request, result.foreign, path, depth + 1)));
+    if (found.length >= 5) break;
+  }
+  return found.slice(0, 5);
 }
 
 function timeoutMs(request, fallback) {
@@ -1184,7 +1390,7 @@ async function handle(request) {
           const found = await inPage(tabId, { ...request, op: 'locate', limit: 1 });
           if (found.count > 0) return found;
         } catch (error) {
-          if (!(error instanceof Refusal) || !['page_unavailable', 'element_not_found'].includes(error.code)) throw error;
+          if (!(error instanceof Refusal) || !['page_unavailable', 'element_not_found', 'frame_unavailable'].includes(error.code)) throw error;
         }
         if (Date.now() > deadline) throw new Refusal('timeout', 'The target did not appear in time');
         await new Promise((resolve) => setTimeout(resolve, 250));
@@ -1361,8 +1567,14 @@ async function pageAction(request) {
     return ref;
   };
 
-  // Frames from the page's own origin are reachable from this world; others are not.
+  // Frames from this document's origin are reachable from this world. A frame from
+  // another origin is entered by running this function again in that frame
+  // (enter_frame below); `origin` then says where this frame's viewport sits in the top
+  // viewport, and `top_viewport` gives the top viewport's size.
   // Coordinates are CSS pixels of the top viewport unless a name says local.
+  const base = request.origin || null;
+  const topView = request.top_viewport || { width: innerWidth, height: innerHeight };
+  const frameTag = request.frame_id ? `@${request.frame_id}` : '';
   const isFrame = (el) => el?.tagName === 'IFRAME' || el?.tagName === 'FRAME';
   const inner = (frame) => {
     try {
@@ -1376,13 +1588,6 @@ async function pageAction(request) {
       return doc.defaultView?.frameElement || null;
     } catch (error) {
       return null;
-    }
-  };
-  const originOf = (frame) => {
-    try {
-      return new URL(frame.src, frame.baseURI).origin;
-    } catch (error) {
-      return 'another origin';
     }
   };
   const frameBox = (frame) => {
@@ -1408,9 +1613,13 @@ async function pageAction(request) {
       x = box.x + x * box.sx;
       y = box.y + y * box.sy;
     }
-    return { x, y };
+    return base ? { x: base.x + x * base.sx, y: base.y + y * base.sy } : { x, y };
   };
   const fromTop = (doc, x, y) => {
+    if (base) {
+      x = (x - base.x) / base.sx;
+      y = (y - base.y) / base.sy;
+    }
     for (const frame of framesOf(doc)) {
       const box = frameBox(frame);
       x = (x - box.x) / box.sx;
@@ -1425,10 +1634,61 @@ async function pageAction(request) {
     return { x: a.x, y: a.y, width: b.x - a.x, height: b.y - a.y };
   };
   const round = (value) => Math.round(value * 10) / 10;
+  // A frame whose document this world cannot reach (another origin, or loaded by a form
+  // post into a named frame) is entered by the worker, which runs this function again in
+  // that frame. The frame is named by its window's index path from the top window
+  // (window.parent and frames[i] work across origins), which the worker maps to Chrome's
+  // frame ID. Its box in the top viewport maps coordinates.
+  const windowPath = (win) => {
+    const path = [];
+    try {
+      for (let w = win; w && w !== w.parent; w = w.parent) {
+        const siblings = w.parent.frames;
+        let index = -1;
+        for (let i = 0; i < siblings.length; i++) {
+          if (siblings[i] === w) {
+            index = i;
+            break;
+          }
+        }
+        if (index < 0) return null;
+        path.unshift(index);
+      }
+    } catch (error) {
+      return null;
+    }
+    return path;
+  };
+  const enter = (frame, rest, extra = {}, show = !['read', 'locate'].includes(request.op)) => {
+    const path = frame.contentWindow ? windowPath(frame.contentWindow) : null;
+    if (!path?.length) {
+      return fail('frame_unavailable', `The iframe ${frameSelector(frame)} has no document yet; wait for it to load`);
+    }
+    if (show) frame.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'instant' });
+    const box = frameBox(frame);
+    const at = toTop(frame.ownerDocument, box.x, box.y);
+    const unit = toTop(frame.ownerDocument, box.x + box.sx, box.y + box.sy);
+    return {
+      ok: false,
+      code: 'enter_frame',
+      extra: {
+        frame_path: path,
+        via: frameSelector(frame),
+        request: {
+          started_at: startedAt,
+          frame: rest,
+          origin: { x: at.x, y: at.y, sx: unit.x - at.x, sy: unit.y - at.y },
+          top_viewport: topView,
+          viewport: null,
+          ...extra,
+        },
+      },
+    };
+  };
   const describe = (el) => {
     const rect = topRect(el);
     const info = {
-      ref: refOf(el),
+      ref: refOf(el) + frameTag,
       tag: el.tagName.toLowerCase(),
       role: roleOf(el) || null,
       name: nameOf(el),
@@ -1436,7 +1696,7 @@ async function pageAction(request) {
       disabled: Boolean(el.disabled || el.getAttribute('aria-disabled') === 'true'),
       rect: { x: Math.round(rect.x), y: Math.round(rect.y), width: Math.round(rect.width), height: Math.round(rect.height) },
     };
-    if (el.ownerDocument !== document) info.in_frame = true;
+    if (el.ownerDocument !== document || base) info.in_frame = true;
     if ('value' in el && ['INPUT', 'TEXTAREA', 'SELECT'].includes(el.tagName)) {
       info.value = el.type === 'password' ? '[hidden]' : clip(el.value, 200);
     }
@@ -1494,7 +1754,7 @@ async function pageAction(request) {
   // --frame selectors, outermost first, choose the document that targets are found in.
   const scopeOf = (frames) => {
     let doc = document;
-    for (const selector of frames || []) {
+    for (const [index, selector] of (frames || []).entries()) {
       let matches;
       try {
         matches = Array.from(doc.querySelectorAll(selector)).filter(isFrame);
@@ -1508,35 +1768,67 @@ async function pageAction(request) {
         });
       }
       const next = inner(matches[0]);
-      if (!next) {
-        return fail('cross_origin_frame', `The iframe ${selector} shows ${originOf(matches[0])}; ca acts only in frames from the page's own origin`);
-      }
+      if (!next) return enter(matches[0], frames.slice(index + 1));
       doc = next;
     }
     return doc;
   };
+  // The first of id, name, title and src that names only this frame in its document.
   const frameSelector = (frame) => {
-    if (frame.id) return `#${CSS.escape(frame.id)}`;
+    const tag = frame.tagName.toLowerCase();
     const quote = (value) => JSON.stringify(value);
-    if (frame.name) return `${frame.tagName.toLowerCase()}[name=${quote(frame.name)}]`;
-    return `${frame.tagName.toLowerCase()}[src=${quote(frame.getAttribute('src') || '')}]`;
+    const options = [
+      frame.id && `#${CSS.escape(frame.id)}`,
+      frame.getAttribute('name') && `${tag}[name=${quote(frame.getAttribute('name'))}]`,
+      frame.getAttribute('title') && `${tag}[title=${quote(frame.getAttribute('title'))}]`,
+      frame.getAttribute('src') && `${tag}[src=${quote(frame.getAttribute('src'))}]`,
+    ].filter(Boolean);
+    const unique = options.find((selector) => {
+      try {
+        return frame.ownerDocument.querySelectorAll(selector).length === 1;
+      } catch (error) {
+        return false;
+      }
+    });
+    return unique || options[0] || tag;
   };
-  // Where a target is missing from the page itself, say which same-origin frames hold it.
+  // Where a target is missing from the document itself, say which frames hold it. Frames
+  // this world reaches are searched here; the others go back to the worker as `foreign`
+  // (frame ID and box), which searches them in turn.
   const frameHint = (target) => {
     const found = [];
+    const foreign = [];
     const visit = (doc, path) => {
       for (const frame of doc.querySelectorAll('iframe,frame')) {
+        if (found.length >= 5) break;
         const sub = inner(frame);
-        if (!sub || found.length >= 5) continue;
         const route = [...path, frameSelector(frame)];
+        if (!sub) {
+          const entry = foreign.length < 5 && isVisible(frame) ? enter(frame, [], {}, false) : null;
+          if (entry?.code === 'enter_frame') foreign.push({ route, frame_path: entry.extra.frame_path, request: entry.extra.request });
+          continue;
+        }
         const nodes = find(target, sub);
         if (Array.isArray(nodes) && nodes.length) found.push({ frame: route, matches: nodes.length });
         if (route.length < 4) visit(sub, route);
       }
     };
     visit(document, []);
-    return found;
+    return { found, foreign };
   };
+  // The frames a document shows, so a read of a page that is all frames says where to look.
+  const framesIn = (doc) =>
+    Array.from(doc.querySelectorAll('iframe,frame'))
+      .filter(isVisible)
+      .slice(0, 10)
+      .map((frame) => {
+        const rect = topRect(frame);
+        return {
+          frame: frameSelector(frame),
+          same_origin: Boolean(inner(frame)),
+          rect: { x: Math.round(rect.x), y: Math.round(rect.y), width: Math.round(rect.width), height: Math.round(rect.height) },
+        };
+      });
   const resolve = (target, doc) => {
     if (target.ref) {
       const ref = String(target.ref);
@@ -1549,12 +1841,12 @@ async function pageAction(request) {
     const nodes = find(target, doc);
     if (!Array.isArray(nodes)) return nodes;
     if (!nodes.length) {
-      const frames = target.frame?.length ? [] : frameHint(target);
+      const { found: frames, foreign } = target.frame?.length ? { found: [], foreign: [] } : frameHint(target);
       if (frames.length) {
         const flags = frames[0].frame.map((selector) => `--frame '${selector}'`).join(' ');
         return fail('element_not_found', `No element in the page matches, but ${frames.length} frame(s) do; pass ${flags}`, { frames });
       }
-      return fail('element_not_found', 'No element matches the target');
+      return fail('element_not_found', 'No element matches the target', foreign.length ? { foreign } : {});
     }
     if (nodes.length > 1 && !target.first) {
       return fail('ambiguous_target', `${nodes.length} elements match; pass a ref or --first`, {
@@ -1563,10 +1855,11 @@ async function pageAction(request) {
     }
     return nodes[0];
   };
+  // The focused element, through frames; a focused frame of another origin is entered.
   const deepActive = () => {
     let el = document.activeElement;
     while (isFrame(el) && inner(el)?.activeElement) el = inner(el).activeElement;
-    return el;
+    return isFrame(el) && !inner(el) ? enter(el, []) : el;
   };
   const editable = (el) =>
     el.isContentEditable ||
@@ -1600,7 +1893,25 @@ async function pageAction(request) {
   // Human input pauses the agent and keeps the lease: the worker waits for a pause
   // and runs the action again (performed: false).
   const started = performance.now();
-  const pen = request.pen ? globalThis.__caPen : null;
+  const startedAt = request.started_at || Date.now(); // when the command began, in any frame
+  // The pen lives in the top frame. In a frame entered by ID, the worker relays each
+  // pen call there and answers whether the human used the tab or the claim ended since
+  // this action started.
+  let remote = null;
+  const relay = (method, args) =>
+    chrome.runtime.sendMessage({ type: 'ca-pen', method, args, since: startedAt, lease: request.lease }).then(
+      (answer) => {
+        if (answer?.human || answer?.ended) remote ??= answer;
+      },
+      () => {},
+    );
+  const relayed = {
+    to: (x, y, options) => relay('to', [x, y, options]),
+    tap: (kind) => void relay('tap', [kind]),
+    trace: (x, y) => void relay('trace', [x, y]),
+    write: (length, characters) => void relay('write', [length, characters]),
+  };
+  const pen = request.pen ? (base ? relayed : globalThis.__caPen) : null;
   const idle = Number(request.human_idle_ms) || 0;
   const humanAt = () => globalThis.__caHumanAt ?? -Infinity;
   const humanActive = () =>
@@ -1608,15 +1919,15 @@ async function pageAction(request) {
       retry_after_ms: Math.max(0, Math.round(idle - (performance.now() - humanAt()))),
       performed: false,
     });
+  const claimEnded = (reason) =>
+    reason === 'released'
+      ? fail('not_claimed', 'The claim was released before ca acted')
+      : fail('ownership_revoked', `The claim ended before ca acted: ${reason}`, { stop_reason: reason });
   const interrupted = () => {
-    if (humanAt() > started) return humanActive();
+    if (humanAt() > started || remote?.human) return humanActive();
     const ended = globalThis.__caClaimEnded;
-    if (ended && ended.at > started) {
-      if (ended.reason === 'released') return fail('not_claimed', 'The claim was released before ca acted');
-      return fail('ownership_revoked', `The claim ended before ca acted: ${ended.reason}`, {
-        stop_reason: ended.reason,
-      });
-    }
+    if (ended && ended.at > started) return claimEnded(ended.reason);
+    if (remote?.ended) return claimEnded(remote.ended);
     return null;
   };
   const arriveAt = async (x, y) => {
@@ -1659,8 +1970,8 @@ async function pageAction(request) {
   const mouse = (ca.mouse ??= { buttons: 0, suppress: false, down: null, hover: null });
   const hitTest = (x, y) => {
     let doc = document;
-    let lx = x;
-    let ly = y;
+    let { x: lx, y: ly } = fromTop(document, x, y);
+    if (!inView(document, lx, ly)) return null;
     for (let depth = 0; depth < 10; depth++) {
       let el = doc.elementFromPoint(lx, ly);
       while (el?.shadowRoot) {
@@ -1671,7 +1982,7 @@ async function pageAction(request) {
       if (!el) return null;
       if (!isFrame(el)) return { el, x, y };
       const sub = inner(el);
-      if (!sub) return { el, x, y, foreign: originOf(el) };
+      if (!sub) return { el, x, y, foreign: true };
       const box = frameBox(el);
       lx = (lx - box.x) / box.sx;
       ly = (ly - box.y) / box.sy;
@@ -1688,7 +1999,7 @@ async function pageAction(request) {
   };
   const fire = (el, type, at, extra = {}) => {
     const view = viewOf(el);
-    const local = el.ownerDocument === document ? at : fromTop(el.ownerDocument, at.x, at.y);
+    const local = fromTop(el.ownerDocument, at.x, at.y);
     const init = {
       bubbles: true,
       cancelable: true,
@@ -1697,7 +2008,7 @@ async function pageAction(request) {
       clientX: local.x,
       clientY: local.y,
       screenX: window.screenX + at.x,
-      screenY: window.screenY + (window.outerHeight - window.innerHeight) + at.y,
+      screenY: window.screenY + (window.outerHeight - topView.height) + at.y,
       button: 0,
       buttons: mouse.buttons,
       ...held,
@@ -1866,7 +2177,10 @@ async function pageAction(request) {
     }
     let el = null;
     let points;
-    if (targeted) {
+    if (request.at) {
+      // Top-viewport points a parent frame measured before it entered this frame.
+      points = request.at;
+    } else if (targeted) {
       el = resolve(request, scope);
       if (el.ok === false) return el;
       if (op !== 'scroll' && (el.disabled || el.matches(':disabled'))) {
@@ -1881,26 +2195,32 @@ async function pageAction(request) {
     } else if (offsets) {
       points = offsets.map(([x, y]) => ({ x, y }));
     } else if (op === 'scroll') {
-      points = [{ x: innerWidth / 2, y: innerHeight / 2 }];
+      const view = viewOf(scope);
+      points = [toTop(scope, view.innerWidth / 2, view.innerHeight / 2)];
     } else {
       return fail('invalid_target', 'Pass an element (--ref, --selector, --text or --role) or --x and --y');
     }
-    const outside = points.find((p) => !inView(document, p.x, p.y));
+    const outside = points.find((p) => !(p.x >= 0 && p.y >= 0 && p.x < topView.width && p.y < topView.height));
     if (outside) {
-      return fail('point_outside_viewport', `Point ${round(outside.x)},${round(outside.y)} is outside the ${innerWidth}x${innerHeight} viewport`, {
-        viewport: { width: innerWidth, height: innerHeight },
+      return fail('point_outside_viewport', `Point ${round(outside.x)},${round(outside.y)} is outside the ${topView.width}x${topView.height} viewport`, {
+        viewport: { width: topView.width, height: topView.height },
       });
     }
-    const stopped = await arriveAt(points[0].x, points[0].y);
-    if (stopped) return stopped;
+    if (base) {
+      const local = fromTop(document, points[0].x, points[0].y);
+      if (!inView(document, local.x, local.y)) {
+        return fail('point_outside_viewport', `Point ${round(points[0].x)},${round(points[0].y)} is outside the frame's visible area`, {
+          viewport: { width: topView.width, height: topView.height },
+        });
+      }
+    }
+    if (!request.at) {
+      const stopped = await arriveAt(points[0].x, points[0].y);
+      if (stopped) return stopped;
+    }
     if (el && !el.isConnected) return fail('stale_element', 'The element was removed while the pen moved');
     const first = hitTest(points[0].x, points[0].y);
     if (!first) return fail('element_not_found', 'Nothing is under that point');
-    if (first.foreign) {
-      return fail('cross_origin_frame', `The point is inside a frame from ${first.foreign}; ca acts only in frames from the page's own origin`, {
-        frame: describe(first.el),
-      });
-    }
     if (el) {
       const rect = topRect(el);
       const within = points[0].x >= rect.x && points[0].x <= rect.x + rect.width &&
@@ -1911,6 +2231,9 @@ async function pageAction(request) {
         });
       }
     }
+    // The point is over a frame this world cannot reach: the action continues there,
+    // at the same top-viewport points.
+    if (first.foreign) return enter(first.el, [], { at: points, ref: null, selector: null, text: null, role: null }, false);
     // Chrome never activates a disabled control; :disabled covers disabled fieldsets.
     const control = first.el.closest?.('button,input,select,textarea,option,optgroup');
     if ((op === 'click' || op === 'drag') && control?.matches(':disabled')) {
@@ -2030,7 +2353,7 @@ async function pageAction(request) {
       }
       const text = root.innerText ?? root.textContent ?? '';
       const max = request.max_chars;
-      return {
+      const reply = {
         ok: true,
         title: scope.title,
         url: scope.location?.href ?? location.href,
@@ -2038,15 +2361,19 @@ async function pageAction(request) {
         length: text.length,
         truncated: text.length > max,
       };
+      const frames = root === (scope.body || scope.documentElement) ? framesIn(scope) : [];
+      if (frames.length) reply.frames = frames;
+      return reply;
     }
     if (request.op === 'locate') {
       const nodes = find(request, scope);
       if (!Array.isArray(nodes)) return nodes;
       const limit = Math.min(Math.max(Number(request.limit) || 20, 1), 100);
-      const reply = { ok: true, url: location.href, count: nodes.length, elements: nodes.slice(0, limit).map(describe) };
+      const reply = { ok: true, url: scope.location?.href ?? location.href, count: nodes.length, elements: nodes.slice(0, limit).map(describe) };
       if (!nodes.length && !request.frame?.length) {
-        const frames = frameHint(request);
-        if (frames.length) reply.frames = frames;
+        const { found, foreign } = frameHint(request);
+        if (found.length) reply.frames = found;
+        if (foreign.length) reply.foreign = foreign;
       }
       return reply;
     }

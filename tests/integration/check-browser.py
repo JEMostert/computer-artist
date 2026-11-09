@@ -342,16 +342,27 @@ def check_pointer(env, url, work, port):
     hover = act('move', '--frame', '#pad', '--text', 'Dot tool')
     step('move_hovers', hover.get('ok') and hover['target']['tag'] == 'span')
 
-    foreign = act('click', '--frame', '#foreign', '--text', 'Press me')
+    # The frame from another origin sits below the fold: ca scrolls it into view first,
+    # for a ref located without scrolling as well as for --frame.
+    act('scroll', '--x', '5', '--y', '5', '--delta', '-5000')
+    ref = ca('locate', '--tab', tab, '--frame', '#foreign', '--text', 'Press me', env=env)
+    by_ref = act('click', '--ref', ref['elements'][0]['ref'])
+    centred = act('scroll', '--frame', '#foreign', '--delta', '10')
+    step('foreign_frame_ref_below_fold_and_scroll', by_ref.get('ok') and centred.get('ok'),
+         errors=[by_ref.get('error'), centred.get('error')], point=by_ref.get('point'))  # fmt: skip
+    act('scroll', '--x', '5', '--y', '5', '--delta', '-5000')
+    foreign = act('click', '--frame', '#foreign', '--selector', 'button')
+    pressed = ca('read', '--tab', tab, '--frame', '#foreign', '--selector', 'button', env=env)
     foreign_point = act('click', '--selector', '#foreign', '--x', '20', '--y', '20')
     outside = act('click', '--x', '5000', '--y', '5')
     no_target = act('click')
     old_style = act('click', '--frame', '#pad', '--text', 'Line tool')
-    step('refusals_and_compatibility', foreign.get('error') == 'cross_origin_frame'
-         and foreign_point.get('error') == 'cross_origin_frame'
+    step('foreign_frame_and_refusals', foreign.get('ok') and pressed.get('text') == 'Pressed'
+         and foreign_point.get('ok') and foreign_point['target']['ref'].count('@') == 1
          and outside.get('error') == 'point_outside_viewport'
          and no_target.get('error') == 'invalid_target' and old_style.get('ok'),
-         errors=[r.get('error') for r in (foreign, foreign_point, outside, no_target)])  # fmt: skip
+         errors=[r.get('error') for r in (foreign, foreign_point, outside, no_target)],
+         pressed=pressed.get('text'))  # fmt: skip
 
     # The human watches, then takes over in the middle of a slow drag.
     target = page_target(port, lambda t: t['url'].startswith(url + 'draw'))
@@ -465,6 +476,83 @@ def check_pointer(env, url, work, port):
             samples.append(time.perf_counter() - began)
         timings[name] = round(sorted(samples)[2], 3)
     step('pointer_timings', True, median_seconds=timings, drag_seconds=drag['_seconds'])
+    ca('close', '--tab', tab, '--lease', lease, env=env)
+
+
+def check_cross_origin_editor(env, url):
+    """An editor in a frame from another origin, embedded the way SharePoint embeds Word."""
+    opened = ca('open', url + 'host', '--instance', 'alpha', '--owner', 'editor', env=env,
+                expect_ok=True)  # fmt: skip
+    tab, lease = opened['handle'], opened['lease']
+    frame = 'iframe[name="editor_frame"]'
+
+    def act(action, *rest):
+        return ca(action, '--tab', tab, '--lease', lease, *rest, env=env)
+
+    def doc():
+        return ca('read', '--tab', tab, '--frame', frame, '--selector', '#doc', env=env)
+
+    ca('wait', '--tab', tab, '--frame', frame, '--selector', '#doc', env=env, expect_ok=True)
+    top = ca('read', '--tab', tab, env=env)
+    listed = (top.get('frames') or [{}])[0]
+    text = doc()
+    step('editor_frame_listed_and_read', top.get('ok') and listed.get('frame') == frame
+         and listed.get('same_origin') is False and listed['rect']['width'] > 0
+         and 'Ths is a concept' in text.get('text', '') and '/editor' in text.get('url', ''),
+         frames=top.get('frames'), text=text.get('text'), url=text.get('url'))  # fmt: skip
+
+    hint = ca('locate', '--tab', tab, '--text', 'Replace all', env=env)
+    nested = act('click', '--text', 'Press me')
+    step('foreign_frame_hints', hint.get('count') == 0
+         and (hint.get('frames') or [{}])[0].get('frame') == [frame]
+         and nested.get('error') == 'element_not_found'
+         and f"--frame '{frame}' --frame '#inner'" in nested.get('detail', ''),
+         frames=hint.get('frames'), detail=nested.get('detail'))  # fmt: skip
+
+    # Find and replace through the editor's own controls, like a spelling fix.
+    act('type', '--frame', frame, '--selector', '#find', 'speling')
+    act('type', '--frame', frame, '--selector', '#replace', 'spelling')
+    replaced = act('click', '--frame', frame, '--text', 'Replace all')
+    typed = act('type', '--frame', frame, '--selector', '#doc', ' Added.')
+    after = doc().get('text', '')
+    step('type_and_click_in_foreign_frame', replaced.get('ok') and typed.get('ok')
+         and 'with a spelling mistake. Added.' in after.replace('\n', ' '),
+         text=after, errors=[replaced.get('error'), typed.get('error')])  # fmt: skip
+
+    # Refs name their frame, so they work without --frame; points map through it.
+    mark = ca('locate', '--tab', tab, '--frame', frame, '--text', 'Mark', env=env)
+    element = mark['elements'][0]
+    by_ref = act('click', '--ref', element['ref'])
+    act('click', '--frame', frame, '--selector', '#find')
+    rect = ca('locate', '--tab', tab, '--frame', frame, '--selector', '#find', env=env)
+    box = rect['elements'][0]['rect']
+    point = act('click', '--x', str(box['x'] + 5), '--y', str(box['y'] + box['height'] / 2))
+    marked = ca('read', '--tab', tab, '--frame', frame, '--selector', '#mark', env=env)
+    step('ref_and_point_in_foreign_frame', by_ref.get('ok') and marked.get('text') == 'Marked'
+         and '@' in element['ref'] and point.get('ok') and point['target'].get('tag') == 'input'
+         and abs(element['rect']['y'] - 8) < 20, ref=element['ref'], rect=element['rect'],
+         point=point.get('target') or point.get('error'))  # fmt: skip
+
+    # A key with no target goes to the focused field inside the frame, without --frame.
+    focused = act('type', '--ref', point['target']['ref'], 'X')
+    pressed = act('press', 'Backspace')
+    typed_into = ca('locate', '--tab', tab, '--frame', frame, '--selector', '#find', env=env)
+    keys = ca('read', '--tab', tab, '--frame', frame, '--selector', '#keys', env=env)
+    step('focused_element_in_foreign_frame', focused.get('ok') and pressed.get('effect') == 'edited'
+         and typed_into['elements'][0].get('value') == 'speling'
+         and 'X:synthetic Backspace:synthetic' in keys.get('text', ''),
+         value=typed_into['elements'][0].get('value'), keys=keys.get('text'),
+         errors=[focused.get('error'), pressed.get('error')])  # fmt: skip
+
+    inner = act('click', '--frame', frame, '--frame', '#inner', '--text', 'Press me')
+    deep = ca('read', '--tab', tab, '--frame', frame, '--frame', '#inner', '--selector', 'button',
+              env=env)  # fmt: skip
+    step(
+        'frame_inside_foreign_frame',
+        inner.get('ok') and deep.get('text') == 'Pressed',
+        text=deep.get('text'),
+        error=inner.get('error'),
+    )
     ca('close', '--tab', tab, '--lease', lease, env=env)
 
 
@@ -717,7 +805,10 @@ def main():
         print('Chrome for Testing or Chromium not found; pass --chrome PATH', file=sys.stderr)
         return 2
     work = Path(tempfile.mkdtemp(prefix='ca-browser-check-'))
-    runtime = Path(os.environ.get('XDG_RUNTIME_DIR') or work)
+    # macOS limits Unix socket paths to 104 bytes, which its per-user temporary folder
+    # plus these folder names exceed; the host's socket then never binds.
+    short = '/tmp' if sys.platform == 'darwin' else work
+    runtime = Path(os.environ.get('XDG_RUNTIME_DIR') or short)
     rendezvous = Path(tempfile.mkdtemp(prefix='ca-bt-', dir=runtime))
     env = {
         **os.environ,
@@ -1075,6 +1166,7 @@ def main():
         )
 
         check_pointer(env, url, work, port)
+        check_cross_origin_editor(env, url)
         check_background_work(env, url, work, port, ids)
         if args.headed:
             check_agent_window_beside_other_app(env, url, devtools_port(profiles['beta']))

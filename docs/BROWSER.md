@@ -59,7 +59,7 @@ extension files) into the installed copy; `instances` and `doctor` report the
 build each browser runs and warn `extension_reload_needed` when it differs from
 the installed one. Every change to the extension raises its version (0.10.0 pauses for your
 input instead of ending the claim, and remembers the tabs ca opened; 0.11.0 gives focus
-back when the agents' window takes it); the build
+back when the agents' window takes it; 0.12.0 enters frames from other origins); the build
 identifies the exact files. A red **!** badge on the toolbar icon means
 the extension cannot reach the native host; its tooltip gives Chrome's reason.
 
@@ -170,14 +170,45 @@ An unhandled wheel scrolls the nearest box under the point that can still move t
 way, or the page, and stops at a box with `overscroll-behavior: contain`. Clicks and
 drags on disabled controls are refused, as Chrome never activates them.
 
-Points hit-test through same-origin iframes, CSS-scaled frames and open shadow roots
-to the element a real pointer would reach. `--frame SELECTOR` (repeatable for nested
-frames) finds `--text`, `--selector` and other targets inside a same-origin iframe
-for any command, including `read`, `locate` and `wait`. When a target exists only in
-a frame, `locate` lists the frames that match and actions refuse with the `--frame`
-flags to pass. Frames from another origin are refused as `cross_origin_frame`.
+Points hit-test through iframes, CSS-scaled frames and open shadow roots to the
+element a real pointer would reach. `--frame SELECTOR` (repeatable for nested frames)
+finds `--text`, `--selector` and other targets inside an iframe for any command,
+including `read`, `locate` and `wait`. When a target exists only in a frame, `locate`
+lists the frames that match and actions refuse with the `--frame` flags to pass. A
+`read` of a whole document lists the frames it shows (`frames`, with `same_origin`),
+so a page that is all frame, like a web document editor, says where its text is.
 Elements named only by a tooltip (`title`) or `aria-label`, like icon toolbar
 buttons, match `--text`.
+
+Frames from another origin work the same way (extension 0.12.0). The top frame
+cannot see into them, so ca runs the action again inside that frame, through Chrome's
+frame ID; nested frames from yet other origins are entered in turn. `rect`s and
+points stay top-viewport CSS pixels, and an action scrolls such a frame into view
+first. Refs from these frames end in `@FRAME` (for example `k3x9q2-4@986`) and work
+without `--frame`. The pen still moves in the top frame. Two differences remain: the
+`element_obscured` check sees only that frame's own document, not page elements laid
+over the frame, and a frame that has not loaded is refused as `frame_unavailable`
+(`wait` keeps polling). Extensions before 0.12.0 refuse these frames as
+`cross_origin_frame`, and the CLI says to update.
+
+#### Web document editors
+
+Word for the web is such a page. SharePoint posts a form into a named iframe
+(`#WacFrame_Word_Inline`) whose document comes from `*.officeapps.live.com`; the
+iframe has no `src`, which is why extensions before 0.12.0 named the SharePoint
+origin in their refusal. Measured on 9 November 2026 (see the
+[cross-origin frame record](validation/2026-11-09-cross-origin-frames.md)):
+
+- Open the document in the agents' window (`open URL --agent-window`). In a
+  background tab Word stays at "We're still loading the document", and text typed
+  there never reaches the document.
+- Once loaded, `read --frame '#WacFrame_Word_Inline' --selector
+  '#WACViewPanel_EditingElement'` returns the document text, and `type` into that
+  element appends text that Word keeps, counts and saves.
+- `type` always appends at the end of an editable element, and ca cannot select a
+  word in the text. Fix a word with Word's own Find and Replace: click **Find Show
+  More Options**, then **Replace**, type into the two fields and click **Replace
+  All**. Word reports how many places changed, and the change is saved.
 
 When you use the tab in the middle of a drag, ca sends `pointercancel`, releases
 nothing else and refuses with `human_active`, `gesture: cancelled` and the number of
@@ -427,8 +458,8 @@ never acts on tabs. Copy the instance ID from its footer for `--instance`.
   `capture_unavailable`.
 - **Scriptable pages only.** `chrome://` pages, the Web Store, other extensions'
   pages and, unless you allow file access on the extension card, `file://` URLs
-  cannot be claimed or read. Same-origin iframes are reachable with `--frame` and
-  by point; frames from another origin are not.
+  cannot be claimed or read. Iframes of any web origin are reachable with `--frame`
+  and by point; frames showing such pages are refused as `frame_unavailable`.
 - **Branded Chrome 137 and later** ignore the `--load-extension` command-line flag.
   Load the extension through the extensions page as described above.
 - Requests are capped at about 900 KB (Chrome's 1 MB native-message limit), typed
@@ -441,7 +472,10 @@ ca browser ──(same-user socket, mutual HMAC)──> native host ──(stdio
 ```
 
 - **Extension** (Manifest V3, `computer_artist/chrome_extension`). Each action runs
-  as one script in the tab's top frame, so a drag of any length is one round trip. Its permissions
+  as one script in the tab's top frame, so a drag of any length is one round trip. A
+  frame the top frame cannot reach is named by its window's index path from the top
+  (`window.parent` and `frames[i]` work across origins); the worker finds that path's
+  Chrome frame ID and runs the action there, one more round trip per frame. Its permissions
   are `nativeMessaging`, `debugger` (background screenshots only, one session per claim), `tabs`, `scripting`,
   `storage`, `alarms` and `tabGroups`,
   with host access `<all_urls>` and the `watch.js` content script. `pen.js` is
@@ -474,7 +508,7 @@ open to the network.
 | Platform | Status |
 | --- | --- |
 | Linux (Fedora 43, GNOME Wayland) | Verified on 3 November 2026 with Chrome for Testing 153, headless and headed in a private KWin desktop. See the [validation record](validation/2026-11-03-chrome-extension.md). The pause for your input and closing reclaimed agent tabs (0.10.0) were verified the same way on 6 November 2026; see the [human pause record](validation/2026-11-06-chrome-human-pause.md). The agents' window giving focus back (0.11.0) was verified the same way, and headed with Vivaldi 8.2; see the [agent window focus record](validation/2026-11-06-agent-window-focus.md). |
-| macOS | Unix socket, `~/Library/Application Support/<browser>/NativeMessagingHosts`. Debugger sessions and the session pen were verified on 5 November 2026 in the user's Chrome 156; see the [debugger session record](validation/2026-11-05-chrome-debugger-session.md). The pen, status card and takeover were verified on 3 November 2026 with headless Chrome for Testing 153 on macOS 27; see the [pen and status card record](validation/2026-11-03-chrome-pen-status.md). |
+| macOS | Unix socket, `~/Library/Application Support/<browser>/NativeMessagingHosts`. Debugger sessions and the session pen were verified on 5 November 2026 in the user's Chrome 156; see the [debugger session record](validation/2026-11-05-chrome-debugger-session.md). The pen, status card and takeover were verified on 3 November 2026 with headless Chrome for Testing 153 on macOS 27; see the [pen and status card record](validation/2026-11-03-chrome-pen-status.md). Frames from other origins (0.12.0) were verified on 9 November 2026 with headless Chrome for Testing 153 and against Word for the web in the user's Vivaldi; see the [cross-origin frame record](validation/2026-11-09-cross-origin-frames.md). |
 | Windows | Implemented (loopback TCP plus key, `HKCU\Software\<vendor>\NativeMessagingHosts`) for Chrome, Chromium, Edge and Brave; covered by portable tests, not exercised with a real browser |
 
 The folder names for Chrome Beta, Dev and Canary, Brave, Edge and Vivaldi follow
