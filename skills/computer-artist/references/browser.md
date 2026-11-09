@@ -69,8 +69,15 @@ user's. Every reply is JSON; refusals are `{"ok": false, "error": CODE, "detail"
 - `ambiguous_target`: choose one of the listed candidates by `ref`; pass `--first`
   only when any match will do.
 - `stale_element`: the page changed or navigated. Run `locate` again.
-- Elements only inside an iframe: `locate` and the refusal name the `--frame
-  SELECTOR` to add. `cross_origin_frame` cannot be reached.
+- Elements only inside an iframe, from any origin: `locate` and the refusal name
+  the `--frame SELECTOR` to add. A `read` with empty text and `frames` means the page
+  is a frame; read again with `--frame`. `frame_unavailable`: the frame has not
+  loaded yet; `wait` for a target in it. `cross_origin_frame` comes only from an
+  extension before 0.12.0: see `extension_outdated`.
+- Word for the web: open the document with `--agent-window` (in a background tab it
+  never finishes loading), read `--frame '#WacFrame_Word_Inline' --selector
+  '#WACViewPanel_EditingElement'`, and fix words with Word's Find Show More Options →
+  Replace → Replace All, as `type` only appends. Edit only a document the user named.
 - `page_unavailable`: Chrome forbids scripting this page (`chrome://`, the Web
   Store, or `file://` without file access). Use another page.
 - `claim_required`: the tab is not on screen and you hold no claim on it. Capture

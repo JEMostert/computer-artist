@@ -139,6 +139,45 @@ canvas.addEventListener('wheel', (e) => { e.preventDefault(); log('wheel' + e.de
 </script></body></html>
 """
 
+# A document editor embedded the way SharePoint embeds Word for the web: the host page
+# (127.0.0.1) posts a form into a named iframe that has no src, so the frame's document
+# comes from another origin (localhost) and its src attribute says nothing about it.
+# The editor holds a further frame from yet another origin than its own (127.0.0.1).
+HOST = """<!doctype html><html><head><meta charset="utf-8"><title>Doc host</title>
+<style>body{margin:0} iframe{position:fixed;inset:0;width:100%;height:100%;border:0}</style>
+</head><body>
+<form id="launch" method="post" target="editor_frame"><input type="hidden" name="access_token"
+value="token"></form>
+<iframe name="editor_frame" title="Office on the web Frame"></iframe>
+<script>
+const form = document.getElementById('launch');
+form.action = 'http://localhost:' + location.port + '/editor';
+form.submit();
+</script></body></html>
+"""
+
+EDITOR = """<!doctype html><html><head><meta charset="utf-8"><title>Editor</title>
+<style>body{margin:0;font:14px sans-serif} #ribbon{height:60px;padding:8px;background:#eef}
+#doc{margin:16px;padding:8px;border:1px solid #999;min-height:80px}
+#inner{width:240px;height:90px}</style></head><body>
+<div id="ribbon"><input id="find" placeholder="Find"> <input id="replace" placeholder="Replace">
+<button id="all">Replace all</button> <button id="mark" onclick="this.textContent='Marked'">Mark</button></div>
+<div id="doc" contenteditable="true"><p>Ths is a concept with a speling mistake.</p></div>
+<p id="keys"></p>
+<iframe id="inner"></iframe>
+<script>
+document.getElementById('inner').src = 'http://127.0.0.1:' + location.port + '/other';
+document.getElementById('all').addEventListener('click', () => {
+  const find = document.getElementById('find').value;
+  const doc = document.getElementById('doc');
+  if (find) doc.innerHTML = doc.innerHTML.split(find).join(document.getElementById('replace').value);
+});
+addEventListener('keydown', (e) => {
+  document.getElementById('keys').textContent += e.key + ':' + (e.isTrusted ? 'trusted' : 'synthetic') + ' ';
+}, true);
+</script></body></html>
+"""
+
 
 def serve(store):
     store = Path(store)
@@ -178,6 +217,8 @@ def serve(store):
                 self.send(200, DRAW, 'text/html; charset=utf-8')
             elif self.path == '/pad':
                 self.send(200, PAD, 'text/html; charset=utf-8')
+            elif self.path == '/host':
+                self.send(200, HOST, 'text/html; charset=utf-8')
             elif self.path == '/redirect':
                 self.send_response(302)
                 self.send_header('location', '/other?redirected')
@@ -192,6 +233,9 @@ def serve(store):
                 self.send(404, 'missing', 'text/plain')
 
         def do_POST(self):
+            if self.path == '/editor':
+                self.rfile.read(int(self.headers.get('content-length', 0)))
+                return self.send(200, EDITOR, 'text/html; charset=utf-8')
             if self.path != '/api/notes':
                 return self.send(404, 'missing', 'text/plain')
             size = int(self.headers.get('content-length', 0))

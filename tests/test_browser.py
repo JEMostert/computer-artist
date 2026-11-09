@@ -208,7 +208,7 @@ class Discovery(unittest.TestCase):
 class PointerRequests(unittest.TestCase):
     """CLI-side validation and request shape for coordinates, gestures and frames."""
 
-    def operate(self, *argv, version='0.6.0', capabilities=()):
+    def operate(self, *argv, version='0.6.0', capabilities=(), answer=None):
         import argparse
 
         parser = argparse.ArgumentParser()
@@ -220,7 +220,7 @@ class PointerRequests(unittest.TestCase):
 
         def call(record, request, timeout):
             sent.append(request)
-            return {'ok': True}
+            return dict(answer or {'ok': True})
 
         with (
             mock.patch.object(bridge, 'live_instances', return_value=[instance]),
@@ -258,6 +258,15 @@ class PointerRequests(unittest.TestCase):
             '--via', '3', '4', '--via', '5', '6', '--to', '7', '8',
         )  # fmt: skip
         self.assertEqual(request['path'], [[1, 2], [3, 4], [5, 6], [7, 8]])
+
+    def test_old_extension_refusing_a_foreign_frame_says_how_to_update(self):
+        refused = {'ok': False, 'error': 'cross_origin_frame', 'detail': 'another origin'}
+        argv = ('read', '--tab', 'aaaaaaaa:5', '--frame', 'iframe')
+        reply, request = self.operate(*argv, version='0.11.0', answer=refused)
+        self.assertEqual(request['frame'], ['iframe'])
+        self.assertIn('0.12.0', reply['hint'])
+        reply, _ = self.operate(*argv, version='0.12.0', capabilities=['frame_ids'], answer=refused)
+        self.assertNotIn('hint', reply)
 
     def test_invalid_input_is_refused_before_the_browser(self):
         cases = [
